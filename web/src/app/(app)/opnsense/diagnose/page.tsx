@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useState } from "react";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { OpnGate } from "@/components/opnsense/bits";
@@ -82,6 +83,12 @@ function FirewallLog({ n }: { n: OpnFirewall }) {
               <input type="checkbox" checked={blocked} onChange={(e) => setBlocked(e.target.checked)} />
               Alleen geblokkeerd
             </label>
+            <Link
+              href={`/logs?node=${n.node_id}&cluster=1&kind=file&name=${encodeURIComponent("/var/log/filter/latest.log")}`}
+              className="text-slate-500 underline"
+            >
+              Ouder en van beide firewalls: bij Logs
+            </Link>
           </div>
           <div className="max-h-[28rem] overflow-auto">
             <table className={tableClass}>

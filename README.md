@@ -1527,6 +1527,36 @@ er draaien en op welke poorten ze luisteren; de server maakt daaruit per node ee
   het verkeer naar dichte poorten (met de knop *Openzetten voor het cluster* als de bron een clusterlid is),
   nodes, eigen regels, de softwarecatalogus en de instellingen. Op de pagina van een node staat de kaart Firewall.
 
+## OPNsense
+
+ClusterForge beheert een OPNsense-firewall of een HA-paar met CARP en pfsync (fase 34, agentprotocol 50;
+ontwerp in [docs/design/fase34-opnsense.md](docs/design/fase34-opnsense.md)). Je installeert de agent één keer
+op elke firewall via **Nodes → Agent installeren** (de regel voor OPNsense, in de shell van menu-optie 8); de
+agent maakt zelf een API-gebruiker `clusterforge` aan (lukt dat niet, dan plak je een sleutel op het overzicht) en
+ClusterForge vindt de backup via CARP en pfsync. Alles daarna gaat via het menu **OPNsense**.
+
+- **Lezen.** Overzicht (wie MASTER is per CARP-VIP, pfsync, configsync, interfaces, gateways, diensten),
+  regels en aliassen, NAT, VIP's, VLAN's, gateways, routes, Unbound, Kea, Dnsmasq en leases, WireGuard, OpenVPN
+  en IPsec, diensten en plugins, het firewalllog live, pf-staten, ARP en de revisies van config.xml.
+- **Veilig wijzigen.** Elke wijziging is een taak `opnsense.change` op de master: voorcontrole (één master,
+  backups BACKUP, geen split-brain), een herstelpunt en een terugdraaitimer op de firewall zelf (60-600 s), toepassen,
+  proeven (webinterface en VIP's antwoorden, CARP wisselt niet, geen gateway valt weg, de agents antwoorden),
+  bevestigen of terugdraaien, en de configsync naar de backup met een controle dat die een nieuwere revisie kreeg.
+  Wat de toegang kan raken (regels, NAT, VIP's, VLAN's, gateways, routes, een revisie terugzetten) vraagt het
+  overtikken van de naam van het cluster; op prod ook de code van je tweestapsverificatie. Alleen de aanroepen in
+  `internal/opnsense/policy.go` mogen; wachtwoorden en sleutels gaan versleuteld in de taak en nooit in uitvoer of
+  logboek. Plugins gaan niet mee met de sync: die komen op elke firewall apart, met een eigen herstelpunt.
+- **HA en firmware.** CARP-onderhoudsmodus per firewall (zet hem meteen weer uit als de backup niet binnen anderhalve
+  minuut overneemt), een failovertest die de overname en het teruggeven meet, firmware-updates in de juiste volgorde
+  (eerst de backup, dan de master terwijl hij in onderhoudsmodus staat; stopt bij de eerste fout) en welke onderdelen
+  van config.xml op de backup anders zijn dan op de master.
+- **Back-ups.** Elke dag en na elke wijziging bewaart ClusterForge de volledige config.xml van elke firewall,
+  versleuteld met de masterkey (30 per firewall; een ongewijzigde configuratie geeft geen nieuwe). Downloaden vraagt
+  altijd je code of wachtwoord en komt in het logboek.
+- **Elders.** Problemen, een firewall die in onderhoudsmodus blijft en back-ups ouder dan 48 uur staan bij Aandacht
+  nodig. Het filterlog en de andere logs van beide firewalls lees je bij Logs. De dashboard-API heeft
+  `/api/dashboard/v1/opnsense`.
+
 ## Zelfherstel
 
 Bij elke database op de pagina **Databases** staat de kaart **Zelfherstel**: wat er mis is, op welke node, waarom, en wat ClusterForge eraan zou doen. Dat werkt voor elke MariaDB, MySQL en PostgreSQL die de agent ziet, ook als ClusterForge haar niet zelf toepaste, zoals een Galera-cluster dat je met de hand opzette. ClusterForge herstelt met vaste acties in de agent en de server, niet met scripts: eerst vaststellen, dan een plan in gewone taal, en pas met **Nu herstellen**, of vanzelf als je dat per cluster aanzet, een taak met een stap per node, in het logboek en in de tijdlijn van het incident. Een kijker ziet de kaart ook; alleen een beheerder herstelt.

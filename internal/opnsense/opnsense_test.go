@@ -496,6 +496,17 @@ func TestChangeFlow(t *testing.T) {
 		t.Fatalf("ongewijzigde back-up: %+v", list)
 	}
 
+	// Aandacht nodig: beide firewalls hebben een verse back-up.
+	ns, err := s.Notices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range ns {
+		if strings.HasPrefix(n.ID, "opnsense-backup-") {
+			t.Fatalf("back-up gemeld als oud: %+v", n)
+		}
+	}
+
 	// Drift: de backup heeft een NAT-regel meer; hostnaam, skew en Hasync
 	// tellen niet mee.
 	d, err := s.Drift(ctx, ida)

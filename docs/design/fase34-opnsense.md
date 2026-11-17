@@ -284,3 +284,8 @@ GUI niet kan aanbieden.
   altijd met code of wachtwoord en in het logboek. Een revisie terugzetten
   (`OPNChange.Restore`) gaat als gewone veilige wijziging op de master
   (overtikken, terugdraaitimer, proeven, sync).
+- **M6 (overal zichtbaar)**: Aandacht nodig (problemen per firewallcluster,
+  crit rood; onderhoudsmodus die blijft staan; geen back-up in 48 uur),
+  dashboard-API `/api/dashboard/v1/opnsense` (platte velden plus een rij per
+  cluster, `?strict=1`), het filterlog en de andere logs van beide firewalls
+  via Logs (fase 23, werkt vanzelf met de agent), README-sectie OPNsense.
