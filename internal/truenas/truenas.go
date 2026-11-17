@@ -203,8 +203,66 @@ func (s *Service) get(ctx context.Context, id uuid.UUID, req protocol.PVERequest
 	if res.Error != "" {
 		return nil, errors.New(res.Error)
 	}
-	s.cache.put(key, res.Data)
-	return res.Data, nil
+	data := scrubSecrets(res.Data)
+	s.cache.put(key, data)
+	return data, nil
+}
+
+// secretKey zijn velden die nooit de server verlaten, wie er ook leest:
+// wachtwoorden en sleutels in cloud-sync, replicatie en dergelijke.
+func secretKey(k string) bool {
+	k = strings.ToLower(k)
+	for _, w := range []string{"password", "passphrase", "secret", "private_key", "privatekey", "access_key", "token", "pass"} {
+		if k == w || strings.HasSuffix(k, "_"+w) || strings.HasPrefix(k, w+"_") {
+			return true
+		}
+	}
+	return false
+}
+
+// scrubSecrets haalt geheime velden uit een antwoord. Bij credentials
+// gaan ook de attributes weg (de sleutels van de cloudprovider).
+func scrubSecrets(raw json.RawMessage) json.RawMessage {
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return raw
+	}
+	changed := false
+	var walk func(x any)
+	walk = func(x any) {
+		switch t := x.(type) {
+		case map[string]any:
+			for k, val := range t {
+				if secretKey(k) {
+					t[k] = "[geheim]"
+					changed = true
+					continue
+				}
+				if k == "credentials" {
+					if m, ok := val.(map[string]any); ok {
+						if _, has := m["attributes"]; has {
+							delete(m, "attributes")
+							changed = true
+						}
+					}
+				}
+				walk(val)
+			}
+		case []any:
+			for _, e := range t {
+				walk(e)
+			}
+		}
+	}
+	walk(v)
+	if !changed {
+		return raw
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // Call is een aanroep vanuit de GUI.

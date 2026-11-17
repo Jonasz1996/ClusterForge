@@ -210,7 +210,20 @@ export const navGroups: NavGroup[] = [
       {
         href: "/truenas",
         label: "TrueNAS",
-        keywords: "truenas nas opslag zfs pool scrub schijf smart temperatuur melding alert dataset",
+        keywords: "truenas nas opslag zfs pool scrub schijf smart temperatuur melding alert",
+        tabs: [
+          { href: "/truenas", label: "Overzicht" },
+          {
+            href: "/truenas/datasets",
+            label: "Datasets",
+            keywords: "truenas dataset snapshot terugrollen quota zvol",
+          },
+          {
+            href: "/truenas/bescherming",
+            label: "Bescherming",
+            keywords: "truenas snapshot-taak cloud sync rsync replicatie back-up",
+          },
+        ],
       },
       {
         href: "/opnsense",

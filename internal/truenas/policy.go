@@ -61,6 +61,22 @@ var rules = map[string]rule{
 		return "scrub van " + p + " " + scrubWord[act], "", nil
 	}},
 
+	// --- Snapshots (M2) -----------------------------------------------
+	"pool.snapshot.create":     {args: snapCreate},
+	"zfs.snapshot.create":      {args: snapCreate},
+	"pool.snapshot.delete":     {args: snapDelete},
+	"zfs.snapshot.delete":      {args: snapDelete},
+	"pool.snapshot.rollback":   {args: snapRollback},
+	"zfs.snapshot.rollback":    {args: snapRollback},
+	"pool.snapshottask.run":    {args: taskID("snapshot-taak %d nu uitvoeren")},
+	"pool.snapshottask.update": {args: taskEnable("snapshot-taak")},
+	"cloudsync.sync":           {job: true, args: taskID("cloud-sync-taak %d nu uitvoeren")},
+	"cloudsync.update":         {args: taskEnable("cloud-sync-taak")},
+	"rsynctask.run":            {job: true, args: taskID("rsync-taak %d nu uitvoeren")},
+	"rsynctask.update":         {args: taskEnable("rsync-taak")},
+	"replication.run":          {job: true, args: taskID("replicatie %d nu uitvoeren")},
+	"replication.update":       {args: taskEnable("replicatie")},
+
 	// --- Meldingen ----------------------------------------------------
 	"alert.dismiss": {args: func(a []json.RawMessage) (string, string, error) {
 		if err := count(a, 1); err != nil {
@@ -154,4 +170,155 @@ func readDenied(method string) bool {
 		}
 	}
 	return false
+}
+
+var (
+	datasetName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/ -]{0,250}$`)
+	snapName    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$`)
+)
+
+func validDataset(d string) bool {
+	return datasetName.MatchString(d) && !strings.Contains(d, "..") && !strings.Contains(d, "//") && !strings.HasSuffix(d, "/")
+}
+
+// splitSnap deelt pool/data@naam.
+func splitSnap(id string) (string, string, bool) {
+	ds, name, ok := strings.Cut(id, "@")
+	return ds, name, ok && validDataset(ds) && snapName.MatchString(name)
+}
+
+func snapCreate(a []json.RawMessage) (string, string, error) {
+	if err := count(a, 1); err != nil {
+		return "", "", err
+	}
+	var in map[string]json.RawMessage
+	if err := json.Unmarshal(a[0], &in); err != nil {
+		return "", "", fmt.Errorf("object verwacht")
+	}
+	var ds, name string
+	var rec bool
+	for k, v := range in {
+		switch k {
+		case "dataset":
+			_ = json.Unmarshal(v, &ds)
+		case "name":
+			_ = json.Unmarshal(v, &name)
+		case "recursive":
+			if json.Unmarshal(v, &rec) != nil {
+				return "", "", fmt.Errorf("recursive is waar of onwaar")
+			}
+		default:
+			return "", "", fmt.Errorf("veld %s mag niet", k)
+		}
+	}
+	if !validDataset(ds) || !snapName.MatchString(name) {
+		return "", "", fmt.Errorf("ongeldige dataset of naam")
+	}
+	t := "snapshot " + ds + "@" + name + " maken"
+	if rec {
+		t += " (met onderliggende datasets)"
+	}
+	return t, "", nil
+}
+
+func snapOpts(a []json.RawMessage, allowed ...string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(a) < 2 {
+		return out, nil
+	}
+	var in map[string]json.RawMessage
+	if err := json.Unmarshal(a[1], &in); err != nil {
+		return nil, fmt.Errorf("opties zijn geen object")
+	}
+	for k, v := range in {
+		ok := false
+		for _, x := range allowed {
+			ok = ok || x == k
+		}
+		var b bool
+		if !ok || json.Unmarshal(v, &b) != nil {
+			return nil, fmt.Errorf("optie %s mag niet", k)
+		}
+		out[k] = b
+	}
+	return out, nil
+}
+
+func snapDelete(a []json.RawMessage) (string, string, error) {
+	if len(a) < 1 || len(a) > 2 {
+		return "", "", fmt.Errorf("1 of 2 argumenten verwacht")
+	}
+	id, err := str(a, 0)
+	if err != nil {
+		return "", "", err
+	}
+	if _, _, ok := splitSnap(id); !ok {
+		return "", "", fmt.Errorf("ongeldige snapshot")
+	}
+	o, err := snapOpts(a, "defer", "recursive")
+	if err != nil {
+		return "", "", err
+	}
+	if o["recursive"] {
+		return "snapshot " + id + " verwijderen (ook onderliggend)", id, nil
+	}
+	return "snapshot " + id + " verwijderen", "", nil
+}
+
+// snapRollback gooit alles na de snapshot weg; daarom de naam van de
+// dataset overtikken.
+func snapRollback(a []json.RawMessage) (string, string, error) {
+	if len(a) < 1 || len(a) > 2 {
+		return "", "", fmt.Errorf("1 of 2 argumenten verwacht")
+	}
+	id, err := str(a, 0)
+	if err != nil {
+		return "", "", err
+	}
+	ds, _, ok := splitSnap(id)
+	if !ok {
+		return "", "", fmt.Errorf("ongeldige snapshot")
+	}
+	if _, err := snapOpts(a, "recursive", "recursive_clones", "force", "recursive_rollback"); err != nil {
+		return "", "", err
+	}
+	return "dataset " + ds + " terugrollen naar " + id, ds, nil
+}
+
+func taskID(title string) func(a []json.RawMessage) (string, string, error) {
+	return func(a []json.RawMessage) (string, string, error) {
+		if err := count(a, 1); err != nil {
+			return "", "", err
+		}
+		var id int64
+		if err := json.Unmarshal(a[0], &id); err != nil || id <= 0 {
+			return "", "", fmt.Errorf("ongeldig nummer")
+		}
+		return fmt.Sprintf(title, id), "", nil
+	}
+}
+
+// taskEnable laat bij een update alleen enabled toe: aan- of uitzetten.
+func taskEnable(what string) func(a []json.RawMessage) (string, string, error) {
+	return func(a []json.RawMessage) (string, string, error) {
+		if err := count(a, 2); err != nil {
+			return "", "", err
+		}
+		var id int64
+		if err := json.Unmarshal(a[0], &id); err != nil || id <= 0 {
+			return "", "", fmt.Errorf("ongeldig nummer")
+		}
+		var in map[string]json.RawMessage
+		if err := json.Unmarshal(a[1], &in); err != nil || len(in) != 1 {
+			return "", "", fmt.Errorf("alleen enabled mag veranderen")
+		}
+		var on bool
+		if v, ok := in["enabled"]; !ok || json.Unmarshal(v, &on) != nil {
+			return "", "", fmt.Errorf("alleen enabled mag veranderen")
+		}
+		if on {
+			return fmt.Sprintf("%s %d aanzetten", what, id), "", nil
+		}
+		return fmt.Sprintf("%s %d uitzetten", what, id), "", nil
+	}
 }

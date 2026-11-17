@@ -201,3 +201,133 @@ export function useTrueNASCall(id: string) {
     },
   });
 }
+
+// --- M2: datasets, snapshots en bescherming ------------------------------
+
+// tnVal haalt het getal of de tekst uit een eigenschap van de middleware
+// ({parsed, value, rawvalue} of al een waarde).
+export function tnVal(v: unknown): number | string | null {
+  if (v == null) return null;
+  if (typeof v === "number" || typeof v === "string") return v;
+  if (typeof v === "object") {
+    const o = v as { parsed?: unknown; value?: unknown; rawvalue?: unknown };
+    if (typeof o.parsed === "number" || typeof o.parsed === "string") return o.parsed;
+    if (o.parsed && typeof o.parsed === "object" && "$date" in (o.parsed as object)) return (o.parsed as { $date: number }).$date;
+    if (typeof o.value === "string" || typeof o.value === "number") return o.value;
+  }
+  return null;
+}
+
+export function tnNum(v: unknown): number {
+  const x = tnVal(v);
+  return typeof x === "number" ? x : Number(x) || 0;
+}
+
+export type TNDataset = {
+  id: string;
+  name: string;
+  type?: string;
+  pool?: string;
+  encrypted?: boolean;
+  locked?: boolean;
+  mountpoint?: string | null;
+  used?: unknown;
+  available?: unknown;
+  usedbysnapshots?: unknown;
+  quota?: unknown;
+  refquota?: unknown;
+  compression?: unknown;
+  compressratio?: unknown;
+  snapshot_count?: number;
+  smb_shares?: unknown[];
+  nfs_shares?: unknown[];
+  children?: TNDataset[];
+};
+
+// flatDatasets maakt van de boom van pool.dataset.details een lijst.
+export function flatDatasets(list: TNDataset[] | undefined): TNDataset[] {
+  const out: TNDataset[] = [];
+  const walk = (ds: TNDataset[]) => {
+    for (const d of ds) {
+      out.push(d);
+      if (d.children?.length) walk(d.children);
+    }
+  };
+  walk(list ?? []);
+  const seen = new Set<string>();
+  return out.filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true))).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export type TNSnapshot = {
+  id: string;
+  name: string;
+  dataset: string;
+  snapshot_name: string;
+  createtxg?: string | number;
+  properties?: Record<string, unknown>;
+};
+
+export type TNSchedule = { minute?: string; hour?: string; dom?: string; month?: string; dow?: string };
+
+export type TNTaskState = { state?: string; datetime?: TNDate; error?: string | null };
+
+export type TNSnapshotTask = {
+  id: number;
+  dataset: string;
+  recursive?: boolean;
+  lifetime_value?: number;
+  lifetime_unit?: string;
+  naming_schema?: string;
+  schedule?: TNSchedule;
+  enabled: boolean;
+  state?: TNTaskState;
+};
+
+export type TNOtherTask = {
+  id: number;
+  description?: string;
+  name?: string;
+  path?: string;
+  remotehost?: string;
+  direction?: string;
+  enabled: boolean;
+  schedule?: TNSchedule;
+  state?: TNTaskState;
+  job?: TNJob | null;
+};
+
+export function scheduleText(s?: TNSchedule) {
+  if (!s) return "–";
+  return [s.minute, s.hour, s.dom, s.month, s.dow].map((x) => x ?? "*").join(" ");
+}
+
+// useTrueNASSnapshots leest de snapshots van één dataset, met de
+// eigenschappen als de versie dat kent.
+export function useTrueNASSnapshots(id: string, dataset: string) {
+  return useQuery({
+    queryKey: ["truenas", id, "snapshots", dataset],
+    queryFn: async () => {
+      const filter = [[["dataset", "=", dataset]]];
+      const get = async (method: string, args: unknown[]) => {
+        const q = new URLSearchParams({ method, args: JSON.stringify(args) });
+        return (await call<{ data: TNSnapshot[] }>("GET", `/truenas/${id}/api?${q.toString()}`)).data;
+      };
+      const opts = { extra: { properties: ["used", "referenced", "creation"] } };
+      for (const m of ["pool.snapshot.query", "zfs.snapshot.query"]) {
+        try {
+          return { method: m, items: await get(m, [...filter, opts]) };
+        } catch {
+          try {
+            return { method: m, items: await get(m, filter) };
+          } catch {
+            /* volgende naam */
+          }
+        }
+      }
+      throw new Error("snapshots lezen mislukte (pool.snapshot.query en zfs.snapshot.query)");
+    },
+    enabled: !!id && !!dataset,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+}
