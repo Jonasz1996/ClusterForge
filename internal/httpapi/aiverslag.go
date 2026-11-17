@@ -119,3 +119,21 @@ func (s *Server) aivCall(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+// aivInstall installeert of werkt de koppeling ext56 in AI-verslag bij (M4).
+func (s *Server) aivInstall(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	id, ok := aivNode(w, r)
+	if !ok {
+		return
+	}
+	j, err := s.aiverslag.StartInstall(r.Context(), events.User(p.User.ID), id)
+	if err != nil {
+		s.aivError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}

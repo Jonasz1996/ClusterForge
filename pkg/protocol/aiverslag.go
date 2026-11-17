@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -25,8 +27,60 @@ const AIVOpGet = "aiv_get"
 // AIVCall is een POST of DELETE op de lokale API, als run pve.
 const AIVCall = "aiv_call"
 
+// AIVOpPost is een korte POST over het onderwerp pve (PVERequest met Path
+// en de inhoud in Args), alleen voor de paden in AIVPostPaths: de context
+// die ClusterForge elke ronde naar AI-verslag stuurt (M4).
+const AIVOpPost = "aiv_post"
+
+// AIVPostPaths zijn de paden die AIVOpPost mag gebruiken.
+var AIVPostPaths = map[string]bool{"/api/inzicht/clusterforge/context": true}
+
+// AIVInstall installeert een extensie van ClusterForge in AI-verslag
+// (ext56: de context uit ClusterForge), als run pve.
+const AIVInstall = "aiv_install"
+
 func init() {
-	PVEActions = append(PVEActions, AIVCall)
+	PVEActions = append(PVEActions, AIVCall, AIVInstall)
+}
+
+// AIVExtension is een extensie (Python) die ClusterForge in AI-verslag zet.
+type AIVExtension struct {
+	// Name zoals ext56; het bestand wordt <Name>.py en app.py krijgt
+	// "import <Name>; <Name>.routes(app, guard)".
+	Name   string `json:"name"`
+	Code   string `json:"code"`
+	SHA256 string `json:"sha256"`
+}
+
+var aivExtName = regexp.MustCompile(`^ext[0-9]{2,3}$`)
+
+// Validate controleert een extensie, ook de controlesom.
+func (e *AIVExtension) Validate() error {
+	if e == nil {
+		return fmt.Errorf("aiv_install zonder extensie")
+	}
+	if !aivExtName.MatchString(e.Name) {
+		return fmt.Errorf("ongeldige naam %q", e.Name)
+	}
+	if len(e.Code) == 0 || len(e.Code) > 256<<10 {
+		return fmt.Errorf("code ontbreekt of is te groot")
+	}
+	sum := sha256.Sum256([]byte(e.Code))
+	if hex.EncodeToString(sum[:]) != e.SHA256 {
+		return fmt.Errorf("controlesom van %s klopt niet", e.Name)
+	}
+	return nil
+}
+
+// ValidateAIVPost controleert een korte POST.
+func (r PVERequest) ValidateAIVPost() error {
+	if !AIVPostPaths[r.Path] {
+		return fmt.Errorf("%q is geen pad voor aiv_post", r.Path)
+	}
+	if len(r.Args) > 512<<10 || !json.Valid(r.Args) {
+		return fmt.Errorf("inhoud is geen JSON of te groot")
+	}
+	return nil
 }
 
 // AIVFacts staat in de facts van een agent op de machine van AI-verslag.

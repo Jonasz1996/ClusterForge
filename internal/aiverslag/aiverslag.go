@@ -56,6 +56,8 @@ type Service struct {
 	Run   *noderun.Runner
 	cache getCache
 	watch watchState
+	// Version is de versie van ClusterForge (in de context voor ext56).
+	Version string
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus) *Service {
@@ -65,6 +67,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	}
 	if runner != nil {
 		runner.Register(Kind, s.run)
+		runner.Register(InstallKind, s.runInstall)
 	}
 	return s
 }

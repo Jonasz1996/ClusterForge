@@ -3,7 +3,10 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -25,6 +29,7 @@ type fakeAIV struct {
 	nextID int
 	pairs  int
 	posts  []string
+	ext    bool
 }
 
 func newFakeAIV() *fakeAIV { return &fakeAIV{codes: map[string]bool{}, tokens: map[string]int{}} }
@@ -74,11 +79,21 @@ func (f *fakeAIV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	case !valid:
 		http.Error(w, `{"detail":"geen geldige app-sleutel"}`, http.StatusUnauthorized)
+	case r.URL.Path == "/api/inzicht/clusterforge":
+		if !f.ext {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ext":"56.1"}`))
 	case r.URL.Path == "/api/app/start":
 		_, _ = w.Write([]byte(`{"niveau":"normaal"}`))
 	case r.URL.Path == "/api/state":
 		_, _ = w.Write([]byte(`{"running":false,"q":"` + r.URL.Query().Get("x") + `"}`))
 	case r.Method == http.MethodPost:
+		if strings.HasPrefix(r.URL.Path, "/api/inzicht/") && r.Header.Get("X-Inzicht") != "1" {
+			http.Error(w, `{"fout":"kop X-Inzicht ontbreekt"}`, http.StatusForbidden)
+			return
+		}
 		f.posts = append(f.posts, r.URL.Path)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	default:
@@ -206,4 +221,69 @@ func TestAIVFacts(t *testing.T) {
 	if (pveHost{root: t.TempDir()}).aivFacts(context.Background()) != nil {
 		t.Fatal("facts zonder AI-verslag")
 	}
+}
+
+func TestAIVInstall(t *testing.T) {
+	f := newFakeAIV()
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	aivBaseOverride = srv.URL
+	defer func() { aivBaseOverride = "" }()
+	aivStartWait, aivStartPoll = 300*time.Millisecond, 50*time.Millisecond
+	root := aivRoot(t)
+	app := "import ext\nimport ext55; ext55.routes(app, guard)\n"
+	_ = os.WriteFile(root+"/opt/aiverslag/app.py", []byte(app), 0o644)
+	var cmds []string
+	r := &RunExecutor{Root: root, Cmd: func(ctx context.Context, user string, argv, env []string, out io.Writer) (int, error) {
+		cmds = append(cmds, strings.Join(argv, " "))
+		if argv[0] == "systemctl" && argv[1] == "restart" {
+			f.mu.Lock()
+			f.ext = strings.Contains(readFile(root+"/opt/aiverslag/app.py"), "ext56.routes")
+			f.mu.Unlock()
+		}
+		return 0, nil
+	}}
+	code := "VERSIE = '56.1'\n"
+	sum := sha256.Sum256([]byte(code))
+	ext := &protocol.AIVExtension{Name: "ext56", Code: code, SHA256: hex.EncodeToString(sum[:])}
+	var out bytes.Buffer
+	if c, err := r.aivInstall(context.Background(), ext, &out); err != nil || c != 0 {
+		t.Fatalf("code %d, fout %v\n%s", c, err, out.String())
+	}
+	got := readFile(root + "/opt/aiverslag/app.py")
+	if got != app+"import ext56; ext56.routes(app, guard)\n" || readFile(root+"/opt/aiverslag/ext56.py") != code {
+		t.Fatalf("app.py %q", got)
+	}
+	// Een tweede keer: de regel staat er al één keer.
+	if _, err := r.aivInstall(context.Background(), ext, &out); err != nil || strings.Count(readFile(root+"/opt/aiverslag/app.py"), "ext56") != 2 {
+		t.Fatalf("tweede keer: %v", err)
+	}
+
+	// De webdienst start niet met de extensie: alles terug.
+	_ = os.WriteFile(root+"/opt/aiverslag/app.py", []byte(app), 0o644)
+	_ = os.Remove(root + "/opt/aiverslag/ext56.py")
+	r.Cmd = func(ctx context.Context, user string, argv, env []string, out io.Writer) (int, error) {
+		f.mu.Lock()
+		f.ext = false
+		f.mu.Unlock()
+		return 0, nil
+	}
+	if _, err := r.aivInstall(context.Background(), ext, &out); err == nil {
+		t.Fatal("geen fout")
+	}
+	if readFile(root+"/opt/aiverslag/app.py") != app {
+		t.Fatal("app.py niet teruggezet")
+	}
+	if _, err := os.Stat(root + "/opt/aiverslag/ext56.py"); err == nil {
+		t.Fatal("ext56.py blijft staan")
+	}
+	ext.SHA256 = "00"
+	if _, err := r.aivInstall(context.Background(), ext, &out); err == nil {
+		t.Fatal("verkeerde controlesom aanvaard")
+	}
+}
+
+func readFile(p string) string {
+	b, _ := os.ReadFile(p)
+	return string(b)
 }

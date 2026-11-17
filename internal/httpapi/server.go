@@ -337,6 +337,7 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Get("/aiverslag/{node}/overview", s.aivOverview)
 		api.With(s.requireSession).Get("/aiverslag/{node}/api", s.aivGet)
 		api.With(s.requireSession).Post("/aiverslag/{node}/call", s.aivCall)
+		api.With(s.requireSession).Post("/aiverslag/{node}/install", s.aivInstall)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},
