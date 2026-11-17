@@ -208,7 +208,8 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # De server biedt de agent voor amd64 en arm64 aan; die moeten in elk image zitten.
+      # De server biedt de agent voor Linux amd64 en arm64 en voor FreeBSD
+      # amd64 (OPNsense) aan; die moeten in elk image zitten.
       - name: Agents in het image
         env:
           IMAGE: ghcr.io/jonasz1996/clusterforge-server:${{ steps.tags.outputs.version }}
@@ -217,7 +218,7 @@ jobs:
           docker cp "$id:/usr/share/clusterforge/agents" agents
           docker rm "$id"
           ls -l agents
-          for arch in amd64 arm64; do
-            test -s agents/cf-agent-linux-$arch
-            (cd agents && sha256sum -c cf-agent-linux-$arch.sha256)
+          for bin in cf-agent-linux-amd64 cf-agent-linux-arm64 cf-agent-freebsd-amd64; do
+            test -s agents/$bin
+            (cd agents && sha256sum -c $bin.sha256)
           done

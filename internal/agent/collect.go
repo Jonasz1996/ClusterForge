@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -78,6 +79,13 @@ type Collector struct {
 	OnUnits func([]UnitInfo)
 	// HTTPGet haalt een lokale URL op, voor SeaweedFS; nil gebruikt HTTP.
 	HTTPGet func(ctx context.Context, url string) ([]byte, error)
+	// OS is het besturingssysteem (linux of freebsd); leeg is dat van de
+	// agent. Tests zetten het.
+	OS string
+
+	// opn praat met de lokale API van OPNsense (fase 34); opnAPI maakt hem.
+	opnOnce sync.Once
+	opn     *opnAPI
 }
 
 // UnitInfo is wat systemctl show over een gevolgde unit zegt.
@@ -149,6 +157,10 @@ func (c *Collector) Heartbeat(ctx context.Context, version string) protocol.Hear
 	} else {
 		hb.Addresses = hostAddresses()
 	}
+	if c.bsd() {
+		c.bsdHeartbeat(ctx, &hb)
+		return hb
+	}
 	if f := strings.Fields(c.read("/proc/uptime")); len(f) > 0 {
 		up, _ := strconv.ParseFloat(f[0], 64)
 		hb.UptimeSeconds = int64(up)
@@ -184,14 +196,24 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	} else {
 		f.Interfaces = interfaces()
 	}
+	if c.PrimaryAddress != nil {
+		f.PrimaryAddress = c.PrimaryAddress()
+	}
+	if c.bsd() {
+		c.bsdFacts(ctx, &f)
+		f.DNS = c.nameservers()
+		f.OPNsense = c.opnsense(ctx)
+		if f.OPNsense != nil {
+			f.OS.ID, f.OS.VersionID = "opnsense", f.OPNsense.Version
+			f.OS.PrettyName = strings.TrimSpace("OPNsense " + f.OPNsense.Version + " (" + f.OS.PrettyName + ")")
+		}
+		return f
+	}
 	mem := c.meminfo()
 	f.MemoryBytes, f.SwapBytes = mem["MemTotal"]*1024, mem["SwapTotal"]*1024
 	f.BootTime = c.bootTime()
 	if out, err := c.run(ctx, "systemd-detect-virt"); err == nil || len(out) > 0 {
 		f.Virtualization = strings.TrimSpace(string(out))
-	}
-	if c.PrimaryAddress != nil {
-		f.PrimaryAddress = c.PrimaryAddress()
 	}
 	f.Filesystems = c.filesystems()
 	f.Services = c.services(ctx)

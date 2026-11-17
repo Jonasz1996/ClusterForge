@@ -113,6 +113,23 @@ export const navGroups: NavGroup[] = [
           { href: "/pbs/systeem", label: "Systeem", keywords: "pbs schijf smart zfs netwerk dns dienst update certificaat syslog herstarten" },
         ],
       },
+      {
+        href: "/opnsense",
+        label: "OPNsense",
+        keywords: "opnsense firewall carp pfsync ha vip gateway router",
+        tabs: [
+          { href: "/opnsense", label: "Overzicht", keywords: "opnsense carp vip master backup pfsync sync gateways interfaces diensten" },
+          { href: "/opnsense/regels", label: "Regels en aliassen", keywords: "opnsense firewall regels rules alias" },
+          { href: "/opnsense/nat", label: "NAT", keywords: "opnsense nat port forward doorsturen outbound 1:1 npt" },
+          { href: "/opnsense/netwerk", label: "Netwerk", keywords: "opnsense vip carp vlan gateway route routering" },
+          { href: "/opnsense/dhcp-dns", label: "DHCP en DNS", keywords: "opnsense dhcp kea dnsmasq lease reservatie unbound dns override" },
+          { href: "/opnsense/vpn", label: "VPN", keywords: "opnsense wireguard openvpn ipsec peer tunnel" },
+          { href: "/opnsense/diensten", label: "Diensten en plugins", keywords: "opnsense dienst service herstarten plugin installeren" },
+          { href: "/opnsense/diagnose", label: "Diagnose", keywords: "opnsense firewalllog log staten states verbinding arp" },
+          { href: "/opnsense/ha", label: "HA en firmware", keywords: "opnsense carp onderhoudsmodus failover test firmware update upgrade drift back-up backup config.xml" },
+          { href: "/opnsense/revisies", label: "Revisies", keywords: "opnsense config.xml revisie geschiedenis diff vergelijken master backup" },
+        ],
+      },
     ],
   },
   {

@@ -40,6 +40,8 @@ type RunExecutor struct {
 	// Stable en Poll zijn voor tests: hoe lang een container aan één stuk
 	// moet draaien (0 is protocol.DockerStable) en hoe vaak de test kijkt.
 	Stable, Poll time.Duration
+	// OPN praat met de lokale API van OPNsense; nil maakt er een.
+	OPN *opnAPI
 }
 
 func (r *RunExecutor) path(p string) string {

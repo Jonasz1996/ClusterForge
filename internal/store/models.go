@@ -1504,6 +1504,19 @@ type ObservedConnectionHour struct {
 	Samples   int64
 }
 
+type OpnsenseBackup struct {
+	ID      uuid.UUID
+	NodeID  uuid.UUID
+	TakenAt time.Time
+	Reason  string
+	Sha256  string
+	Size    int32
+	Version string
+	KeyID   string
+	Nonce   string
+	Data    []byte
+}
+
 type ProxmoxBackup struct {
 	ConnectionID uuid.UUID
 	Volid        string

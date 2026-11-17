@@ -15200,6 +15200,26 @@ type GetNodeTimelineParams struct {
 	Limit *TimelineLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetOpnsenseApiParams defines parameters for GetOpnsenseApi.
+type GetOpnsenseApiParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Params JSON-object met velden voor een zoekopdracht
+	Params *string `form:"params,omitempty" json:"params,omitempty"`
+}
+
+// GetOpnsenseConfigctlParams defines parameters for GetOpnsenseConfigctl.
+type GetOpnsenseConfigctlParams struct {
+	Action string `form:"action" json:"action"`
+}
+
+// GetOpnsenseDiffParams defines parameters for GetOpnsenseDiff.
+type GetOpnsenseDiffParams struct {
+	From  string              `form:"from" json:"from"`
+	To    string              `form:"to" json:"to"`
+	Other *openapi_types.UUID `form:"other,omitempty" json:"other,omitempty"`
+}
+
 // GetPbsCoverageParams defines parameters for GetPbsCoverage.
 type GetPbsCoverageParams struct {
 	// Fresh 1 leest alle PBS'en opnieuw in plaats van de laatste ronde
@@ -15646,6 +15666,24 @@ type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
 
 // ToggleNodeCronJSONRequestBody defines body for ToggleNodeCron for application/json ContentType.
 type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
+
+// DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
+type DownloadOpnsenseBackupJSONRequestBody = PveObject
+
+// StartOpnsenseCarpJSONRequestBody defines body for StartOpnsenseCarp for application/json ContentType.
+type StartOpnsenseCarpJSONRequestBody = PveObject
+
+// StartOpnsenseChangeJSONRequestBody defines body for StartOpnsenseChange for application/json ContentType.
+type StartOpnsenseChangeJSONRequestBody = PveObject
+
+// StartOpnsenseFirmwareJSONRequestBody defines body for StartOpnsenseFirmware for application/json ContentType.
+type StartOpnsenseFirmwareJSONRequestBody = PveObject
+
+// SetOpnsenseKeyJSONRequestBody defines body for SetOpnsenseKey for application/json ContentType.
+type SetOpnsenseKeyJSONRequestBody = PveObject
+
+// PlanOpnsenseChangeJSONRequestBody defines body for PlanOpnsenseChange for application/json ContentType.
+type PlanOpnsenseChangeJSONRequestBody = PveObject
 
 // CallPbsApiJSONRequestBody defines body for CallPbsApi for application/json ContentType.
 type CallPbsApiJSONRequestBody = PveCallInput
@@ -16636,6 +16674,51 @@ type ServerInterface interface {
 	// GetNodeTimeline De tijdlijn van een node, oudste eerst
 	// (GET /nodes/{nodeId}/timeline)
 	GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams)
+	// DownloadOpnsenseBackup Een back-up downloaden (admin, altijd met code of wachtwoord); de volledige config.xml met geheimen
+	// (POST /opnsense/backups/{backupId}/download)
+	DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, backupId openapi_types.UUID)
+	// ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
+	// (GET /opnsense/clusters)
+	ListOpnsenseClusters(w http.ResponseWriter, r *http.Request)
+	// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+	// (GET /opnsense/firewalls/{nodeId}/api)
+	GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams)
+	// ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
+	// (GET /opnsense/firewalls/{nodeId}/backups)
+	ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseBackup Nu een back-up maken van elke firewall van het cluster (admin)
+	// (POST /opnsense/firewalls/{nodeId}/backups)
+	StartOpnsenseBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseCarp CARP-onderhoudsmodus aan of uit, of een failovertest, als taak opnsense.carp (admin; op prod met code of wachtwoord)
+	// (POST /opnsense/firewalls/{nodeId}/carp)
+	StartOpnsenseCarp(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseChange Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+	// (POST /opnsense/firewalls/{nodeId}/changes)
+	StartOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetOpnsenseConfigctl Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status
+	// (GET /opnsense/firewalls/{nodeId}/configctl)
+	GetOpnsenseConfigctl(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseConfigctlParams)
+	// GetOpnsenseDiff Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen)
+	// (GET /opnsense/firewalls/{nodeId}/diff)
+	GetOpnsenseDiff(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseDiffParams)
+	// GetOpnsenseDrift Welke onderdelen van de configuratie op de backup anders zijn dan op de master
+	// (GET /opnsense/firewalls/{nodeId}/drift)
+	GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
+	// (POST /opnsense/firewalls/{nodeId}/firmware)
+	StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SetOpnsenseKey Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
+	// (POST /opnsense/firewalls/{nodeId}/key)
+	SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// PlanOpnsenseChange Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen
+	// (POST /opnsense/firewalls/{nodeId}/plan)
+	PlanOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ListOpnsenseRevisions De revisies van config.xml, nieuwste eerst
+	// (GET /opnsense/firewalls/{nodeId}/revisions)
+	ListOpnsenseRevisions(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
+	// (POST /opnsense/firewalls/{nodeId}/sync)
+	SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
 	// (GET /pbs/coverage)
 	GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams)
@@ -18706,6 +18789,96 @@ func (_ Unimplemented) GetNodeMetrics(w http.ResponseWriter, r *http.Request, no
 // GetNodeTimeline De tijdlijn van een node, oudste eerst
 // (GET /nodes/{nodeId}/timeline)
 func (_ Unimplemented) GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DownloadOpnsenseBackup Een back-up downloaden (admin, altijd met code of wachtwoord); de volledige config.xml met geheimen
+// (POST /opnsense/backups/{backupId}/download)
+func (_ Unimplemented) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, backupId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
+// (GET /opnsense/clusters)
+func (_ Unimplemented) ListOpnsenseClusters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+// (GET /opnsense/firewalls/{nodeId}/api)
+func (_ Unimplemented) GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
+// (GET /opnsense/firewalls/{nodeId}/backups)
+func (_ Unimplemented) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseBackup Nu een back-up maken van elke firewall van het cluster (admin)
+// (POST /opnsense/firewalls/{nodeId}/backups)
+func (_ Unimplemented) StartOpnsenseBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseCarp CARP-onderhoudsmodus aan of uit, of een failovertest, als taak opnsense.carp (admin; op prod met code of wachtwoord)
+// (POST /opnsense/firewalls/{nodeId}/carp)
+func (_ Unimplemented) StartOpnsenseCarp(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseChange Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+// (POST /opnsense/firewalls/{nodeId}/changes)
+func (_ Unimplemented) StartOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseConfigctl Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status
+// (GET /opnsense/firewalls/{nodeId}/configctl)
+func (_ Unimplemented) GetOpnsenseConfigctl(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseConfigctlParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseDiff Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen)
+// (GET /opnsense/firewalls/{nodeId}/diff)
+func (_ Unimplemented) GetOpnsenseDiff(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseDiffParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseDrift Welke onderdelen van de configuratie op de backup anders zijn dan op de master
+// (GET /opnsense/firewalls/{nodeId}/drift)
+func (_ Unimplemented) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
+// (POST /opnsense/firewalls/{nodeId}/firmware)
+func (_ Unimplemented) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetOpnsenseKey Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
+// (POST /opnsense/firewalls/{nodeId}/key)
+func (_ Unimplemented) SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanOpnsenseChange Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen
+// (POST /opnsense/firewalls/{nodeId}/plan)
+func (_ Unimplemented) PlanOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOpnsenseRevisions De revisies van config.xml, nieuwste eerst
+// (GET /opnsense/firewalls/{nodeId}/revisions)
+func (_ Unimplemented) ListOpnsenseRevisions(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
+// (POST /opnsense/firewalls/{nodeId}/sync)
+func (_ Unimplemented) SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27894,6 +28067,471 @@ func (siw *ServerInterfaceWrapper) GetNodeTimeline(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// DownloadOpnsenseBackup operation middleware
+func (siw *ServerInterfaceWrapper) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "backupId" -------------
+	var backupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "backupId", chi.URLParam(r, "backupId"), &backupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "backupId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadOpnsenseBackup(w, r, backupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOpnsenseClusters operation middleware
+func (siw *ServerInterfaceWrapper) ListOpnsenseClusters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOpnsenseClusters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseApi operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseApiParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "params" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "params", r.URL.Query(), &params.Params, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "params"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "params", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseApi(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOpnsenseBackups operation middleware
+func (siw *ServerInterfaceWrapper) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOpnsenseBackups(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseBackup operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseBackup(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseCarp operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseCarp(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseCarp(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseChange operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseChange(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseConfigctl operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseConfigctl(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseConfigctlParams
+
+	// ------------- Required query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseConfigctl(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseDiffParams
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "other" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "other", r.URL.Query(), &params.Other, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "other"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "other", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseDiff(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseDrift operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseDrift(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseFirmware operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseFirmware(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOpnsenseKey operation middleware
+func (siw *ServerInterfaceWrapper) SetOpnsenseKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOpnsenseKey(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanOpnsenseChange operation middleware
+func (siw *ServerInterfaceWrapper) PlanOpnsenseChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanOpnsenseChange(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOpnsenseRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListOpnsenseRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOpnsenseRevisions(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncOpnsense operation middleware
+func (siw *ServerInterfaceWrapper) SyncOpnsense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncOpnsense(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPbsCoverage operation middleware
 func (siw *ServerInterfaceWrapper) GetPbsCoverage(w http.ResponseWriter, r *http.Request) {
 
@@ -31659,6 +32297,51 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/link", wrapper.LinkPbs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/clusters", wrapper.ListOpnsenseClusters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/api", wrapper.GetOpnsenseApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/configctl", wrapper.GetOpnsenseConfigctl)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/revisions", wrapper.ListOpnsenseRevisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/diff", wrapper.GetOpnsenseDiff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/plan", wrapper.PlanOpnsenseChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/changes", wrapper.StartOpnsenseChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/sync", wrapper.SyncOpnsense)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/key", wrapper.SetOpnsenseKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/carp", wrapper.StartOpnsenseCarp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/firmware", wrapper.StartOpnsenseFirmware)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/backups", wrapper.ListOpnsenseBackups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/backups", wrapper.StartOpnsenseBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/backups/{backupId}/download", wrapper.DownloadOpnsenseBackup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

@@ -146,3 +146,48 @@ func TestInstallRefusesHTTP(t *testing.T) {
 		t.Fatalf("http zonder --allow-http: %v %s", err, out)
 	}
 }
+
+func TestInstallFreeBSD(t *testing.T) {
+	e := newInstallEnv(t)
+	services := filepath.Join(e.root, "service.log")
+	fake := strings.SplitN(e.path, string(os.PathListSeparator), 2)[0]
+	write(t, filepath.Join(fake, "service"), "#!/bin/sh\necho \"$*\" >>"+services+"\n", 0o755)
+	bin := "#!/bin/sh\nif [ \"$1\" = enroll ]; then echo \"enroll $CF_ENROLL_TOKEN $*\" >>" + services + "; fi\necho 0.3.0\n"
+	s := sha256.Sum256([]byte(bin))
+	write(t, filepath.Join(e.downloads, "cf-agent-freebsd-amd64"), bin, 0o644)
+	write(t, filepath.Join(e.downloads, "cf-agent-freebsd-amd64.sha256"), hex.EncodeToString(s[:])+"  cf-agent-freebsd-amd64\n", 0o644)
+	write(t, filepath.Join(e.root, "usr/local/opnsense/version/core"), "{}", 0o644)
+	run := func(args ...string) (string, int) {
+		cmd := exec.Command("sh", append([]string{e.script, "--allow-http"}, args...)...)
+		cmd.Env = append(os.Environ(), "PATH="+e.path, "CF_INSTALL_ROOT="+e.root, "CF_INSTALL_OS=FreeBSD", "CF_INSTALL_ARCH=amd64")
+		out, err := cmd.CombinedOutput()
+		if ee, ok := err.(*exec.ExitError); ok {
+			return string(out), ee.ExitCode()
+		}
+		return string(out), 0
+	}
+	out, code := run("--server", e.srv, "--token", "cfe_abc")
+	if code != 0 || !strings.Contains(out, "cf-agent draait en is aangemeld") {
+		t.Fatalf("installeren: %d %s", code, out)
+	}
+	rc, err := os.ReadFile(filepath.Join(e.root, "usr/local/etc/rc.d/cf_agent"))
+	if err != nil || !strings.Contains(string(rc), "rcvar=cf_agent_enable") || !strings.Contains(string(rc), "/usr/local/bin/cf-agent run") {
+		t.Fatalf("rc.d: %v %s", err, rc)
+	}
+	if b, _ := os.ReadFile(filepath.Join(e.root, "etc/rc.conf.d/cf_agent")); string(b) != "cf_agent_enable=\"YES\"\n" {
+		t.Fatalf("rc.conf.d: %q", b)
+	}
+	if b, _ := os.ReadFile(services); !strings.Contains(string(b), "enroll cfe_abc enroll -server "+e.srv+" -allow-http") || !strings.HasSuffix(string(b), "cf_agent restart\n") {
+		t.Fatalf("service/enroll: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "etc/systemd")); err == nil {
+		t.Fatal("systemd-units op FreeBSD")
+	}
+	out, code = run("--server", e.srv, "--upgrade")
+	if code != 0 || !strings.Contains(out, "bijgewerkt van 0.3.0 naar 0.3.0") {
+		t.Fatalf("bijwerken: %d %s", code, out)
+	}
+	if out, code := run("--server", e.srv, "--no-enroll"); code != 2 {
+		t.Fatalf("--no-enroll: %d %s", code, out)
+	}
+}
