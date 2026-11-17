@@ -61,6 +61,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
@@ -117,6 +118,7 @@ type Server struct {
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
 	pbs          *pbs.Service
+	truenas      *truenas.Service
 	opnsense     *opnsense.Service
 	publish      *publish.Service
 	docker       *dockerhost.Service
@@ -221,6 +223,8 @@ type Deps struct {
 	PVEHosts *pvehost.Service
 	// PBS beheert de Proxmox Backup Servers (fase 32).
 	PBS *pbs.Service
+	// TrueNAS beheert TrueNAS SCALE (fase 37).
+	TrueNAS *truenas.Service
 	// OPNsense beheert de OPNsense-firewalls (fase 34).
 	OPNsense *opnsense.Service
 	// Publish beheert NPM en Authentik (fase 35).
@@ -273,6 +277,7 @@ func New(d Deps) *Server {
 		security:     d.Security,
 		pvehosts:     d.PVEHosts,
 		pbs:          d.PBS,
+		truenas:      d.TrueNAS,
 		opnsense:     d.OPNsense,
 		publish:      d.Publish,
 		docker:       d.Docker,
@@ -317,6 +322,11 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Get("/home-apps", s.listHomeApps)
 		api.With(s.requireSession).Post("/home-apps/override", s.saveHomeAppOverride)
 		api.With(s.requireSession).Post("/home-apps/doubt", s.decideHomeAppDoubt)
+		// TrueNAS (fase 37), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/truenas", s.listTrueNAS)
+		api.With(s.requireSession).Get("/truenas/{node}/overview", s.trueNASOverview)
+		api.With(s.requireSession).Get("/truenas/{node}/api", s.trueNASGet)
+		api.With(s.requireSession).Post("/truenas/{node}/call", s.trueNASCall)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},

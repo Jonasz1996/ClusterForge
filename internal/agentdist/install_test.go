@@ -191,3 +191,56 @@ func TestInstallFreeBSD(t *testing.T) {
 		t.Fatalf("--no-enroll: %d %s", code, out)
 	}
 }
+
+func TestInstallTrueNAS(t *testing.T) {
+	e := newInstallEnv(t)
+	log := filepath.Join(e.root, "enroll.log")
+	e.serve("#!/bin/sh\nif [ \"$1\" = enroll ]; then echo \"enroll $CF_ENROLL_TOKEN\" >>"+log+"; fi\necho 0.4.0\n", "")
+	run := func(args ...string) (string, int) {
+		cmd := exec.Command("sh", append([]string{e.script, "--allow-http"}, args...)...)
+		cmd.Env = append(os.Environ(), "PATH="+e.path, "CF_INSTALL_ROOT="+e.root, "CF_INSTALL_TRUENAS=1")
+		out, err := cmd.CombinedOutput()
+		if ee, ok := err.(*exec.ExitError); ok {
+			return string(out), ee.ExitCode()
+		}
+		return string(out), 0
+	}
+	out, code := run("--server", e.srv, "--token", "cfe_nas")
+	if code != 0 || !strings.Contains(out, "start vanzelf na een herstart of update") {
+		t.Fatalf("installeren: %d %s", code, out)
+	}
+	home := filepath.Join(e.root, "data/clusterforge")
+	if b, err := os.ReadFile(filepath.Join(home, "etc/agent.json")); err != nil || string(b) != `{"node_id":"n1"}` {
+		t.Fatalf("aanmelding niet meegenomen: %v %s", err, b)
+	}
+	if l, err := os.Readlink(filepath.Join(e.root, "etc/clusterforge")); err != nil || l != "/data/clusterforge/etc" {
+		t.Fatalf("koppeling /etc/clusterforge: %q %v", l, err)
+	}
+	unit, err := os.ReadFile(filepath.Join(e.root, "etc/systemd/system/cf-agent.service"))
+	if err != nil || !strings.Contains(string(unit), "ExecStart=/var/lib/clusterforge/bin/cf-agent run") {
+		t.Fatalf("unit: %v %s", err, unit)
+	}
+	if fi, err := os.Stat(filepath.Join(home, "boot.sh")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("boot.sh: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(e.root, "var/lib/clusterforge/bin/cf-agent")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("uitvoerbare kopie: %v", err)
+	}
+	// /data is noexec: daar mag het script niets rechtstreeks uitvoeren.
+	if err := os.Chmod(filepath.Join(home, "bin/cf-agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(home, "boot.sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(log); string(b) != "enroll cfe_nas\n" {
+		t.Fatalf("aanmelden: %q", b)
+	}
+	out, code = run("--server", e.srv, "--upgrade")
+	if code != 0 || !strings.Contains(out, "bijgewerkt naar 0.4.0") {
+		t.Fatalf("bijwerken: %d %s", code, out)
+	}
+	if out, code := run("--server", e.srv, "--no-enroll"); code != 2 {
+		t.Fatalf("--no-enroll: %d %s", code, out)
+	}
+}

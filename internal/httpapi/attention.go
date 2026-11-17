@@ -244,6 +244,12 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		s.pbsAttention(add)
 	}
 
+	// TrueNAS (fase 37): pools, schijven, mislukte taken en updates, uit
+	// de laatste achtergrondronde.
+	if s.truenas != nil {
+		s.trueNASAttention(add)
+	}
+
 	// Zabbix-monitoring (fase 33): API, proxy, HA, problemen die niemand
 	// bevestigt en nodes die Zabbix niet ziet.
 	if s.zabbixMon != nil {
