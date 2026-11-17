@@ -15,6 +15,11 @@ export type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  // Fase 41: wat er gebeurt en of je het kunt terugdraaien, in gewone taal.
+  // Zonder undo zegt een gevaarlijke vraag zelf dat terugdraaien misschien
+  // niet kan.
+  what?: ReactNode;
+  undo?: ReactNode;
 };
 
 type Pending = { message: ReactNode; opts: ConfirmOptions; resolve: (ok: boolean) => void };
@@ -71,6 +76,17 @@ export function ConfirmHost() {
   return (
     <Modal title={p.opts.title ?? "Bevestigen"} onClose={() => settle(false)}>
       <div className="text-sm text-slate-700 dark:text-slate-300">{p.message}</div>
+      {p.opts.what && (
+        <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">
+          <strong>Wat gebeurt er?</strong> {p.opts.what}
+        </p>
+      )}
+      {(p.opts.undo || danger) && (
+        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <strong>Kun je het terugdraaien?</strong>{" "}
+          {p.opts.undo ?? "Misschien niet. Twijfel je, annuleer dan en lees eerst de uitleg bovenaan de pagina, of vraag het aan de Assistent."}
+        </p>
+      )}
       <div className="mt-5 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" onClick={() => settle(false)}>
           {p.opts.cancelLabel ?? "Annuleren"}
