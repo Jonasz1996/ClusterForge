@@ -4376,6 +4376,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/docker/nodes/{nodeId}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een shell in een draaiende container openen (docker exec, admin, fase 28)
+         * @description Geeft een sessie terug; het verkeer loopt daarna over de websocket /api/v1/pve/console/{session}, zoals bij
+         *     Proxmox. Op een prodcluster vraagt het tweestapsverificatie (totp_code) of, zonder, het wachtwoord. Alleen het
+         *     openen komt in het logboek (docker.console_opened), niet wat je typt.
+         */
+        post: operations["openDockerConsole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters": {
         parameters: {
             query?: never;
@@ -14044,6 +14068,23 @@ export interface components {
             cols?: number;
             rows?: number;
         };
+        DockerConsoleInput: {
+            /** @description Id of naam van de container */
+            container: string;
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            shell: "auto" | "sh" | "bash";
+            /** @description Gebruiker in de container; leeg is wat het image zegt */
+            user?: string;
+            cols?: number;
+            rows?: number;
+            /** @description Op prod, als je geen tweestapsverificatie hebt */
+            password?: string;
+            /** @description Op prod: je code van tweestapsverificatie */
+            totp_code?: string;
+        };
         PveConsoleOpened: {
             session: string;
             kind: string;
@@ -21210,6 +21251,37 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    openDockerConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DockerConsoleInput"];
+            };
+        };
+        responses: {
+            /** @description Sessie klaar */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveConsoleOpened"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listPveDatacenters: {

@@ -1377,6 +1377,27 @@ func (e DocMetaScope) Valid() bool {
 	}
 }
 
+// Defines values for DockerConsoleInputShell.
+const (
+	DockerConsoleInputShellAuto DockerConsoleInputShell = "auto"
+	DockerConsoleInputShellBash DockerConsoleInputShell = "bash"
+	DockerConsoleInputShellSh   DockerConsoleInputShell = "sh"
+)
+
+// Valid indicates whether the value is a known member of the DockerConsoleInputShell enum.
+func (e DockerConsoleInputShell) Valid() bool {
+	switch e {
+	case DockerConsoleInputShellAuto:
+		return true
+	case DockerConsoleInputShellBash:
+		return true
+	case DockerConsoleInputShellSh:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DockerReportResult.
 const (
 	DockerReportResultFailed     DockerReportResult = "failed"
@@ -8290,6 +8311,28 @@ type DockerCallInput struct {
 	Title   *string `json:"title,omitempty"`
 }
 
+// DockerConsoleInput defines model for DockerConsoleInput.
+type DockerConsoleInput struct {
+	Cols *int `json:"cols,omitempty"`
+
+	// Container Id of naam van de container
+	Container string `json:"container"`
+
+	// Password Op prod, als je geen tweestapsverificatie hebt
+	Password *string                  `json:"password,omitempty"`
+	Rows     *int                     `json:"rows,omitempty"`
+	Shell    *DockerConsoleInputShell `json:"shell,omitempty"`
+
+	// TotpCode Op prod: je code van tweestapsverificatie
+	TotpCode *string `json:"totp_code,omitempty"`
+
+	// User Gebruiker in de container; leeg is wat het image zegt
+	User *string `json:"user,omitempty"`
+}
+
+// DockerConsoleInputShell defines model for DockerConsoleInput.Shell.
+type DockerConsoleInputShell string
+
 // DockerObject Een object van Docker zoals Portainer (fase 28); de velden staan in web/src/lib/docker.ts.
 type DockerObject map[string]interface{}
 
@@ -14564,6 +14607,9 @@ type RunDisasterScenarioJSONRequestBody = DisasterRunInput
 // CallDockerApiJSONRequestBody defines body for CallDockerApi for application/json ContentType.
 type CallDockerApiJSONRequestBody = DockerCallInput
 
+// OpenDockerConsoleJSONRequestBody defines body for OpenDockerConsole for application/json ContentType.
+type OpenDockerConsoleJSONRequestBody = DockerConsoleInput
+
 // SaveDocsTargetJSONRequestBody defines body for SaveDocsTarget for application/json ContentType.
 type SaveDocsTargetJSONRequestBody = DocsTargetInput
 
@@ -15247,6 +15293,9 @@ type ServerInterface interface {
 	// CallDockerApi Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
 	// (POST /docker/nodes/{nodeId}/calls)
 	CallDockerApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// OpenDockerConsole Een shell in een draaiende container openen (docker exec, admin, fase 28)
+	// (POST /docker/nodes/{nodeId}/console)
+	OpenDockerConsole(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetDockerStats CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28)
 	// (GET /docker/nodes/{nodeId}/stats)
 	GetDockerStats(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetDockerStatsParams)
@@ -16849,6 +16898,12 @@ func (_ Unimplemented) GetDockerApi(w http.ResponseWriter, r *http.Request, node
 // CallDockerApi Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
 // (POST /docker/nodes/{nodeId}/calls)
 func (_ Unimplemented) CallDockerApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// OpenDockerConsole Een shell in een draaiende container openen (docker exec, admin, fase 28)
+// (POST /docker/nodes/{nodeId}/console)
+func (_ Unimplemented) OpenDockerConsole(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -22664,6 +22719,32 @@ func (siw *ServerInterfaceWrapper) CallDockerApi(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CallDockerApi(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OpenDockerConsole operation middleware
+func (siw *ServerInterfaceWrapper) OpenDockerConsole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OpenDockerConsole(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -29489,6 +29570,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/docker/nodes/{nodeId}/calls", wrapper.CallDockerApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docker/nodes/{nodeId}/console", wrapper.OpenDockerConsole)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

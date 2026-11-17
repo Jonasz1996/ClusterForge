@@ -274,3 +274,20 @@ export type SystemDF = {
 
 export const shortId = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
 export const builtinNetworks = new Set(["bridge", "host", "none"]);
+
+// Console in een container (M5). De sessie loopt over dezelfde websocket als
+// de Proxmox-console (consoleSocketURL in lib/pve).
+export type DockerShell = "auto" | "sh" | "bash";
+export type DockerConsoleOpened = { session: string; kind: string; title: string };
+
+export async function openDockerConsole(
+  node: string,
+  body: { container: string; shell: DockerShell; user?: string; cols?: number; rows?: number; password?: string; totp_code?: string },
+): Promise<DockerConsoleOpened> {
+  return unwrap(await api.POST("/docker/nodes/{nodeId}/console", { params: { path: { nodeId: node } }, body })) as DockerConsoleOpened;
+}
+
+/** De link naar de console van een container; die opent in een eigen tabblad. */
+export function dockerConsoleHref(node: string, id: string) {
+  return `/docker/console?${new URLSearchParams({ node, id })}`;
+}

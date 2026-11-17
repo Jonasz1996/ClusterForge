@@ -217,6 +217,7 @@ const parentOf: Record<string, string> = {
   "/proxmox/gast": "/proxmox/gasten",
   "/proxmox/console": "/proxmox/gasten",
   "/docker/container": "/docker/containers",
+  "/docker/console": "/docker/containers",
   // De stacks van één cluster (fase 21) horen onder Docker → Stacks.
   "/containers": "/docker/stacks",
 };

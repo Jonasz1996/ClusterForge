@@ -126,3 +126,52 @@ func (s *Server) GetDockerAll(w http.ResponseWriter, r *http.Request, params gen
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": res})
 }
+
+// OpenDockerConsole opent een shell in een container (M5). De sessie en de
+// websocket zijn die van de Proxmox-console (/pve/console/{session}).
+func (s *Server) OpenDockerConsole(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.DockerConsoleInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ci := dockerhost.ConsoleInput{Container: in.Container, User: deref(in.User)}
+	if in.Shell != nil {
+		ci.Shell = string(*in.Shell)
+	}
+	if in.Cols != nil {
+		ci.Cols = *in.Cols
+	}
+	if in.Rows != nil {
+		ci.Rows = *in.Rows
+	}
+	plan, err := s.docker.PrepareConsole(r.Context(), nodeId, ci)
+	if err != nil {
+		s.dockerError(w, r, err)
+		return
+	}
+	if plan.Prod() {
+		if deref(in.TotpCode) == "" && deref(in.Password) == "" {
+			what := "het wachtwoord"
+			if p.User.TotpEnabledAt != nil {
+				what = "de code van je tweestapsverificatie"
+			}
+			writeError(w, http.StatusConflict, "needs_confirmation", plan.Host.Hostname+" is productie: geef "+what+" om een shell te openen")
+			return
+		}
+		if s.authError(w, r, s.auth.Confirm(r.Context(), p, deref(in.Password), deref(in.TotpCode), "docker_console")) {
+			return
+		}
+	}
+	c, _, err := s.pvehosts.StartConsole(r.Context(), plan.Host.NodeID, p.User.ID, plan.Request)
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	s.docker.ConsoleOpened(r.Context(), events.User(p.User.ID), plan)
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, gen.PveConsoleOpened{Session: c.ID, Kind: protocol.ConsoleDocker, Title: plan.Title()})
+}
