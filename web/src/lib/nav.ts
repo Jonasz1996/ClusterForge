@@ -111,10 +111,11 @@ export const navGroups: NavGroup[] = [
         tabs: [
           { href: "/docker", label: "Overzicht" },
           { href: "/docker/containers", label: "Containers", keywords: "docker container start stop herstart logs stats" },
+          { href: "/docker/stacks", label: "Stacks", keywords: "docker compose stacks overnemen" },
           { href: "/docker/images", label: "Images", keywords: "docker image pull update registry digest" },
           { href: "/docker/volumes", label: "Volumes", keywords: "docker volume opslag" },
           { href: "/docker/networks", label: "Netwerken", keywords: "docker network subnet bridge macvlan" },
-          { href: "/containers", label: "Stacks", keywords: "docker compose stacks" },
+          { href: "/docker/cleanup", label: "Opruimen", adminOnly: true, keywords: "docker prune opruimen schijf ruimte" },
         ],
       },
       { href: "/databases", label: "Databases", keywords: "mariadb galera postgresql patroni dump" },
@@ -216,6 +217,8 @@ const parentOf: Record<string, string> = {
   "/proxmox/gast": "/proxmox/gasten",
   "/proxmox/console": "/proxmox/gasten",
   "/docker/container": "/docker/containers",
+  // De stacks van één cluster (fase 21) horen onder Docker → Stacks.
+  "/containers": "/docker/stacks",
 };
 
 // Elke pagina (item of tabblad) met het menu-item waar ze onder valt.
