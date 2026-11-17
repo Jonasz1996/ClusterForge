@@ -15783,6 +15783,12 @@ type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
 // DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
 type DownloadOpnsenseBackupJSONRequestBody = PveObject
 
+// ApplyOpnsenseAdviceJSONRequestBody defines body for ApplyOpnsenseAdvice for application/json ContentType.
+type ApplyOpnsenseAdviceJSONRequestBody = PveObject
+
+// IgnoreOpnsenseAdviceJSONRequestBody defines body for IgnoreOpnsenseAdvice for application/json ContentType.
+type IgnoreOpnsenseAdviceJSONRequestBody = PveObject
+
 // SetOpnsenseAutoJSONRequestBody defines body for SetOpnsenseAuto for application/json ContentType.
 type SetOpnsenseAutoJSONRequestBody = PveObject
 
@@ -16811,6 +16817,15 @@ type ServerInterface interface {
 	// ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
 	// (GET /opnsense/clusters)
 	ListOpnsenseClusters(w http.ResponseWriter, r *http.Request)
+	// GetOpnsenseAdvice Regeladvies (fase 40) - regels voor geblokkeerd verkeer naar luisterende poorten, dubbele, overschaduwde en ongebruikte regels
+	// (GET /opnsense/firewalls/{nodeId}/advice)
+	GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ApplyOpnsenseAdvice Gekozen regeladvies toepassen als taak opnsense.change (admin; naam van het cluster overtikken, op prod met code of wachtwoord)
+	// (POST /opnsense/firewalls/{nodeId}/advice/apply)
+	ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// IgnoreOpnsenseAdvice Een voorstel van het regeladvies negeren of weer tonen (admin)
+	// (POST /opnsense/firewalls/{nodeId}/advice/ignore)
+	IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
 	// (GET /opnsense/firewalls/{nodeId}/api)
 	GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams)
@@ -18980,6 +18995,24 @@ func (_ Unimplemented) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Req
 // ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
 // (GET /opnsense/clusters)
 func (_ Unimplemented) ListOpnsenseClusters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseAdvice Regeladvies (fase 40) - regels voor geblokkeerd verkeer naar luisterende poorten, dubbele, overschaduwde en ongebruikte regels
+// (GET /opnsense/firewalls/{nodeId}/advice)
+func (_ Unimplemented) GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyOpnsenseAdvice Gekozen regeladvies toepassen als taak opnsense.change (admin; naam van het cluster overtikken, op prod met code of wachtwoord)
+// (POST /opnsense/firewalls/{nodeId}/advice/apply)
+func (_ Unimplemented) ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// IgnoreOpnsenseAdvice Een voorstel van het regeladvies negeren of weer tonen (admin)
+// (POST /opnsense/firewalls/{nodeId}/advice/ignore)
+func (_ Unimplemented) IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -28382,6 +28415,84 @@ func (siw *ServerInterfaceWrapper) ListOpnsenseClusters(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpnsenseAdvice operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseAdvice(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyOpnsenseAdvice operation middleware
+func (siw *ServerInterfaceWrapper) ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyOpnsenseAdvice(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IgnoreOpnsenseAdvice operation middleware
+func (siw *ServerInterfaceWrapper) IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IgnoreOpnsenseAdvice(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetOpnsenseApi operation middleware
 func (siw *ServerInterfaceWrapper) GetOpnsenseApi(w http.ResponseWriter, r *http.Request) {
 
@@ -33005,6 +33116,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto/apply", wrapper.ApplyOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice", wrapper.GetOpnsenseAdvice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice/apply", wrapper.ApplyOpnsenseAdvice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice/ignore", wrapper.IgnoreOpnsenseAdvice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)

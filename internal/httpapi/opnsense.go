@@ -401,3 +401,59 @@ func (s *Server) ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeI
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+func (s *Server) GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	v, err := s.opnsense.Advice(r.Context(), nodeId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Keys    []string `json:"keys"`
+		Confirm string   `json:"confirm"`
+		opnConfirmInput
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Keys) > 50 {
+		writeError(w, http.StatusBadRequest, "invalid_input", "hoogstens 50 voorstellen tegelijk")
+		return
+	}
+	if !s.opnConfirm(w, r, p, nodeId, in.Password, in.TotpCode, "opnsense_advice_apply", false) {
+		return
+	}
+	j, err := s.opnsense.ApplyAdvice(r.Context(), events.User(p.User.ID), nodeId, in.Keys, in.Confirm)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func (s *Server) IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Key    string `json:"key"`
+		Ignore bool   `json:"ignore"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.opnsense.IgnoreAdvice(r.Context(), events.User(p.User.ID), nodeId, in.Key, in.Ignore); err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"key": in.Key, "ignore": in.Ignore})
+}

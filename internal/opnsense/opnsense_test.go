@@ -573,6 +573,17 @@ func TestChangeFlow(t *testing.T) {
 		t.Fatalf("lichaam: %v", bus.gotBody)
 	}
 	bus.mu.Unlock()
+	// M3: regeladvies; de nep-firewall kent searchRule niet.
+	adv, err := s.Advice(ctx, ida)
+	if err != nil || adv.Confirm != "Firewalls" || len(adv.Notes) == 0 {
+		t.Fatalf("advies: %v %+v", err, adv)
+	}
+	if err := s.IgnoreAdvice(ctx, events.System(), ida, "open:x", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyAdvice(ctx, events.System(), ida, []string{"open:x"}, "Firewalls"); err == nil {
+		t.Fatal("een voorstel dat niet bestaat toegepast")
+	}
 	if _, err := pool.Exec(ctx, `DELETE FROM nodes WHERE id = $1`, db1); err != nil {
 		t.Fatal(err)
 	}

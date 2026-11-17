@@ -588,3 +588,62 @@ export function useOpnAutoApply(id: string) {
     onSuccess: after,
   });
 }
+
+// --- Regeladvies (fase 40 M3) ------------------------------------------------
+
+export type OpnAdviceItem = {
+  key: string;
+  kind: "open" | "dup" | "shadow" | "unused" | "wan";
+  op: "add" | "set" | "del" | "conflict";
+  title: string;
+  detail?: string;
+  ignored: boolean;
+  manual?: boolean;
+};
+
+export type OpnAdvice = {
+  cluster: string;
+  firewall: string;
+  items: OpnAdviceItem[];
+  notes: string[];
+  since?: string;
+  confirm: string;
+};
+
+export function useOpnAdvice(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "advice", id],
+    queryFn: async () =>
+      unwrap(await api.GET("/opnsense/firewalls/{nodeId}/advice", { params: { path: { nodeId: id! } } })) as unknown as OpnAdvice,
+    enabled: !!id,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
+export function useOpnAdviceApply(id: string) {
+  const after = useAfterJob();
+  return useMutation({
+    mutationFn: async (b: { keys: string[] } & OpnConfirm) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/advice/apply", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ) as unknown as Job,
+    onSuccess: after,
+  });
+}
+
+export function useOpnAdviceIgnore(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (b: { key: string; ignore: boolean }) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/advice/ignore", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["opnsense", "advice"] }),
+  });
+}

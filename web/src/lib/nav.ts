@@ -276,6 +276,11 @@ export const navGroups: NavGroup[] = [
             keywords: "opnsense dienst service herstarten plugin installeren",
           },
           {
+            href: "/opnsense/advies",
+            label: "Regeladvies",
+            keywords: "opnsense regels advies voorstellen dubbel overschaduwd ongebruikt geblokkeerd toelaten opruimen",
+          },
+          {
             href: "/opnsense/automatisch",
             label: "Automatisch",
             keywords: "opnsense automatisch aliassen dns overrides unbound dhcp reservaties kea dnsmasq beheerd",

@@ -1524,17 +1524,18 @@ type ObservedConnectionHour struct {
 }
 
 type OpnsenseAuto struct {
-	ClusterKey string
-	Aliases    string
-	Dns        string
-	Dhcp       string
-	Domain     string
-	Ignored    []string
-	LastRun    *time.Time
-	LastError  string
-	LastJob    *uuid.UUID
-	UpdatedAt  time.Time
-	UpdatedBy  *uuid.UUID
+	ClusterKey    string
+	Aliases       string
+	Dns           string
+	Dhcp          string
+	Domain        string
+	Ignored       []string
+	LastRun       *time.Time
+	LastError     string
+	LastJob       *uuid.UUID
+	UpdatedAt     time.Time
+	UpdatedBy     *uuid.UUID
+	AdviceIgnored []string
 }
 
 type OpnsenseBackup struct {
