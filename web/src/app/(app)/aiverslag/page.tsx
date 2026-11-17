@@ -1,6 +1,9 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
+import { AskView } from "@/components/aiverslag/Ask";
+import { FindingsView } from "@/components/aiverslag/Findings";
+import { Tabs } from "@/components/Tabs";
 import {
   AIVGate,
   NiveauBadge,
@@ -39,8 +42,28 @@ export default function AIVerslagPage() {
         description="De AI-analyse van je netwerk (OPNsense, CrowdSec, Zenarmor, dreigingsfeeds) in ClusterForge: dreigingsniveau, wat nu belangrijk is, alarmen en bevindingen. Via de ClusterForge-agent op de machine van AI-verslag."
       />
       <Suspense>
-        <AIVGate>{(v) => <OverviewView key={v.node_id} v={v} />}</AIVGate>
+        <AIVGate>{(v) => <Main key={v.node_id} v={v} />}</AIVGate>
       </Suspense>
+    </div>
+  );
+}
+
+type TabKey = "overzicht" | "bevindingen" | "vraag";
+
+const tabs = [
+  { key: "overzicht", label: "Overzicht" },
+  { key: "bevindingen", label: "Bevindingen" },
+  { key: "vraag", label: "Vraag het AI-verslag" },
+] as const;
+
+function Main({ v }: { v: AIVInstance }) {
+  const [tab, setTab] = useState<TabKey>("overzicht");
+  return (
+    <div className="space-y-4">
+      <Tabs tabs={tabs} value={tab} onChange={setTab} label="AI-verslag" />
+      {tab === "overzicht" && <OverviewView v={v} />}
+      {tab === "bevindingen" && <FindingsView v={v} />}
+      {tab === "vraag" && <AskView v={v} />}
     </div>
   );
 }

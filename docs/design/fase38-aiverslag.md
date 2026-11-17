@@ -65,3 +65,17 @@ updatecommando.
    op een eigen tak van de aiverslag-repo, door ClusterForge geïnstalleerd.
    Daarvoor heb ik schrijfrechten op die repo nodig; zonder die rechten lever
    ik het bestand mee in ClusterForge zelf.
+
+## Stand
+
+- **M1** (af): agent herkent AI-verslag (`/opt/aiverslag/app.py` + `aiverslag-web.service`),
+  facts `aiverslag` (versie uit `v2/kern.py`, units, model, schijf, bereikbaar,
+  gekoppeld), koppelt zichzelf bij het eerste verzoek en trekt oudere koppelingen
+  met dezelfde naam in. Server: `internal/aiverslag` (allowlist in `policy.go`,
+  overzicht, ronde elke 5 min), endpoints `/api/v1/aiverslag{,/{node}/overview,/{node}/api,/{node}/call}`
+  buiten de OpenAPI. Pagina **Beveiliging → AI-verslag**.
+- **M2** (af): tabbladen Bevindingen (filter, onderzoek, laten onderzoeken, is
+  normaal, verwijderen, fix met voorbeeld, overtikken van `fix` en
+  tweestapsverificatie) en Vraag het AI-verslag (vraag meteen, antwoord met de
+  stappen van de AI). "Gezien" bij een alarm. Wat ClusterForge nooit doet: alles
+  wissen (`/api/clearall`), koppelcodes maken voor anderen, sleutels lezen.
