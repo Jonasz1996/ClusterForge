@@ -164,7 +164,7 @@ if [ "$NO_ENROLL" = 1 ] && [ -f "$ETC/agent.json" ]; then
 	echo "deze machine is al aangemeld (/etc/clusterforge/agent.json); --no-enroll is voor een golden image" >&2
 	exit 1
 fi
-if [ "$UPGRADE" = 1 ] && [ ! -x "$ROOT/data/clusterforge/bin/cf-agent" ] && { [ ! -f "$ETC/agent.json" ] || [ ! -x "$BIN" ]; }; then
+if [ "$UPGRADE" = 1 ] && [ ! -f "$ROOT/data/clusterforge/bin/cf-agent" ] && { [ ! -f "$ETC/agent.json" ] || [ ! -x "$BIN" ]; }; then
 	echo "deze machine heeft nog geen aangemelde cf-agent; installeer hem met --token" >&2
 	exit 1
 fi
@@ -218,15 +218,18 @@ UNIT
 }
 
 # install_truenas installeert cf-agent op TrueNAS SCALE (fase 37). /usr is
-# daar alleen-lezen en een update van TrueNAS begint met een nieuwe
-# boot-omgeving zonder onze units. Daarom staan de agent en zijn aanmelding
-# in /data/clusterforge (blijft bij een update), en zet een
-# Init/Shutdown-script van TrueNAS (POSTINIT) na elke start de koppeling
-# /etc/clusterforge en de units terug.
+# daar alleen-lezen, /data is noexec en een update van TrueNAS begint met
+# een nieuwe boot-omgeving zonder onze units. Daarom:
+# - /data/clusterforge bewaart de agent en zijn aanmelding (blijft bij een
+#   update, maar mag niets uitvoeren);
+# - boot.sh (gestart met sh, als Init/Shutdown-script POSTINIT) zet bij elke
+#   start de agent in een map waar hij wel mag draaien (/var/lib/clusterforge,
+#   anders een pool), de koppeling /etc/clusterforge en de units terug.
+#   Werkte de agent zichzelf bij, dan gaat de nieuwere terug naar /data.
 install_truenas() {
 	HOME_CF="$ROOT/data/clusterforge"
 	BIN="$HOME_CF/bin/cf-agent"
-	if [ "$UPGRADE" = 1 ] && [ ! -x "$BIN" ]; then
+	if [ "$UPGRADE" = 1 ] && [ ! -f "$BIN" ]; then
 		echo "deze TrueNAS heeft nog geen aangemelde cf-agent; installeer hem met --token" >&2
 		exit 1
 	fi
@@ -236,12 +239,12 @@ install_truenas() {
 	if [ -f "$ROOT/etc/clusterforge/agent.json" ] && [ ! -L "$ROOT/etc/clusterforge" ] && [ ! -f "$HOME_CF/etc/agent.json" ]; then
 		cp -a "$ROOT/etc/clusterforge/." "$HOME_CF/etc/"
 	fi
-	OLD="$("$BIN" version 2>/dev/null || echo geen)"
 	install -m 0755 "$TMP/cf-agent" "$BIN.new"
 	mv -f "$BIN.new" "$BIN"
 	cat >"$HOME_CF/boot.sh" <<'BOOT'
 #!/bin/sh
 # ClusterForge: na elke start of update van TrueNAS de agent terugzetten.
+# Start met: sh /data/clusterforge/boot.sh (/data is noexec).
 set -eu
 R="${CF_INSTALL_ROOT:-}"
 H="$R/data/clusterforge"
@@ -250,8 +253,27 @@ if [ -d "$R/etc/clusterforge" ] && [ ! -L "$R/etc/clusterforge" ]; then
 	rm -rf "$R/etc/clusterforge"
 fi
 ln -sfn /data/clusterforge/etc "$R/etc/clusterforge"
+# Een map waar de agent mag draaien: /var/lib/clusterforge, anders een pool.
+RUNDIR=""
+for d in "$R/var/lib/clusterforge/bin" $(ls -d "$R"/mnt/*/ 2>/dev/null | sed 's|/$|/.clusterforge/bin|'); do
+	mkdir -p "$d" 2>/dev/null || continue
+	# De agent werkte zichzelf bij: die versie bewaren.
+	if [ -f "$d/cf-agent" ] && [ "$d/cf-agent" -nt "$H/bin/cf-agent" ]; then
+		cp -f "$d/cf-agent" "$H/bin/cf-agent.new" && mv -f "$H/bin/cf-agent.new" "$H/bin/cf-agent"
+	fi
+	cp -f "$H/bin/cf-agent" "$d/cf-agent.new" && chmod 0755 "$d/cf-agent.new" && mv -f "$d/cf-agent.new" "$d/cf-agent" || continue
+	touch -r "$H/bin/cf-agent" "$d/cf-agent" 2>/dev/null || true
+	if [ -n "$R" ] || "$d/cf-agent" version >/dev/null 2>&1; then
+		RUNDIR="${d#"$R"}"
+		break
+	fi
+done
+if [ -z "$RUNDIR" ]; then
+	echo "geen map gevonden waar cf-agent mag draaien (/var/lib en de pools zijn noexec)" >&2
+	exit 1
+fi
 install -d "$R/etc/systemd/system"
-cat >"$R/etc/systemd/system/cf-agent.service" <<'UNIT'
+cat >"$R/etc/systemd/system/cf-agent.service" <<UNIT
 [Unit]
 Description=ClusterForge agent
 Documentation=https://github.com/Jonasz1996/ClusterForge
@@ -259,7 +281,7 @@ After=network-online.target middlewared.service
 Wants=network-online.target
 
 [Service]
-ExecStart=/data/clusterforge/bin/cf-agent run
+ExecStart=$RUNDIR/cf-agent run
 Restart=always
 RestartSec=5
 User=root
@@ -267,7 +289,7 @@ User=root
 [Install]
 WantedBy=multi-user.target
 UNIT
-cat >"$R/etc/systemd/system/cf-agent-fault-clear.service" <<'UNIT'
+cat >"$R/etc/systemd/system/cf-agent-fault-clear.service" <<UNIT
 [Unit]
 Description=ClusterForge: achtergebleven storingen van een rampoefening terugdraaien
 DefaultDependencies=no
@@ -276,8 +298,9 @@ Before=network-pre.target cf-agent.service
 
 [Service]
 Type=oneshot
-ExecStart=/data/clusterforge/bin/cf-agent fault-clear
+ExecStart=$RUNDIR/cf-agent fault-clear
 UNIT
+echo "$RUNDIR/cf-agent" >"$H/run-path"
 if [ -z "$R" ]; then
 	systemctl daemon-reload
 	if [ -f /data/clusterforge/etc/agent.json ] || [ -f /data/clusterforge/etc/enroll.json ]; then
@@ -287,29 +310,34 @@ if [ -z "$R" ]; then
 fi
 BOOT
 	chmod 0755 "$HOME_CF/boot.sh"
-	CF_INSTALL_ROOT="$ROOT" "$HOME_CF/boot.sh"
+	CF_INSTALL_ROOT="$ROOT" sh "$HOME_CF/boot.sh"
+	RUN="$ROOT$(cat "$HOME_CF/run-path")"
 	# Het opstartscript eenmalig in TrueNAS zetten (blijft in de config-db).
+	# Een oudere installatie riep boot.sh rechtstreeks aan: die wordt sh.
 	if [ -z "$ROOT" ] && command -v midclt >/dev/null 2>&1; then
-		if ! midclt call initshutdownscript.query '[["command","=","/data/clusterforge/boot.sh"]]' | grep -q boot.sh; then
-			midclt call initshutdownscript.create '{"type":"COMMAND","command":"/data/clusterforge/boot.sh","when":"POSTINIT","enabled":true,"timeout":60,"comment":"ClusterForge agent"}' >/dev/null
+		for old in $(midclt call initshutdownscript.query '[["command","=","/data/clusterforge/boot.sh"]]' | grep -o '"id": *[0-9]*' | grep -o '[0-9]*$'); do
+			midclt call initshutdownscript.delete "$old" >/dev/null || true
+		done
+		if ! midclt call initshutdownscript.query '[["command","=","sh /data/clusterforge/boot.sh"]]' | grep -q boot.sh; then
+			midclt call initshutdownscript.create '{"type":"COMMAND","command":"sh /data/clusterforge/boot.sh","when":"POSTINIT","enabled":true,"timeout":60,"comment":"ClusterForge agent"}' >/dev/null
 		fi
 	fi
 	if [ "$UPGRADE" = 1 ] || [ -z "$TOKEN" ]; then
 		[ -z "$ROOT" ] && systemctl restart cf-agent
-		echo "klaar: cf-agent bijgewerkt van $OLD naar $("$BIN" version); de aanmelding is gebleven"
+		echo "klaar: cf-agent bijgewerkt naar $("$RUN" version); de aanmelding is gebleven"
 		return 0
 	fi
 	echo "aanmelden bij $SERVER"
 	if [ "$ALLOW_HTTP" = 1 ]; then
-		CF_ENROLL_TOKEN="$TOKEN" "$BIN" enroll -server "$SERVER" -allow-http
+		CF_ENROLL_TOKEN="$TOKEN" "$RUN" enroll -server "$SERVER" -allow-http
 	else
-		CF_ENROLL_TOKEN="$TOKEN" "$BIN" enroll -server "$SERVER"
+		CF_ENROLL_TOKEN="$TOKEN" "$RUN" enroll -server "$SERVER"
 	fi
 	if [ -z "$ROOT" ]; then
 		systemctl enable cf-agent >/dev/null 2>&1 || true
 		systemctl restart cf-agent
 	fi
-	echo "klaar: cf-agent draait op TrueNAS, staat in /data/clusterforge en start vanzelf na een update"
+	echo "klaar: cf-agent draait op TrueNAS en start vanzelf na een herstart of update"
 }
 
 # TrueNAS SCALE herken je aan midclt en de config-db (CF_INSTALL_TRUENAS
