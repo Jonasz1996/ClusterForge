@@ -873,6 +873,25 @@ type DisasterScenario struct {
 	NextRunAt *time.Time
 }
 
+type DiskScan struct {
+	NodeID     uuid.UUID
+	JobID      *uuid.UUID
+	RunningJob *uuid.UUID
+	ScannedAt  *time.Time
+	Result     []byte
+	CleanedAt  *time.Time
+	Freed      int64
+	Cleaned    []string
+}
+
+type DiskWatchSetting struct {
+	ID           bool
+	WarnPct      int32
+	CritPct      int32
+	IgnoreMounts []string
+	UpdatedAt    time.Time
+}
+
 type DocSnapshot struct {
 	ID          int64
 	Scope       string
@@ -1534,6 +1553,29 @@ type OpnsenseBackup struct {
 	KeyID   string
 	Nonce   string
 	Data    []byte
+}
+
+type OpnsenseFlow struct {
+	NodeID uuid.UUID
+	Hour   time.Time
+	Action string
+	Iface  string
+	Dir    string
+	Proto  string
+	Src    string
+	Dst    string
+	Port   int32
+	Rule   string
+	Count  int64
+}
+
+type OpnsenseFlowRead struct {
+	NodeID  uuid.UUID
+	ReadAt  time.Time
+	Lines   int64
+	Skipped int64
+	Dropped int64
+	Error   string
 }
 
 type ProxmoxBackup struct {

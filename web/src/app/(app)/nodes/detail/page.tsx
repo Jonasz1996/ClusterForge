@@ -22,6 +22,7 @@ import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import { NodeChangesCard } from "@/components/journal/Changes";
 import { NodeCronCard } from "@/components/cron/Cron";
 import { CrowdSecNodeCard } from "@/components/crowdsec/CrowdSecNodeCard";
+import { NodeDiskCard } from "@/components/disk/NodeDiskCard";
 import { FirewallNodeCard } from "@/components/firewall/FirewallNodeView";
 import { SeaweedCard } from "@/components/seaweed/SeaweedCard";
 import {
@@ -188,6 +189,11 @@ function NodeDetailInner() {
             <Tile>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
             </Tile>
+            {node.data.agent && (
+              <Tile>
+                <NodeDiskCard nodeId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
             <Tile>
               <NodeLifecycleCard node={node.data} runtime={runtime.data} jobs={jobs.data} isAdmin={isAdmin} />
             </Tile>
