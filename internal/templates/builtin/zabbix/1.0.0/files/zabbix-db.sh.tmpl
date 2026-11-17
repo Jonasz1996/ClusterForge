@@ -14,6 +14,13 @@ PASSWORD={{ .params.db_password }}
 # verbinding van de node met het VIP naar het VIP komt van het VIP zelf).
 HOSTS="{{ range .nodes }}{{ if eq .role "server" }}{{ .address }} {{ end }}{{ end }}$VIP"
 
+# De proxy's met hun PSK: met versleuteling psk zet de node met het VIP de
+# sleutel en identiteit bij elke proxy die in Zabbix al bestaat (op naam).
+PROXIES="{{ range .nodes }}{{ if eq .role "proxy" }}{{ .hostname }} {{ end }}{{ end }}"
+ENCRYPTION={{ .params.proxy_encryption }}
+PSK_IDENTITY='{{ .params.proxy_psk_identity }}'
+PSK={{ sha256 (print .params.db_password "/zabbix-proxy-psk") }}
+
 sql() { mariadb --protocol=socket -N -B -e "$1" 2>/dev/null; }
 
 has_vip() { ip -o -4 addr show | grep -q " $VIP/"; }
@@ -36,6 +43,14 @@ users() {
 		sql "CREATE USER IF NOT EXISTS 'zabbix'@'$h' IDENTIFIED BY '$PASSWORD'" &&
 			sql "ALTER USER 'zabbix'@'$h' IDENTIFIED BY '$PASSWORD'" &&
 			sql "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'$h'" || return 1
+	done
+}
+
+proxies() {
+	[ "$ENCRYPTION" = psk ] || return 0
+	for p in $PROXIES; do
+		sql "UPDATE zabbix.proxy SET tls_connect = 2, tls_accept = 2, tls_psk_identity = '$PSK_IDENTITY', tls_psk = '$PSK'
+			WHERE name = '$p' AND (tls_connect <> 2 OR tls_accept <> 2 OR tls_psk_identity <> '$PSK_IDENTITY' OR tls_psk <> '$PSK')"
 	done
 }
 
@@ -83,8 +98,15 @@ while :; do
 			fi
 			echo "database en schema van Zabbix zijn klaar"
 			# Blijven draaien: de dienst staat zo active, en daar wachten
-			# een uitrol en een herstel op.
-			exec sleep infinity
+			# een uitrol en een herstel op. Elke minuut de PSK van de
+			# proxy's bijwerken, ook voor een proxy die je later in Zabbix
+			# toevoegt.
+			while :; do
+				if has_vip; then
+					proxies
+				fi
+				sleep 60
+			done
 		fi
 		if has_vip; then
 			setup || exit 1

@@ -11,6 +11,7 @@ Type=simple
 User=zabbix
 RuntimeDirectory=cf-zabbix-proxy
 StateDirectory=cf-zabbix-proxy
+LoadCredential=psk:/etc/zabbix/cf-zabbix_proxy.psk
 ExecStart=/usr/sbin/zabbix_proxy -f -c /etc/zabbix/cf-zabbix_proxy.conf
 Restart=always
 RestartSec=15

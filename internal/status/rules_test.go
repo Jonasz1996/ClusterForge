@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -164,5 +165,19 @@ func TestSettle(t *testing.T) {
 	h[vip.ID] = Settle(h[vip.ID], &a, time.Second, VIPGrace)
 	if res := ClusterWith(nodes, []ClusterVIP{vip}, h); res.Status != Healthy {
 		t.Fatalf("tijdens de wissel: %+v", res.Result)
+	}
+}
+
+func TestNodeCrashLoopAndCheck(t *testing.T) {
+	r := Node(NodeInput{HasAgent: true, HeartbeatAge: time.Second, Services: map[string]string{
+		"zabbix-proxy": "auto-restart", "cf-zabbix-proxy-check": "failed", "cf-zabbix-proxy": "active",
+	}})
+	if r.Status != Degraded || !strings.Contains(r.Reason, "Zabbix-proxy bereikt geen Zabbix server") ||
+		!strings.Contains(r.Reason, "service zabbix-proxy crasht en start steeds opnieuw") {
+		t.Fatalf("%+v", r)
+	}
+	// Een controle die gewoon klaar is (oneshot, static), is geen probleem.
+	if r := Node(NodeInput{HasAgent: true, HeartbeatAge: time.Second, Services: map[string]string{"cf-zabbix-proxy-check": "inactive"}}); r.Status != Healthy {
+		t.Fatalf("%+v", r)
 	}
 }
