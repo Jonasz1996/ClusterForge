@@ -104,6 +104,8 @@ export const navGroups: NavGroup[] = [
         keywords: "pbs proxmox backup server datastore back-up",
         tabs: [
           { href: "/pbs", label: "Overzicht" },
+          { href: "/pbs/datastores", label: "Datastores", keywords: "pbs datastore gc garbage collection prune verify onderhoud" },
+          { href: "/pbs/inhoud", label: "Inhoud", keywords: "pbs snapshot groep namespace back-up beschermen notitie verifieer" },
           { href: "/pbs/taken", label: "Taken", keywords: "pbs task log upid back-up verify gc" },
         ],
       },
