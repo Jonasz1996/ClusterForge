@@ -469,6 +469,7 @@ func serve() error {
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
 	goLoop(ctx, log, "opnsense", opnSvc.Loop)
 	goLoop(ctx, log, "opnflows", opnSvc.FlowsLoop)
+	goLoop(ctx, log, "opnauto", opnSvc.AutoLoop)
 	goLoop(ctx, log, "publish", pub.Loop)
 	goLoop(ctx, log, "publish-feeds", pub.FeedLoop)
 	goLoop(ctx, log, "zabbixmon", zbm.Loop)
