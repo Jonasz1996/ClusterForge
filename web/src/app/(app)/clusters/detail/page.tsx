@@ -1,6 +1,7 @@
 "use client";
 
 import { SectionNav } from "@/components/shell/SectionNav";
+import { Tile, TileGrid } from "@/components/Tiles";
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -127,7 +128,7 @@ function ClusterDetailInner() {
               )
             }
           />
-          <SectionNav />
+          <SectionNav views />
 
           {deleting && (
             <ConfirmDelete
@@ -145,7 +146,7 @@ function ClusterDetailInner() {
           <StatusNote status={cluster.data.status} reason={cluster.data.status_reason} since={cluster.data.status_since} />
           <FailoverBanner clusterId={id} isAdmin={isAdmin} />
 
-          {editing ? (
+          {editing && (
             <Card title="Cluster bewerken">
               <ClusterForm
                 initial={cluster.data}
@@ -158,46 +159,93 @@ function ClusterDetailInner() {
                 }}
               />
             </Card>
-          ) : (
-            <Info c={cluster.data} />
           )}
 
-          <NodesCard c={cluster.data} isAdmin={isAdmin} />
-          <ClusterAppsCard clusterId={id} />
-          <RecentChangesCard kind="cluster" id={id} />
-          <ClusterRiskCard clusterId={id} isAdmin={isAdmin} />
-          <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
-          {cluster.data.template_name && <SpecCard cluster={cluster.data} isAdmin={isAdmin} />}
-          {cluster.data.template_name && <GitCard c={cluster.data} isAdmin={isAdmin} />}
-          <VipsCard c={cluster.data} isAdmin={isAdmin} />
-          <ClusterDatabaseCard c={cluster.data} isAdmin={isAdmin} />
-          {cluster.data.template_name?.startsWith("eigen-") && <ConnectionCard clusterId={id} isAdmin={isAdmin} />}
-          <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
-          <FailoverCard clusterId={id} isAdmin={isAdmin} />
-          <DisasterCard clusterId={id} isAdmin={isAdmin} />
-          <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
-          <ClusterDocsCard clusterId={id} />
-          {(jobs.data?.length ?? 0) > 0 && (
-            <Card title="Taken">
-              <JobList jobs={jobs.data!} />
-            </Card>
-          )}
-          {cluster.data.nodes.some((n) => n.agent) && (
-            <MetricsPanels
-              kind="cluster"
-              id={id}
-              actions={
-                <GrafanaButton
-                  href={grafanaLink(info.data?.grafana_cluster_url ?? "", {
-                    cluster: cluster.data.slug,
-                    cluster_id: cluster.data.id,
-                    env: cluster.data.environment,
-                  })}
+          <TileGrid>
+            <Tile wide>
+              <NodesCard c={cluster.data} isAdmin={isAdmin} />
+            </Tile>
+            {!editing && (
+              <Tile>
+                <Info c={cluster.data} />
+              </Tile>
+            )}
+            <Tile>
+              <ClusterRiskCard clusterId={id} isAdmin={isAdmin} />
+            </Tile>
+            <Tile wide>
+              <RecentChangesCard kind="cluster" id={id} />
+            </Tile>
+            <Tile>
+              <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
+              <ClusterAppsCard clusterId={id} />
+            </Tile>
+            {cluster.data.template_name && (
+              <Tile>
+                <SpecCard cluster={cluster.data} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            {cluster.data.template_name && (
+              <Tile>
+                <GitCard c={cluster.data} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            <Tile wide>
+              <VipsCard c={cluster.data} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
+              <ClusterDatabaseCard c={cluster.data} isAdmin={isAdmin} />
+            </Tile>
+            {cluster.data.template_name?.startsWith("eigen-") && (
+              <Tile>
+                <ConnectionCard clusterId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            <Tile>
+              <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
+              <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
+              <FailoverCard clusterId={id} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
+              <DisasterCard clusterId={id} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
+              <ClusterDocsCard clusterId={id} />
+            </Tile>
+            {(jobs.data?.length ?? 0) > 0 && (
+              <Tile wide>
+                <Card title="Taken">
+                  <JobList jobs={jobs.data!} />
+                </Card>
+              </Tile>
+            )}
+            <Tile wide>
+              <HistoryCard filter={{ cluster: id }} isAdmin={isAdmin} />
+            </Tile>
+            {cluster.data.nodes.some((n) => n.agent) && (
+              <Tile wide tall>
+                <MetricsPanels
+                  kind="cluster"
+                  id={id}
+                  actions={
+                    <GrafanaButton
+                      href={grafanaLink(info.data?.grafana_cluster_url ?? "", {
+                        cluster: cluster.data.slug,
+                        cluster_id: cluster.data.id,
+                        env: cluster.data.environment,
+                      })}
+                    />
+                  }
                 />
-              }
-            />
-          )}
-          <HistoryCard filter={{ cluster: id }} isAdmin={isAdmin} />
+              </Tile>
+            )}
+          </TileGrid>
         </div>
       )}
     </QueryState>
@@ -230,7 +278,7 @@ function Info({ c }: { c: ClusterDetail }) {
     ["Laatst gewijzigd", fmt.format(new Date(c.updated_at))],
   ];
   return (
-    <Card>
+    <Card title="Over dit cluster">
       <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]">
         {rows.map(([k, v]) => (
           <div key={k} className="contents">

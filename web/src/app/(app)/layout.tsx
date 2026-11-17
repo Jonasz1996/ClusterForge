@@ -186,9 +186,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
-        {/* De graaf van Afhankelijkheden krijgt de volle breedte. */}
+        {/* De graaf van Afhankelijkheden krijgt de volle breedte; een pagina
+            met vensters (fase 30) ook bijna. */}
         <main
-          className={`mx-auto w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 print:max-w-none print:p-0 ${
+          className={`mx-auto w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 has-[.cf-tilegrid]:max-w-[110rem] print:max-w-none print:p-0 ${
             pathname.startsWith("/afhankelijkheden")
               ? "max-w-[100rem]"
               : pathname.startsWith("/documentatie") || pathname.startsWith("/rapporten") || pathname.startsWith("/logs")
