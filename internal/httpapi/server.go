@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Jonasz1996/clusterforge/internal/agentconf"
 	"github.com/Jonasz1996/clusterforge/internal/agentdist"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
@@ -99,6 +100,7 @@ type Server struct {
 	lessons      *kubelessons.Engine
 	version      string
 	upgrades     *agentupgrade.Service
+	agentConf    *agentconf.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	soc          *soc.Service
@@ -181,6 +183,8 @@ type Deps struct {
 	Components *components.Service
 	// Upgrades werkt de agents bij.
 	Upgrades *agentupgrade.Service
+	// AgentConf bepaalt het adres voor agents en zet agents om.
+	AgentConf *agentconf.Service
 	// Updates en Commands werken de nodes bij en draaien eigen commando's
 	// (fase 10).
 	Updates  *updates.Service
@@ -208,42 +212,43 @@ func New(d Deps) *Server {
 	inv := inventory.NewService(d.Pool, ev)
 	inv.Disconnect = d.Bus.Disconnect
 	s := &Server{
-		cfg:      d.Config,
-		log:      d.Log,
-		pool:     d.Pool,
-		q:        store.New(d.Pool),
-		ev:       ev,
-		auth:     d.Auth,
-		audit:    audit.NewService(store.New(d.Pool)),
-		inv:      inv,
-		agents:   agents.NewService(d.Pool, ev, d.Bus),
-		bus:      d.Bus,
-		hub:      d.Hub,
-		metrics:  metrics.NewClient(d.Config.VictoriaMetricsURL),
-		pve:      d.Proxmox,
-		jobs:     d.Jobs,
-		life:     d.Lifecycle,
-		deploy:   d.Deploy,
-		backups:  d.Backups,
-		drift:    d.Drift,
-		failover: d.Failover,
-		disaster: d.Disaster,
-		deps:     d.Deps,
-		rollout:  d.Rollout,
-		git:      d.GitOps,
-		version:  d.Version,
-		upgrades: d.Upgrades,
-		updates:  d.Updates,
-		commands: d.Commands,
-		crowdsec: d.CrowdSec,
-		soc:      d.SOC,
-		stacks:   d.Stacks,
-		logs:     d.Logs,
-		firewall: d.Firewall,
-		security: d.Security,
-		pvehosts: d.PVEHosts,
-		docker:   d.Docker,
-		recipes:  recipes.NewService(d.Pool, ev),
+		cfg:       d.Config,
+		log:       d.Log,
+		pool:      d.Pool,
+		q:         store.New(d.Pool),
+		ev:        ev,
+		auth:      d.Auth,
+		audit:     audit.NewService(store.New(d.Pool)),
+		inv:       inv,
+		agents:    agents.NewService(d.Pool, ev, d.Bus),
+		bus:       d.Bus,
+		hub:       d.Hub,
+		metrics:   metrics.NewClient(d.Config.VictoriaMetricsURL),
+		pve:       d.Proxmox,
+		jobs:      d.Jobs,
+		life:      d.Lifecycle,
+		deploy:    d.Deploy,
+		backups:   d.Backups,
+		drift:     d.Drift,
+		failover:  d.Failover,
+		disaster:  d.Disaster,
+		deps:      d.Deps,
+		rollout:   d.Rollout,
+		git:       d.GitOps,
+		version:   d.Version,
+		upgrades:  d.Upgrades,
+		agentConf: d.AgentConf,
+		updates:   d.Updates,
+		commands:  d.Commands,
+		crowdsec:  d.CrowdSec,
+		soc:       d.SOC,
+		stacks:    d.Stacks,
+		logs:      d.Logs,
+		firewall:  d.Firewall,
+		security:  d.Security,
+		pvehosts:  d.PVEHosts,
+		docker:    d.Docker,
+		recipes:   recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
 		loginTimeout:   20 * time.Second,

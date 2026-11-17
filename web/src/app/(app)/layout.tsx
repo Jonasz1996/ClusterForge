@@ -16,6 +16,7 @@ import { useLiveUpdates } from "@/lib/live";
 import { titleFor } from "@/lib/nav";
 import { useTheme, type Theme } from "@/lib/theme";
 import { useReloadOnStaleChunks, useServerUpdated } from "@/lib/version";
+import { useAgentEndpoints } from "@/lib/agentEndpoints";
 
 const themeNext: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
 const themeLabel: Record<Theme, string> = { system: "Thema: zoals het systeem", light: "Thema: licht", dark: "Thema: donker" };
@@ -23,6 +24,8 @@ const themeIcon: Record<Theme, ReactNode> = { system: <SystemIcon />, light: <Su
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const me = useRequireMe();
+  // Het adres voor agents, voor elk installcommando in de interface.
+  useAgentEndpoints(!!me.data);
   const logout = useLogout();
   const pathname = usePathname();
   useLiveUpdates(!!me.data);

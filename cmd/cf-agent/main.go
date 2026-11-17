@@ -58,6 +58,10 @@ Gebruik:
   cf-agent upgrade-rollback
                      zet de oude agent terug als de nieuwe niet met de server
                      praat; de timer cf-agent-rollback start dit
+  cf-agent reconfigure-rollback
+                     zet het oude agent.json terug als de agent de server op
+                     het nieuwe adres niet bereikt; de timer
+                     cf-agent-reconfig-rollback start dit
   cf-agent version
 `
 
@@ -98,6 +102,8 @@ func main() {
 		err = json.NewEncoder(os.Stdout).Encode(agent.SelfCheckOf(version))
 	case "upgrade-rollback":
 		err = upgradeRollback(os.Args[2:], log)
+	case "reconfigure-rollback":
+		err = reconfigureRollback(os.Args[2:], log)
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -210,6 +216,20 @@ func upgradeRollback(args []string, log *slog.Logger) error {
 	})
 }
 
+// reconfigureRollback zet het oude agent.json terug als de agent de server
+// op het nieuwe adres niet bereikte.
+func reconfigureRollback(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("reconfigure-rollback", flag.ExitOnError)
+	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt; de herconfiguratie-status staat ernaast")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return agent.RollbackReconfigure(ctx, *config, *statePath, log, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	})
+}
+
 func enroll(args []string) error {
 	fl := flag.NewFlagSet("enroll", flag.ExitOnError)
 	server := fl.String("server", "", "URL van ClusterForge, bijvoorbeeld https://clusterforge.example")
@@ -269,7 +289,7 @@ func run(args []string, log *slog.Logger) error {
 		return err
 	}
 
-	a := &agent.Agent{Config: c, Version: version, Log: log, StatePath: *statePath}
+	a := &agent.Agent{Config: c, Version: version, Log: log, StatePath: *statePath, ConfigPath: *config}
 	log.Info("cf-agent gestart", "version", version, "node", c.NodeID, "nats", c.NatsURL)
 	return a.Run(ctx)
 }

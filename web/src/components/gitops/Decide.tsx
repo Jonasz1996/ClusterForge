@@ -7,6 +7,7 @@ import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfir
 import { Alert, Badge, Button, Field, Textarea } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import { shortSha, useApproveGitChange, useReapplyCluster, useRejectGitChange, type GitChangeDetail } from "@/lib/gitops";
+import { agentServerURL } from "@/lib/agentEndpoints";
 
 // errorText geeft de melding van de server, met een hint als het plan
 // intussen verviel.
@@ -211,7 +212,7 @@ export function ReapplyDialog({
             onClick={() =>
               reapply.mutate(
                 // Zonder Git melden nieuwe nodes zich aan op het adres van deze pagina.
-                { confirm: prod ? confirm : undefined, serverUrl: gitManaged ? undefined : window.location.origin },
+                { confirm: prod ? confirm : undefined, serverUrl: gitManaged ? undefined : agentServerURL() },
                 { onSuccess: (j) => router.push(`/taken/detail?id=${j.id}`) },
               )
             }

@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Field, Input } from "@/components/ui";
 import { useProbeGitRepo, type GitRepo, type GitRepoInput } from "@/lib/gitops";
 import { CommitLine } from "./bits";
+import { agentServerURL } from "@/lib/agentEndpoints";
 
 // RepoForm koppelt een repository of wijzigt de koppeling. Een leeg token
 // laat het opgeslagen token staan; het komt nooit terug uit de server.
@@ -23,7 +24,7 @@ export function RepoForm({
   const [apiUrl, setApiUrl] = useState(initial?.api_url ?? "");
   // Het adres van deze pagina is meestal ook wat nieuwe nodes bereiken.
   const [serverUrl, setServerUrl] = useState(
-    initial?.server_url || (typeof window === "undefined" ? "" : window.location.origin),
+    initial?.server_url || (typeof window === "undefined" ? "" : agentServerURL()),
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

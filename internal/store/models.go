@@ -362,18 +362,29 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 }
 
 type Agent struct {
-	ID                uuid.UUID
-	NodeID            uuid.UUID
-	NkeyPublic        string
-	MachineID         string
-	Version           string
-	ProtocolVersion   int32
-	EnrolledAt        time.Time
-	LastSeenAt        *time.Time
-	RevokedAt         *time.Time
-	Arch              string
-	BinarySha256      string
-	UpgradeRolledBack string
+	ID                    uuid.UUID
+	NodeID                uuid.UUID
+	NkeyPublic            string
+	MachineID             string
+	Version               string
+	ProtocolVersion       int32
+	EnrolledAt            time.Time
+	LastSeenAt            *time.Time
+	RevokedAt             *time.Time
+	Arch                  string
+	BinarySha256          string
+	UpgradeRolledBack     string
+	ServerUrl             string
+	NatsUrl               string
+	ReconfigureRolledBack string
+}
+
+type AgentEndpointSetting struct {
+	ID        uuid.UUID
+	ServerUrl string
+	NatsUrl   string
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
 }
 
 type AgentUpgradeOff struct {
