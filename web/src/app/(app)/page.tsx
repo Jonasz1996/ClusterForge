@@ -32,6 +32,14 @@ export default function OverviewPage() {
 
       <AttentionCard />
 
+      <p className="-mt-3 text-sm text-slate-500">
+        Nieuw hier, of weet je niet waar te beginnen?{" "}
+        <Link href="/aan-de-slag" className="text-brand-700 hover:underline dark:text-sky-300">
+          Aan de slag
+        </Link>{" "}
+        zet de gewone taken stap voor stap op een rij.
+      </p>
+
       <SocStrip />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
