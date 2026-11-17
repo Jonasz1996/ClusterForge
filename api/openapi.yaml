@@ -5460,6 +5460,152 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /publish/settings:
+    get:
+      operationId: getPublishSettings
+      summary: Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: savePublishSettings
+      summary: Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/test/{what}:
+    parameters:
+      - { name: what, in: path, required: true, schema: { type: string, enum: [npm, authentik] } }
+    post:
+      operationId: testPublishLink
+      summary: De koppeling met NPM of Authentik proberen via de agent (admin)
+      responses:
+        "200":
+          description: Wat de agent zag
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /publish/overview:
+    get:
+      operationId: getPublishOverview
+      summary: Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/refresh:
+    post:
+      operationId: refreshPublish
+      summary: Diensten, NPM en Authentik nu opnieuw lezen (admin)
+      responses:
+        "200":
+          description: Het nieuwe overzicht
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/plan:
+    post:
+      operationId: planPublish
+      summary: Wat een actie zou doen, zonder iets te veranderen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/actions:
+    post:
+      operationId: startPublish
+      summary: Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt, met het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /publish/adopt:
+    post:
+      operationId: adoptPublishHosts
+      summary: Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Aantal overgenomen hosts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/hosts/{hostId}/accept:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: acceptPublishDrift
+      summary: Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+      responses:
+        "204": { description: Aanvaard }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/hosts/{hostId}/release:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: releasePublishHost
+      summary: Een host niet langer beheren; hij blijft in NPM staan (admin)
+      responses:
+        "204": { description: Losgelaten }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters

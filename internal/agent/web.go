@@ -624,6 +624,9 @@ func (a *Agent) findNPM(ctx context.Context) (npmInstance, error) {
 // sqliteBackup maakt met sqlite3 .backup een consistente kopie, ook terwijl
 // NPM schrijft, en controleert die.
 func (a *Agent) sqliteBackup(ctx context.Context, db, dst string) error {
+	if err := a.ensureSQLite(ctx); err != nil {
+		return err
+	}
 	if out, err := a.exec(ctx, "sqlite3", db, ".backup '"+dst+"'"); err != nil {
 		if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "executable file not found") {
 			return errors.New("sqlite3 ontbreekt op deze node (apt install sqlite3)")
@@ -631,6 +634,19 @@ func (a *Agent) sqliteBackup(ctx context.Context, db, dst string) error {
 		return fmt.Errorf("sqlite3 .backup: %s", webFirst(out, err))
 	}
 	return a.sqliteIntegrity(ctx, dst)
+}
+
+// ensureSQLite installeert sqlite3 als het ontbreekt, zodat Jonas niets
+// met de hand op de NPM-nodes hoeft te zetten.
+func (a *Agent) ensureSQLite(ctx context.Context) error {
+	if _, err := a.exec(ctx, "sqlite3", "-version"); err == nil {
+		return nil
+	}
+	_, _, err := a.applyPackage(ctx, &protocol.PackageStep{Names: []string{"sqlite3"}, State: "present"})
+	if err != nil {
+		return fmt.Errorf("sqlite3 ontbreekt en installeren lukte niet: %w", err)
+	}
+	return nil
 }
 
 func (a *Agent) sqliteIntegrity(ctx context.Context, db string) error {

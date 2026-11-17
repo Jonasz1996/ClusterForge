@@ -3,7 +3,6 @@ package publish
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -434,5 +433,3 @@ func pickCert(certs []NPMCert, name string, now time.Time) *NPMCert {
 	}
 	return best
 }
-
-var errNoNPM = errors.New("NPM is niet gekoppeld")

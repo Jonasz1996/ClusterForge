@@ -50,6 +50,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
@@ -117,6 +118,7 @@ type Server struct {
 	pvehosts     *pvehost.Service
 	pbs          *pbs.Service
 	opnsense     *opnsense.Service
+	publish      *publish.Service
 	docker       *dockerhost.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
@@ -218,6 +220,8 @@ type Deps struct {
 	PBS *pbs.Service
 	// OPNsense beheert de OPNsense-firewalls (fase 34).
 	OPNsense *opnsense.Service
+	// Publish beheert NPM en Authentik (fase 35).
+	Publish *publish.Service
 	// Docker is Docker zoals Portainer (fase 28).
 	Docker  *dockerhost.Service
 	Version string
@@ -267,6 +271,7 @@ func New(d Deps) *Server {
 		pvehosts:     d.PVEHosts,
 		pbs:          d.PBS,
 		opnsense:     d.OPNsense,
+		publish:      d.Publish,
 		docker:       d.Docker,
 		recipes:      recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.

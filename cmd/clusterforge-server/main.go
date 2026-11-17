@@ -67,6 +67,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
@@ -273,6 +274,8 @@ func serve() error {
 	pbsSvc := pbs.NewService(pool, ev, log, runner, bus)
 	pbsSvc.Box, pbsSvc.Hosts = box, pvh
 	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
+	pub := publish.NewService(pool, ev, log, runner, bus, box)
+	pub.Sync = crons
 	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
@@ -460,6 +463,7 @@ func serve() error {
 	goLoop(ctx, log, "crowdsec", csec.Loop)
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
 	goLoop(ctx, log, "opnsense", opnSvc.Loop)
+	goLoop(ctx, log, "publish", pub.Loop)
 	goLoop(ctx, log, "zabbixmon", zbm.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)
@@ -483,7 +487,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, OPNsense: opnSvc, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

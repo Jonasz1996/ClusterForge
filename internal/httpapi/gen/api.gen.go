@@ -15709,6 +15709,18 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
 
+// StartPublishJSONRequestBody defines body for StartPublish for application/json ContentType.
+type StartPublishJSONRequestBody = PveObject
+
+// AdoptPublishHostsJSONRequestBody defines body for AdoptPublishHosts for application/json ContentType.
+type AdoptPublishHostsJSONRequestBody = PveObject
+
+// PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
+type PlanPublishJSONRequestBody = PveObject
+
+// SavePublishSettingsJSONRequestBody defines body for SavePublishSettings for application/json ContentType.
+type SavePublishSettingsJSONRequestBody = PveObject
+
 // StartPveHostActionJSONRequestBody defines body for StartPveHostAction for application/json ContentType.
 type StartPveHostActionJSONRequestBody = PveActionInput
 
@@ -16776,6 +16788,36 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// StartPublish Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+	// (POST /publish/actions)
+	StartPublish(w http.ResponseWriter, r *http.Request)
+	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+	// (POST /publish/adopt)
+	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+	// (POST /publish/hosts/{hostId}/accept)
+	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
+	// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
+	// (POST /publish/hosts/{hostId}/release)
+	ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int)
+	// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+	// (GET /publish/overview)
+	GetPublishOverview(w http.ResponseWriter, r *http.Request)
+	// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
+	// (POST /publish/plan)
+	PlanPublish(w http.ResponseWriter, r *http.Request)
+	// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
+	// (POST /publish/refresh)
+	RefreshPublish(w http.ResponseWriter, r *http.Request)
+	// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+	// (GET /publish/settings)
+	GetPublishSettings(w http.ResponseWriter, r *http.Request)
+	// SavePublishSettings Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+	// (PUT /publish/settings)
+	SavePublishSettings(w http.ResponseWriter, r *http.Request)
+	// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
+	// (POST /publish/test/{what})
+	TestPublishLink(w http.ResponseWriter, r *http.Request, what string)
 	// ListPveHosts Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
 	// (GET /pve-hosts)
 	ListPveHosts(w http.ResponseWriter, r *http.Request)
@@ -18993,6 +19035,66 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPublish Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+// (POST /publish/actions)
+func (_ Unimplemented) StartPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+// (POST /publish/adopt)
+func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+// (POST /publish/hosts/{hostId}/accept)
+func (_ Unimplemented) AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
+// (POST /publish/hosts/{hostId}/release)
+func (_ Unimplemented) ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+// (GET /publish/overview)
+func (_ Unimplemented) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
+// (POST /publish/plan)
+func (_ Unimplemented) PlanPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
+// (POST /publish/refresh)
+func (_ Unimplemented) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+// (GET /publish/settings)
+func (_ Unimplemented) GetPublishSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishSettings Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+// (PUT /publish/settings)
+func (_ Unimplemented) SavePublishSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
+// (POST /publish/test/{what})
+func (_ Unimplemented) TestPublishLink(w http.ResponseWriter, r *http.Request, what string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -29032,6 +29134,182 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// StartPublish operation middleware
+func (siw *ServerInterfaceWrapper) StartPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdoptPublishHosts operation middleware
+func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdoptPublishHosts(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptPublishDrift operation middleware
+func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptPublishDrift(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleasePublishHost operation middleware
+func (siw *ServerInterfaceWrapper) ReleasePublishHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleasePublishHost(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishOverview(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanPublish operation middleware
+func (siw *ServerInterfaceWrapper) PlanPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshPublish operation middleware
+func (siw *ServerInterfaceWrapper) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishSettings operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestPublishLink operation middleware
+func (siw *ServerInterfaceWrapper) TestPublishLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "what" -------------
+	var what string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "what", chi.URLParam(r, "what"), &what, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "what", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestPublishLink(w, r, what)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPveHosts operation middleware
 func (siw *ServerInterfaceWrapper) ListPveHosts(w http.ResponseWriter, r *http.Request) {
 
@@ -32342,6 +32620,36 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/opnsense/backups/{backupId}/download", wrapper.DownloadOpnsenseBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/settings", wrapper.GetPublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/settings", wrapper.SavePublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/test/{what}", wrapper.TestPublishLink)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/overview", wrapper.GetPublishOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/refresh", wrapper.RefreshPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/plan", wrapper.PlanPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/actions", wrapper.StartPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/adopt", wrapper.AdoptPublishHosts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/hosts/{hostId}/accept", wrapper.AcceptPublishDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/hosts/{hostId}/release", wrapper.ReleasePublishHost)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

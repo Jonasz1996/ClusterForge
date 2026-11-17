@@ -3,7 +3,6 @@ package publish
 import (
 	"context"
 	"fmt"
-	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
@@ -173,9 +172,4 @@ func (s *Service) npmNode(ctx context.Context, st Settings) (nodeRow, error) {
 		return nodeRow{}, invalid("NPM: geen enkele node van het cluster heeft nu het VIP; NPM draait alleen op de VIP-node")
 	}
 	return n, nil
-}
-
-func isIP(s string) bool {
-	_, err := netip.ParseAddr(s)
-	return err == nil
 }
