@@ -312,8 +312,9 @@ func TestRealNPM(t *testing.T) {
 	}
 
 	// 2. Een doel waar niets draait: de controle faalt en de host gaat terug.
-	closed := listenAll(t, http.NotFoundHandler())
-	logText := run(Action{Action: ActUpdate, HostID: id, ForwardPort: closed + 1}, store.JobStatusFailed)
+	// Een poort die net vrijkwam; closed+1 kan op een runner wel bezet zijn.
+	closed, _ := strconv.Atoi(freePort(t))
+	logText := run(Action{Action: ActUpdate, HostID: id, ForwardPort: closed}, store.JobStatusFailed)
 	if !strings.Contains(logText, "HTTP 502") || !strings.Contains(logText, "terug naar de vorige waarden") {
 		t.Fatalf("terugdraaien niet gezien:\n%s", logText)
 	}
