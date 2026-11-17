@@ -89,7 +89,7 @@ func (c Config) Validate() error {
 
 // scriptVersion verandert als het script iets anders gaat doen, zodat elke
 // node het opnieuw krijgt.
-const scriptVersion = "1"
+const scriptVersion = "2"
 
 // Script installeert zabbix-agent2 uit de repository van Zabbix, schrijft
 // de config en de PSK, zet de Docker-plugin aan waar Docker draait en
@@ -101,19 +101,21 @@ func Script(c Config, psk string) string {
 set -euo pipefail
 trap 'rm -f "$0"' EXIT
 export DEBIAN_FRONTEND=noninteractive
-VERSION=%s
+ZBX_VERSION=%s
 APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=600)
 
-. /etc/os-release
-case "${ID:-}" in
+# os-release in een subshell: het zet zelf VERSION en andere namen.
+ID=$(. /etc/os-release && echo "${ID:-}")
+VERSION_ID=$(. /etc/os-release && echo "${VERSION_ID:-}")
+case "$ID" in
   debian|ubuntu) ;;
   *) echo "zabbix-agent2 via ClusterForge kan alleen op Debian of Ubuntu (dit is ${ID:-onbekend})"; exit 1 ;;
 esac
 
-if ! grep -rqs "zabbix/${VERSION}/" /etc/apt/sources.list.d/; then
-  deb="zabbix-release_latest_${VERSION}+${ID}${VERSION_ID}_all.deb"
-  url="https://repo.zabbix.com/zabbix/${VERSION}/release/${ID}/pool/main/z/zabbix-release/${deb}"
-  echo "Repository van Zabbix ${VERSION} toevoegen ($deb)"
+if ! grep -rqs "zabbix/${ZBX_VERSION}/" /etc/apt/sources.list.d/; then
+  deb="zabbix-release_latest_${ZBX_VERSION}+${ID}${VERSION_ID}_all.deb"
+  url="https://repo.zabbix.com/zabbix/${ZBX_VERSION}/release/${ID}/pool/main/z/zabbix-release/${deb}"
+  echo "Repository van Zabbix ${ZBX_VERSION} toevoegen ($deb)"
   tmp=$(mktemp -d)
   if command -v curl >/dev/null; then curl -fsSL -o "$tmp/$deb" "$url"; else wget -q -O "$tmp/$deb" "$url"; fi
   dpkg -i "$tmp/$deb"

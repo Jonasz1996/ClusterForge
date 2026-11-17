@@ -38,8 +38,8 @@ func TestScript(t *testing.T) {
 	psk := strings.Repeat("ab", 32)
 	s := Script(c, psk)
 	for _, want := range []string{
-		"Server=192.168.199.14\n", "Hostname=docker-trippel1\n", "TLSPSKIdentity=cf-docker-trippel1\n", "VERSION=8.0\n",
-		"\n" + psk + "\nCFPSK\n", "zabbix-release_latest_${VERSION}+${ID}${VERSION_ID}_all.deb", "Plugins.Docker.Endpoint",
+		"Server=192.168.199.14\n", "Hostname=docker-trippel1\n", "TLSPSKIdentity=cf-docker-trippel1\n", "ZBX_VERSION=8.0\n",
+		"\n" + psk + "\nCFPSK\n", "zabbix-release_latest_${ZBX_VERSION}+${ID}${VERSION_ID}_all.deb", "Plugins.Docker.Endpoint",
 		"trap 'rm -f \"$0\"' EXIT",
 	} {
 		if !strings.Contains(s, want) {
@@ -334,5 +334,27 @@ func TestServiceFlow(t *testing.T) {
 	}
 	if n, _ := s.Node(ctx, b); n.ApplyRunning || !n.Pending {
 		t.Errorf("niet beheerde node: %+v", n)
+	}
+}
+
+// Het script leest /etc/os-release, dat zelf VERSION zet ("13 (trixie)"):
+// de versie van Zabbix mag daar niet door overschreven worden.
+func TestScriptKeepsZabbixVersion(t *testing.T) {
+	if _, err := os.Stat("/etc/os-release"); err != nil {
+		t.Skip("geen /etc/os-release")
+	}
+	s := Script(testConfig(), strings.Repeat("ab", 32))
+	head := s[:strings.Index(s, "case \"$ID\" in")]
+	head = strings.Replace(head, "trap 'rm -f \"$0\"' EXIT\n", "", 1)
+	f := filepath.Join(t.TempDir(), "s.sh")
+	if err := os.WriteFile(f, []byte(head+"echo \"$ZBX_VERSION|$ID|$VERSION_ID\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("bash", f).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if !strings.HasPrefix(string(out), "8.0|") {
+		t.Errorf("uitvoer %q", out)
 	}
 }
