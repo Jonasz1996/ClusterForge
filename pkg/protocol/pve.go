@@ -221,6 +221,12 @@ type PVERun struct {
 	Scrub  *PVEScrub `json:"scrub,omitempty"`
 	// Enable bij maintenance: true zet de host in onderhoud.
 	Enable bool `json:"enable,omitempty"`
+
+	// Vanaf OPNsenseSince: OPN bij opn_api, Change bij opn_confirm en
+	// opn_rollback, OPNKey bij opn_key.
+	OPN    *OPNChange   `json:"opn,omitempty"`
+	Change string       `json:"change,omitempty"`
+	OPNKey *OPNKeyInput `json:"opn_key,omitempty"`
 }
 
 // PVESetting zijn de instellingen van set; nil laat staan.
@@ -473,7 +479,8 @@ func (p PVERun) Validate() error {
 		if t.Match != "" && !pveMatch.MatchString(t.Match) {
 			return fmt.Errorf("ongeldig begin van een naam %q", t.Match)
 		}
-	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI:
+	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI,
+		OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey:
 		return p.validateHost()
 	case PVEBootstrap:
 		b := p.Bootstrap

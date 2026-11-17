@@ -58,6 +58,8 @@ func isHostAction(a string) bool {
 	switch a {
 	case PVETemplate, PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI:
 		return true
+	case OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey:
+		return true
 	}
 	return false
 }
@@ -209,6 +211,18 @@ func (p PVERun) validateHost() error {
 			return fmt.Errorf("pbs_api zonder aanroep")
 		}
 		return p.API.ValidatePBS()
+	case OPNAPI:
+		return p.OPN.Validate()
+	case OPNConfirm, OPNRollback:
+		if !ValidOPNChangeID(p.Change) {
+			return fmt.Errorf("ongeldig nummer van de wijziging")
+		}
+	case OPNHASync:
+	case OPNKey:
+		k := p.OPNKey
+		if k == nil || !opnKeyPart.MatchString(k.Key) || !opnKeyPart.MatchString(k.Secret) {
+			return fmt.Errorf("ongeldige API-sleutel of geheim")
+		}
 	}
 	return nil
 }

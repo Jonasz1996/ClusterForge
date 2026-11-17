@@ -107,6 +107,9 @@ func (a *Agent) startRun(ctx context.Context, id string) error {
 	if a.StartRun != nil {
 		return a.StartRun(ctx, id)
 	}
+	if hostOS == "freebsd" {
+		return bsdStartDetached(ctx, a.exec, runUnit(id), protocol.VerifyPath, "run-exec", id)
+	}
 	out, err := a.exec(ctx, "systemd-run", "--unit", runUnit(id), "--collect", "--quiet",
 		"--description", "ClusterForge-run "+id,
 		"--property", "KillMode=mixed", "--property", "TimeoutStopSec=15",
@@ -177,6 +180,9 @@ func (a *Agent) runPoll(ctx context.Context, id string, offset int64) protocol.R
 
 // runActive is true als de unit van de run nog bestaat.
 func (a *Agent) runActive(ctx context.Context, id string) bool {
+	if hostOS == "freebsd" {
+		return oneShotActive(ctx, a.exec, runUnit(id))
+	}
 	out, _ := a.exec(ctx, "systemctl", "is-active", runUnit(id))
 	switch strings.TrimSpace(string(out)) {
 	case "active", "activating", "deactivating", "reloading":
@@ -193,6 +199,12 @@ func (a *Agent) runStop(ctx context.Context, id string) protocol.RunResponse {
 	}
 	if a.StopRun != nil {
 		if err := a.StopRun(ctx, id); err != nil {
+			return protocol.RunResponse{Error: err.Error()}
+		}
+		return a.runPoll(ctx, id, 0)
+	}
+	if hostOS == "freebsd" {
+		if err := bsdStopDetached(ctx, a.exec, runUnit(id)); err != nil && a.runActive(ctx, id) {
 			return protocol.RunResponse{Error: err.Error()}
 		}
 		return a.runPoll(ctx, id, 0)
