@@ -17,6 +17,7 @@ import { useIsAdmin } from "@/lib/inventory";
 import { useTheme, type Theme } from "@/lib/theme";
 import { AgentEndpointsCard } from "@/components/settings/AgentEndpointsCard";
 import { PublishSettingsCard } from "@/components/settings/PublishSettingsCard";
+import { DiskWatchSettingsCard } from "@/components/settings/DiskWatchSettingsCard";
 
 const sections: { id: string; label: string }[] = [
   { id: "tweestap", label: "Tweestapsverificatie" },
@@ -27,6 +28,7 @@ const sections: { id: string; label: string }[] = [
   { id: "documentatie-github", label: "Documentatie naar GitHub" },
   { id: "locatie", label: "Locatie van ClusterForge" },
   { id: "agents-bijwerken", label: "Agents bijwerken" },
+  { id: "schijfbewaking", label: "Schijfbewaking" },
   { id: "dashboard-api", label: "Dashboard-API" },
   { id: "publicatie", label: "Domeinen en publicatie" },
 ];
@@ -85,6 +87,11 @@ export default function SettingsPage() {
         <Tile>
           <div id="agents-bijwerken" className="scroll-mt-20">
             <AgentUpgradeSettingsCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="schijfbewaking" className="scroll-mt-20">
+            <DiskWatchSettingsCard isAdmin={isAdmin} />
           </div>
         </Tile>
         <Tile>

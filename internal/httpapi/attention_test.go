@@ -56,4 +56,45 @@ func TestAttention(t *testing.T) {
 	if b := a.Badges["/clusters"]; b.Count != 2 || b.Tone != "red" {
 		t.Fatalf("badge clusters: %+v", b)
 	}
+
+	// Schijfbewaking (fase 41): 85 % is let op, 93 % ernstig, met uitleg.
+	// De badge van Nodes telt ook de drie agents zonder recente hartslag.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO nodes (hostname) VALUES ('ai1'), ('ai2'), ('ai3')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO agents (id, node_id, nkey_public) SELECT gen_random_uuid(), id, 'U' || hostname FROM nodes WHERE hostname LIKE 'ai%'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO node_status (node_id, heartbeat_at, disk_used_ratio, disk_used_mount)
+		SELECT id, now(), CASE hostname WHEN 'ai1' THEN 0.85 WHEN 'ai2' THEN 0.93 ELSE 0.79 END, '/' FROM nodes WHERE hostname LIKE 'ai%'`); err != nil {
+		t.Fatal(err)
+	}
+	var full struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Tone   string `json:"tone"`
+			Detail string `json:"detail"`
+			Href   string `json:"href"`
+			Help   string `json:"help"`
+		} `json:"items"`
+		Badges map[string]struct {
+			Count int `json:"count"`
+		} `json:"badges"`
+	}
+	c.do("GET", "/api/v1/attention", nil, &full)
+	seen := map[string]bool{}
+	for _, it := range full.Items {
+		if it.Help == "" {
+			t.Errorf("geen uitleg bij %s", it.ID)
+		}
+		switch it.ID {
+		case "disk-warn":
+			seen[it.ID] = it.Tone == "amber" && it.Detail == "ai1 (/ 85 %)"
+		case "disk-crit":
+			seen[it.ID] = it.Tone == "red" && it.Detail == "ai2 (/ 93 %)"
+		}
+	}
+	if !seen["disk-warn"] || !seen["disk-crit"] || full.Badges["/nodes"].Count != 5 {
+		t.Fatalf("schijfmeldingen: %+v", full)
+	}
 }

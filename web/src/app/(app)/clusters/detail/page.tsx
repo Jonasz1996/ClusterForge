@@ -421,7 +421,12 @@ function NodesCard({ c, isAdmin: admin }: { c: ClusterDetail; isAdmin: boolean }
                           variant="ghost"
                           className="px-2 py-1 text-xs"
                           onClick={async () => {
-                            if (await askConfirm(`${n.hostname} uit dit cluster halen? De node zelf blijft bestaan.`))
+                            if (
+                              await askConfirm(`${n.hostname} uit dit cluster halen? De node zelf blijft bestaan.`, {
+                                what: "De node telt niet meer mee voor dit cluster en ClusterForge verwacht er geen clusterdiensten meer op. De machine en wat erop draait, blijven ongewijzigd.",
+                                undo: "Ja: open de node, klik Bewerken en kies het cluster opnieuw.",
+                              })
+                            )
                               void updateNode.mutateAsync({ id: n.id, body: { cluster_id: null } });
                           }}
                         >
@@ -534,7 +539,12 @@ function VipRow({ v, isAdmin }: { v: Vip; isAdmin: boolean }) {
             variant="ghost"
             className="px-2 py-1 text-xs text-red-600!"
             onClick={async () => {
-              if (await askConfirm(`VIP ${v.address} verwijderen?`)) void remove.mutateAsync(v.id);
+              if (
+                await askConfirm(`VIP ${v.address} verwijderen?`, {
+                  what: "Keepalived zet dit gedeelde adres niet meer op de nodes. Wie dit adres gebruikt (gebruikers, DNS, de reverse proxy), bereikt de dienst er niet meer.",
+                  undo: "Ja, voeg het VIP opnieuw toe met hetzelfde adres; het staat er dan binnen enkele seconden weer.",
+                })
+              ) void remove.mutateAsync(v.id);
             }}
           >
             Verwijderen

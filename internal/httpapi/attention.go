@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/apps"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
+	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 )
@@ -309,8 +311,41 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Schijfbewaking (fase 41): nodes boven de drempels.
+	if s.disk != nil {
+		if full, err := s.disk.Full(ctx); err == nil {
+			var crit, warn []string
+			var critHref, warnHref string
+			for _, n := range full {
+				label := fmt.Sprintf("%s (%s %.0f %%)", n.Hostname, n.Mount, math.Floor(n.Ratio*100))
+				href := "/nodes/detail?id=" + n.NodeID.String() + "#schijf"
+				if n.Level == diskwatch.LevelCrit {
+					crit, critHref = append(crit, label), href
+				} else {
+					warn, warnHref = append(warn, label), href
+				}
+			}
+			if len(crit) > 1 {
+				critHref = "/nodes"
+			}
+			if len(warn) > 1 {
+				warnHref = "/nodes"
+			}
+			add("disk-crit", red, plural(len(crit), "schijf is", "schijven zijn")+" (bijna) vol", names(crit), critHref, len(crit))
+			add("disk-warn", amber, plural(len(warn), "schijf raakt", "schijven raken")+" vol", names(warn), warnHref, len(warn))
+		} else {
+			s.log.Warn("schijfbewaking", "err", err)
+		}
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
+	}
+
+	for i := range items {
+		if h := helpFor(items[i].Id); h != "" {
+			items[i].Help = &h
+		}
 	}
 
 	// Rood eerst, dan op aantal.
@@ -338,6 +373,9 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		// Een clusterpagina telt bij Clusters.
 		if strings.HasPrefix(href, "/clusters/") {
 			href = "/clusters"
+		}
+		if strings.HasPrefix(href, "/nodes/") {
+			href = "/nodes"
 		}
 		b := badges[href]
 		b.Count += it.Count

@@ -32,6 +32,22 @@ export const navHome: NavItem = {
 
 export const navGroups: NavGroup[] = [
   {
+    id: "hulp",
+    label: "Hulp",
+    items: [
+      {
+        href: "/aan-de-slag",
+        label: "Aan de slag",
+        keywords: "hulp uitleg beginnen wizard stappen hoe leek nieuw help",
+      },
+      {
+        href: "/uitleg",
+        label: "Woordenlijst",
+        keywords: "uitleg begrippen vakterm betekenis wat is vip failover drift quorum",
+      },
+    ],
+  },
+  {
     id: "infra",
     label: "Infrastructuur",
     items: [

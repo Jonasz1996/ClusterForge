@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/disaster"
+	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
 	"github.com/Jonasz1996/clusterforge/internal/dockerhost"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
@@ -110,6 +111,7 @@ type Server struct {
 	agentConf    *agentconf.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
+	disk         *diskwatch.Service
 	zabbixAgents *zabbixagent.Service
 	zabbixMon    *zabbixmon.Service
 	soc          *soc.Service
@@ -208,6 +210,8 @@ type Deps struct {
 	Commands *commands.Service
 	// CrowdSec beheert CrowdSec op de nodes (fase 14).
 	CrowdSec *crowdsec.Service
+	// Disk bewaakt de schijfruimte en ruimt veilig op (fase 41).
+	Disk *diskwatch.Service
 	// ZabbixAgents zet zabbix-agent2 met een eigen PSK op de nodes.
 	ZabbixAgents *zabbixagent.Service
 	// ZabbixMon leest de Zabbix-API voor de dashboards (fase 33).
@@ -272,6 +276,7 @@ func New(d Deps) *Server {
 		updates:      d.Updates,
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
+		disk:         d.Disk,
 		zabbixAgents: d.ZabbixAgents,
 		zabbixMon:    d.ZabbixMon,
 		soc:          d.SOC,

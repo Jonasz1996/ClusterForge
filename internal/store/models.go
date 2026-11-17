@@ -873,6 +873,25 @@ type DisasterScenario struct {
 	NextRunAt *time.Time
 }
 
+type DiskScan struct {
+	NodeID     uuid.UUID
+	JobID      *uuid.UUID
+	RunningJob *uuid.UUID
+	ScannedAt  *time.Time
+	Result     []byte
+	CleanedAt  *time.Time
+	Freed      int64
+	Cleaned    []string
+}
+
+type DiskWatchSetting struct {
+	ID           bool
+	WarnPct      int32
+	CritPct      int32
+	IgnoreMounts []string
+	UpdatedAt    time.Time
+}
+
 type DocSnapshot struct {
 	ID          int64
 	Scope       string

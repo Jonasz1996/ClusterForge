@@ -3030,6 +3030,30 @@ func (e NodeConnOutDest) Valid() bool {
 	}
 }
 
+// Defines values for NodeDiskLevel.
+const (
+	NodeDiskLevelCrit    NodeDiskLevel = "crit"
+	NodeDiskLevelOk      NodeDiskLevel = "ok"
+	NodeDiskLevelUnknown NodeDiskLevel = "unknown"
+	NodeDiskLevelWarn    NodeDiskLevel = "warn"
+)
+
+// Valid indicates whether the value is a known member of the NodeDiskLevel enum.
+func (e NodeDiskLevel) Valid() bool {
+	switch e {
+	case NodeDiskLevelCrit:
+		return true
+	case NodeDiskLevelOk:
+		return true
+	case NodeDiskLevelUnknown:
+		return true
+	case NodeDiskLevelWarn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeLifecycle.
 const (
 	NodeLifecycleActive         NodeLifecycle = "active"
@@ -4905,6 +4929,9 @@ type AttentionItem struct {
 
 	// Detail De betrokken clusters of nodes, kort
 	Detail string `json:"detail"`
+
+	// Help Wat kun je doen, in gewone taal (fase 41)
+	Help *string `json:"help,omitempty"`
 
 	// Href Pagina waar je het oplost
 	Href string `json:"href"`
@@ -8553,6 +8580,58 @@ type DisasterVIPResult struct {
 	Segments []TestRunSegment `json:"segments"`
 }
 
+// DiskScan defines model for DiskScan.
+type DiskScan struct {
+	// Cleaned Wat de laatste opruimbeurt opruimde
+	Cleaned   *[]string  `json:"cleaned,omitempty"`
+	CleanedAt *time.Time `json:"cleaned_at,omitempty"`
+	Dirs      []struct {
+		Bytes int64  `json:"bytes"`
+		Path  string `json:"path"`
+	} `json:"dirs"`
+
+	// Freed Hoeveel de laatste opruimbeurt vrijmaakte
+	Freed  *int64             `json:"freed,omitempty"`
+	Items  []DiskScanItem     `json:"items"`
+	JobId  openapi_types.UUID `json:"job_id"`
+	Mounts []struct {
+		Avail int64  `json:"avail"`
+		Mount string `json:"mount"`
+		Size  int64  `json:"size"`
+		Used  int64  `json:"used"`
+	} `json:"mounts"`
+	ScannedAt time.Time `json:"scanned_at"`
+}
+
+// DiskScanItem defines model for DiskScanItem.
+type DiskScanItem struct {
+	// Bytes Hoeveel opruimen ongeveer vrijmaakt
+	Bytes int64 `json:"bytes"`
+
+	// Default Staat standaard aangevinkt
+	Default bool `json:"default"`
+
+	// Explain Wat het is en wat opruimen doet, in gewone taal
+	Explain string `json:"explain"`
+	Id      string `json:"id"`
+
+	// Safe Opruimen raakt niets dat een dienst nodig heeft
+	Safe  bool   `json:"safe"`
+	Title string `json:"title"`
+}
+
+// DiskWatchSettings defines model for DiskWatchSettings.
+type DiskWatchSettings struct {
+	// CritPct Vanaf deze bezetting: ernstig (rood)
+	CritPct int `json:"crit_pct"`
+
+	// IgnoreMounts Mounts die niet meetellen, zoals /mnt/backup
+	IgnoreMounts []string `json:"ignore_mounts"`
+
+	// WarnPct Vanaf deze bezetting: let op (oranje)
+	WarnPct int `json:"warn_pct"`
+}
+
 // Doc defines model for Doc.
 type Doc struct {
 	Cause string `json:"cause"`
@@ -11908,6 +11987,25 @@ type NodeConnections struct {
 	Supported bool `json:"supported"`
 }
 
+// NodeDisk defines model for NodeDisk.
+type NodeDisk struct {
+	CritPct      int                 `json:"crit_pct"`
+	Hostname     string              `json:"hostname"`
+	Level        NodeDiskLevel       `json:"level"`
+	Mount        string              `json:"mount"`
+	NodeId       openapi_types.UUID  `json:"node_id"`
+	Online       bool                `json:"online"`
+	RunningJobId *openapi_types.UUID `json:"running_job_id,omitempty"`
+	Scan         *DiskScan           `json:"scan,omitempty"`
+
+	// UsedRatio Bezetting van de volste schijf, 0-1
+	UsedRatio float32 `json:"used_ratio"`
+	WarnPct   int     `json:"warn_pct"`
+}
+
+// NodeDiskLevel defines model for NodeDisk.Level.
+type NodeDiskLevel string
+
 // NodeInput defines model for NodeInput.
 type NodeInput struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
@@ -15260,6 +15358,12 @@ type ToggleNodeCronJSONBody struct {
 	Enabled bool    `json:"enabled"`
 }
 
+// CleanupNodeDiskJSONBody defines parameters for CleanupNodeDisk.
+type CleanupNodeDiskJSONBody struct {
+	// Items Ids uit DiskScanItem
+	Items []string `json:"items"`
+}
+
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
 type GetNodeMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -15681,6 +15785,9 @@ type UpdateDisasterScenarioJSONRequestBody = DisasterScenarioInput
 // RunDisasterScenarioJSONRequestBody defines body for RunDisasterScenario for application/json ContentType.
 type RunDisasterScenarioJSONRequestBody = DisasterRunInput
 
+// SetDiskWatchSettingsJSONRequestBody defines body for SetDiskWatchSettings for application/json ContentType.
+type SetDiskWatchSettingsJSONRequestBody = DiskWatchSettings
+
 // CallDockerApiJSONRequestBody defines body for CallDockerApi for application/json ContentType.
 type CallDockerApiJSONRequestBody = DockerCallInput
 
@@ -15779,6 +15886,9 @@ type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
 
 // ToggleNodeCronJSONRequestBody defines body for ToggleNodeCron for application/json ContentType.
 type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
+
+// CleanupNodeDiskJSONRequestBody defines body for CleanupNodeDisk for application/json ContentType.
+type CleanupNodeDiskJSONRequestBody CleanupNodeDiskJSONBody
 
 // DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
 type DownloadOpnsenseBackupJSONRequestBody = PveObject
@@ -16442,6 +16552,12 @@ type ServerInterface interface {
 	// RunDisasterScenario Rampoefening starten (admin)
 	// (POST /disaster-scenarios/{scenarioId}/run)
 	RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// GetDiskWatchSettings De drempels van de schijfbewaking (fase 41)
+	// (GET /disk/settings)
+	GetDiskWatchSettings(w http.ResponseWriter, r *http.Request)
+	// SetDiskWatchSettings De drempels van de schijfbewaking aanpassen (admin)
+	// (PUT /disk/settings)
+	SetDiskWatchSettings(w http.ResponseWriter, r *http.Request)
 	// GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
 	// (GET /docker/all)
 	GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams)
@@ -16793,6 +16909,15 @@ type ServerInterface interface {
 	// ToggleNodeCron Een gevonden cronregel op een node uit- of weer aanzetten (admin)
 	// (POST /nodes/{nodeId}/crons/{key}/toggle)
 	ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, key string)
+	// GetNodeDisk Schijfbezetting van een node met de laatste meting van wat ruimte inneemt (fase 41)
+	// (GET /nodes/{nodeId}/disk)
+	GetNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// CleanupNodeDisk De gekozen onderdelen opruimen en opnieuw meten, als taak disk.cleanup (admin)
+	// (POST /nodes/{nodeId}/disk/cleanup)
+	CleanupNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ScanNodeDisk Meten wat er ruimte inneemt, als taak disk.scan (admin)
+	// (POST /nodes/{nodeId}/disk/scan)
+	ScanNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -18248,6 +18373,18 @@ func (_ Unimplemented) RunDisasterScenario(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetDiskWatchSettings De drempels van de schijfbewaking (fase 41)
+// (GET /disk/settings)
+func (_ Unimplemented) GetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetDiskWatchSettings De drempels van de schijfbewaking aanpassen (admin)
+// (PUT /disk/settings)
+func (_ Unimplemented) SetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
 // (GET /docker/all)
 func (_ Unimplemented) GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams) {
@@ -18947,6 +19084,24 @@ func (_ Unimplemented) SetCronLogging(w http.ResponseWriter, r *http.Request, no
 // ToggleNodeCron Een gevonden cronregel op een node uit- of weer aanzetten (admin)
 // (POST /nodes/{nodeId}/crons/{key}/toggle)
 func (_ Unimplemented) ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, key string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNodeDisk Schijfbezetting van een node met de laatste meting van wat ruimte inneemt (fase 41)
+// (GET /nodes/{nodeId}/disk)
+func (_ Unimplemented) GetNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CleanupNodeDisk De gekozen onderdelen opruimen en opnieuw meten, als taak disk.cleanup (admin)
+// (POST /nodes/{nodeId}/disk/cleanup)
+func (_ Unimplemented) CleanupNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScanNodeDisk Meten wat er ruimte inneemt, als taak disk.scan (admin)
+// (POST /nodes/{nodeId}/disk/scan)
+func (_ Unimplemented) ScanNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -24366,6 +24521,34 @@ func (siw *ServerInterfaceWrapper) RunDisasterScenario(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetDiskWatchSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDiskWatchSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetDiskWatchSettings operation middleware
+func (siw *ServerInterfaceWrapper) SetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDiskWatchSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetDockerAll operation middleware
 func (siw *ServerInterfaceWrapper) GetDockerAll(w http.ResponseWriter, r *http.Request) {
 
@@ -28113,6 +28296,84 @@ func (siw *ServerInterfaceWrapper) ToggleNodeCron(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ToggleNodeCron(w, r, nodeId, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNodeDisk operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeDisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeDisk(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CleanupNodeDisk operation middleware
+func (siw *ServerInterfaceWrapper) CleanupNodeDisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CleanupNodeDisk(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScanNodeDisk operation middleware
+func (siw *ServerInterfaceWrapper) ScanNodeDisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScanNodeDisk(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -32249,6 +32510,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/attention", wrapper.GetAttention)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/disk/settings", wrapper.GetDiskWatchSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/disk/settings", wrapper.SetDiskWatchSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/disk", wrapper.GetNodeDisk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/disk/scan", wrapper.ScanNodeDisk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/disk/cleanup", wrapper.CleanupNodeDisk)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/totp/setup", wrapper.BeginTotpSetup)

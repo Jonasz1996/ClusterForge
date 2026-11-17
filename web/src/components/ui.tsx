@@ -1,6 +1,8 @@
 "use client";
 
 import { TileButton, TileReset, useTile } from "@/components/Tiles";
+import { explainError } from "@/lib/explainError";
+import { glossary } from "@/lib/help";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -99,6 +101,18 @@ export function Card({
 }
 
 export function Alert({ kind = "error", children }: { kind?: "error" | "success" | "info"; children: ReactNode }) {
+  // Een foutmelding in tekst krijgt eronder wat je kunt doen (fase 41).
+  const help = kind === "error" && typeof children === "string" ? explainError(children) : null;
+  if (help) {
+    return (
+      <div role="alert" className="space-y-1 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+        <p>{children}</p>
+        <p className="text-xs text-red-900/80 dark:text-red-100/80">
+          {help.uitleg} <strong>Wat kun je doen?</strong> {help.doen}
+        </p>
+      </div>
+    );
+  }
   return (
     <div
       role={kind === "error" ? "alert" : "status"}
@@ -146,8 +160,14 @@ const tones: Record<Tone, string> = {
 };
 
 export function Badge({ tone = "slate", children }: { tone?: Tone; children: ReactNode }) {
+  // Een label dat een vakterm is (VIP, Drift, ...), toont de uitleg uit de
+  // woordenlijst als je erover gaat (fase 41).
+  const term = typeof children === "string" ? glossary[children.toLowerCase()] : undefined;
   return (
-    <span className={cx("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap", tones[tone])}>
+    <span
+      title={term ? `${term.term}: ${term.uitleg}` : undefined}
+      className={cx("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap", term && "cursor-help", tones[tone])}
+    >
       {children}
     </span>
   );

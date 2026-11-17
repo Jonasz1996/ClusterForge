@@ -9,6 +9,8 @@ import { SectionTabs } from "@/components/shell/SectionTabs";
 import { MenuIcon, MoonIcon, SearchIcon, SunIcon, SystemIcon } from "@/components/shell/icons";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { ToastHost } from "@/components/Toast";
+import { PageHelpBox } from "@/components/help/PageHelpBox";
+import { useHelpOn } from "@/lib/helpPrefs";
 import { Button } from "@/components/ui";
 import { useAttentionBadges } from "@/lib/attention";
 import { useLogout, useRequireMe } from "@/lib/auth";
@@ -37,6 +39,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const setMenuOpen = (o: boolean) => setMenuAt(o ? pathname : null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [theme, setTheme] = useTheme();
+  const [helpOn, setHelpOn] = useHelpOn();
   const badges = useAttentionBadges(!!me.data);
   const updated = useServerUpdated(!!me.data);
   useReloadOnStaleChunks();
@@ -161,6 +164,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             {searchButton}
             <button
               type="button"
+              onClick={() => setHelpOn(!helpOn)}
+              title={helpOn ? "Uitleg op elke pagina: aan (klik om te verbergen)" : "Uitleg op elke pagina: uit (klik om te tonen)"}
+              aria-label={helpOn ? "Uitleg verbergen" : "Uitleg tonen"}
+              aria-pressed={helpOn}
+              className={`flex size-8 items-center justify-center rounded-full border text-sm font-bold ${
+                helpOn
+                  ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
+                  : "border-slate-300 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              }`}
+            >
+              ?
+            </button>
+            <button
+              type="button"
               onClick={() => setTheme(themeNext[theme])}
               title={themeLabel[theme]}
               aria-label={themeLabel[theme]}
@@ -198,6 +215,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           }`}
         >
           <SectionTabs pathname={pathname} isAdmin={isAdmin} />
+          <PageHelpBox pathname={pathname} />
           {children}
         </main>
       </div>
