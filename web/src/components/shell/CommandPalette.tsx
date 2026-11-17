@@ -105,6 +105,7 @@ export function CommandPalette({ onClose, isAdmin }: { onClose: () => void; isAd
     const ip = q.trim();
     if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip) || (/^[0-9a-f:]+$/i.test(ip) && ip.includes(":") && ip.length > 2)) {
       hits.push({ key: `soc-${ip}`, label: `Adres ${ip} in het SOC`, sub: "Aanvallen, bans en firewallverkeer", href: `/soc?ip=${encodeURIComponent(ip)}`, kind: "Actie", hay: ip });
+      hits.push({ key: `aiv-${ip}`, label: `Adres ${ip} in AI-verslag`, sub: "Toestel, risico, land en dreigingslijsten", href: `/aiverslag?ip=${encodeURIComponent(ip)}`, kind: "Actie", hay: ip });
     }
     return hits;
   }, [q, isAdmin, clusters.data, nodes.data]);

@@ -240,6 +240,9 @@ type startInfo struct {
 	Feeds *struct {
 		Fout int `json:"fout"`
 	} `json:"feeds"`
+	Run *struct {
+		TS int64 `json:"ts"`
+	} `json:"run"`
 	Firewall *struct {
 		Updates   any `json:"updates"`
 		Kwetsbaar int `json:"kwetsbaar"`
@@ -296,6 +299,12 @@ func Warnings(v Instance, start, app json.RawMessage, st *StateSummary) []Warnin
 		if si.Feeds != nil && si.Feeds.Fout > 0 {
 			out = append(out, Warning{"warning", fmt.Sprintf("%d dreigingsfeed(s) werken niet", si.Feeds.Fout)})
 		}
+		// De analyse loopt elk uur; na 3 uur zonder ronde klopt er iets niet.
+		if si.Run != nil && si.Run.TS > 0 {
+			if age := time.Since(time.Unix(si.Run.TS, 0)); age > 3*time.Hour {
+				out = append(out, Warning{"warning", fmt.Sprintf("laatste analyse is %d uur oud", int(age.Hours()))})
+			}
+		}
 	}
 	var ai appInfo
 	if len(app) > 0 && json.Unmarshal(app, &ai) == nil {
@@ -341,6 +350,10 @@ type levelInfo struct {
 	Score *struct {
 		Score *float64 `json:"score"`
 	} `json:"score"`
+	IncidentenN int `json:"incidenten_n"`
+	Run         *struct {
+		TS int64 `json:"ts"`
+	} `json:"run"`
 }
 
 // fillLevel neemt niveau, score en open hoog over in een samenvatting.
@@ -352,6 +365,18 @@ func fillLevel(sum *Summary, o Overview) {
 		}
 		if li.Score != nil {
 			sum.Score = li.Score.Score
+		}
+		sum.Incidenten = li.IncidentenN
+		if li.Run != nil {
+			sum.LastRun = li.Run.TS
+		}
+	}
+	var ai appInfo
+	if len(o.App) > 0 && json.Unmarshal(o.App, &ai) == nil {
+		for _, m := range ai.Meldingen {
+			if !m.Gezien && time.Since(time.Unix(m.TS, 0)) < 7*24*time.Hour {
+				sum.Unseen++
+			}
 		}
 	}
 	if o.State != nil {

@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { Modal } from "@/components/Modal";
+import { AIVLookup } from "@/components/aiverslag/Lookup";
 import { AskView } from "@/components/aiverslag/Ask";
 import { FindingsView } from "@/components/aiverslag/Findings";
 import { Tabs } from "@/components/Tabs";
@@ -21,7 +24,7 @@ import {
   thClass,
 } from "@/components/inventory/bits";
 import { Tile as Win, TileGrid } from "@/components/Tiles";
-import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
+import { Alert, Badge, Button, Card, Input, PageHeader } from "@/components/ui";
 import { Sparkline } from "@/components/zabbix/Zabbix";
 import { useMe } from "@/lib/auth";
 import {
@@ -60,9 +63,40 @@ const tabs = [
 
 function Main({ v }: { v: AIVInstance }) {
   const [tab, setTab] = useState<TabKey>("overzicht");
+  const params = useSearchParams();
+  const router = useRouter();
+  const ip = params.get("ip") ?? "";
+  const [look, setLook] = useState("");
+  const open = (q: string) =>
+    router.replace(q ? `/aiverslag?ip=${encodeURIComponent(q)}` : "/aiverslag");
   return (
     <div className="space-y-4">
-      <Tabs tabs={tabs} value={tab} onChange={setTab} label="AI-verslag" />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <Tabs tabs={tabs} value={tab} onChange={setTab} label="AI-verslag" />
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (look.trim()) open(look.trim());
+          }}
+        >
+          <Input
+            value={look}
+            onChange={(e) => setLook(e.target.value)}
+            placeholder="IP, domein of CVE opzoeken"
+            aria-label="IP, domein of CVE opzoeken"
+            className="w-56"
+          />
+          <Button variant="secondary" type="submit">
+            Opzoeken
+          </Button>
+        </form>
+      </div>
+      {ip && (
+        <Modal title={`Opzoeken: ${ip}`} onClose={() => open("")}>
+          <AIVLookup v={v} q={ip} />
+        </Modal>
+      )}
       {tab === "overzicht" && <OverviewView v={v} />}
       {tab === "bevindingen" && <FindingsView v={v} />}
       {tab === "vraag" && <AskView v={v} />}

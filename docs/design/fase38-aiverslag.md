@@ -79,3 +79,14 @@ updatecommando.
   tweestapsverificatie) en Vraag het AI-verslag (vraag meteen, antwoord met de
   stappen van de AI). "Gezien" bij een alarm. Wat ClusterForge nooit doet: alles
   wissen (`/api/clearall`), koppelcodes maken voor anderen, sleutels lezen.
+
+### M4 (af)
+- ext56 (VERSIE 56.1) zit in ClusterForge en in de aiverslag-repo (draft PR #5). Overzicht → kaart "Koppeling in AI-verslag" → Koppeling installeren (admin): py_compile, kopie van app.py, herstart, terugzetten als de webdienst niet start, daarna eerste context.
+- Elke 5 minuten: servers, VIP's, onderhoud (nodes in onderhoud of draining) en wijzigingen van 24 u als kennisregels cf-* in AI-verslag. Nooit "eigen".
+
+### M3 (af)
+- Aandacht nodig: dreigingsniveau, ongeziene alarmen, diensten/timers, Ollama, analyse ouder dan 3 uur, schijf.
+- SOC: regel "AI-verslag" onder het dreigingsniveau; het adresvenster toont "Wat AI-verslag weet" (land, AS, dreigingslijsten, of toestel en risico bij een intern adres).
+- Ctrl K op een IP: "Adres … in AI-verslag"; op de pagina zelf een opzoekveld (IP, domein, CVE).
+- Bevindingen met een publiek IP: knop "Ban … op alle nodes" (CrowdSec, een week).
+- Dashboard-API: GET /api/dashboard/v1/aiverslag en /api/dashboard/v2/sources/aiverslag (token voor alle clusters; ?strict=1); homepage-tegel in het YAML-voorbeeld bij API-tokens.
