@@ -52,7 +52,7 @@ func freePort(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 }
 
@@ -95,7 +95,7 @@ func npmAPI(t *testing.T, port, method, path, token string, body any) (int, []by
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	b, _ := io.ReadAll(res.Body)
 	return res.StatusCode, b
 }
@@ -167,7 +167,7 @@ func TestRealNPM(t *testing.T) {
 		status, body := 0, []byte(nil)
 		if res, err := http.Get("http://127.0.0.1:" + p81 + "/api/"); err == nil {
 			body, _ = io.ReadAll(res.Body)
-			res.Body.Close()
+			_ = res.Body.Close()
 			status = res.StatusCode
 		}
 		if status == 200 {

@@ -151,7 +151,7 @@ func localHTTP(ctx context.Context, dial dialFunc, h *protocol.WebHTTP) (int, js
 	if err != nil {
 		return 0, nil, fmt.Errorf("127.0.0.1:%d antwoordt niet: %w", h.Port, unwrapURLError(err))
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(res.Body, protocol.MaxWebResponse+1))
 	if err != nil {
 		return res.StatusCode, nil, err
@@ -231,7 +231,7 @@ func checkURL(ctx context.Context, dial dialFunc, c *protocol.WebCheck) protocol
 		out.Error = unwrapURLError(err).Error()
 		return out
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
 	out.Status = res.StatusCode
 	out.Location = res.Header.Get("Location")
@@ -767,7 +767,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
@@ -798,7 +798,7 @@ func (a *Agent) npmCheck(ctx context.Context, in protocol.WebNPM) (*protocol.Web
 	if err != nil {
 		return res, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	copyDB := filepath.Join(tmp, "database.sqlite")
 	if err := a.sqliteBackup(ctx, filepath.Join(data, "database.sqlite"), copyDB); err != nil {
 		add("database", false, "%v", err)

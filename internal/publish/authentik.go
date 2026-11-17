@@ -118,10 +118,10 @@ func (s *Service) akCall(ctx context.Context, st Settings, node nodeRow, method,
 	defer cancel()
 	res, err := s.bus.Web(cctx, node.ID, protocol.WebRequest{Op: protocol.WebOpHTTP, HTTP: h})
 	if err != nil {
-		return 0, nil, fmt.Errorf("Authentik via %s: %w", node.Hostname, err)
+		return 0, nil, fmt.Errorf("authentik via %s: %w", node.Hostname, err)
 	}
 	if res.Error != "" {
-		return 0, nil, fmt.Errorf("Authentik via %s: %s", node.Hostname, res.Error)
+		return 0, nil, fmt.Errorf("authentik via %s: %s", node.Hostname, res.Error)
 	}
 	if res.Status == http.StatusForbidden || res.Status == http.StatusUnauthorized {
 		return res.Status, res.Body, invalid("Authentik weigert het token (HTTP %d): maak in Authentik een token met intent API voor een beheerder", res.Status)
@@ -155,7 +155,7 @@ func akList[T any](ctx context.Context, s *Service, st Settings, node nodeRow, p
 			return nil, err
 		}
 		if status != http.StatusOK {
-			return nil, fmt.Errorf("Authentik %s: %s", path, akMessage(status, data))
+			return nil, fmt.Errorf("authentik %s: %s", path, akMessage(status, data))
 		}
 		var res struct {
 			Pagination struct {
@@ -164,7 +164,7 @@ func akList[T any](ctx context.Context, s *Service, st Settings, node nodeRow, p
 			Results []T `json:"results"`
 		}
 		if err := json.Unmarshal(data, &res); err != nil {
-			return nil, fmt.Errorf("Authentik %s: %w", path, err)
+			return nil, fmt.Errorf("authentik %s: %w", path, err)
 		}
 		out = append(out, res.Results...)
 		if res.Pagination.Next == 0 {
@@ -270,7 +270,7 @@ func (s *Service) akProtect(ctx context.Context, st Settings, node nodeRow, name
 	if prov == nil {
 		auth := preferFlow(r.AuthFlows, "default-provider-authorization-implicit-consent", "default-provider-authorization-explicit-consent")
 		if auth == "" {
-			return done, fmt.Errorf("Authentik heeft geen autorisatieflow")
+			return done, fmt.Errorf("authentik heeft geen autorisatieflow")
 		}
 		body := map[string]any{"name": "ClusterForge: " + domain, "authorization_flow": auth, "external_host": external, "mode": "forward_single"}
 		if inval := preferFlow(r.InvalFlows, "default-provider-invalidation-flow", "default-invalidation-flow"); inval != "" {
@@ -312,7 +312,7 @@ func (s *Service) akProtect(ctx context.Context, st Settings, node nodeRow, name
 	}
 	out := r.EmbeddedOutpost()
 	if out == nil {
-		return done, fmt.Errorf("Authentik heeft geen ingebouwde outpost (authentik Embedded Outpost)")
+		return done, fmt.Errorf("authentik heeft geen ingebouwde outpost (authentik Embedded Outpost)")
 	}
 	done.OutpostPK = out.PK
 	if !r.InOutpost(prov.PK) {

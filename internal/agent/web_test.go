@@ -202,6 +202,8 @@ func npmFixture(t *testing.T) (*Agent, string, *[]string) {
 	a.Exec = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		switch {
+		case name == "sqlite3" && len(args) == 1 && args[0] == "-version":
+			return []byte("3.46.1\n"), nil
 		case name == "sqlite3" && strings.HasPrefix(args[len(args)-1], ".backup '"):
 			dst := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], ".backup '"), "'")
 			b, err := os.ReadFile(args[0])
