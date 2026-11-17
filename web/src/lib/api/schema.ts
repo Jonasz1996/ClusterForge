@@ -4031,7 +4031,7 @@ export interface paths {
         /**
          * Zabbix-agent-instellingen bewaren (admin)
          * @description token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
-         *     nooit teruggegeven. auto_prod aanzetten vraagt de code van je tweestapsverificatie.
+         *     nooit teruggegeven. Agentonderhoud op prod vraagt geen TOTP-code.
          */
         put: operations["updateZabbixAgentSettings"];
         post?: never;
@@ -4071,7 +4071,7 @@ export interface paths {
          * Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
          * @description action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
          *     blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
-         *     rotate geeft de node een nieuwe sleutel en past toe. Een prod-node vraagt totp_code.
+         *     rotate geeft de node een nieuwe sleutel en past toe. Ook op prod zonder TOTP-code (agentonderhoud).
          */
         post: operations["setZabbixAgentNodes"];
         delete?: never;
@@ -13908,7 +13908,6 @@ export interface components {
             proxy: string;
             /** @description Weglaten laat het token staan; leeg haalt het weg */
             token?: string;
-            totp_code?: string;
         };
         ZabbixAgentNode: {
             /** Format: uuid */
@@ -13955,7 +13954,6 @@ export interface components {
             node_ids?: string[];
             /** @description Alle nodes die nog niet toegepast zijn (apply) of alle nodes */
             all?: boolean;
-            totp_code?: string;
         };
         ZabbixAgentNodesResult: {
             jobs: string[];
@@ -21087,7 +21085,6 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
         };
     };
     testZabbixAgentAPI: {

@@ -4286,7 +4286,7 @@ paths:
       summary: Zabbix-agent-instellingen bewaren (admin)
       description: |
         token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
-        nooit teruggegeven. auto_prod aanzetten vraagt de code van je tweestapsverificatie.
+        nooit teruggegeven. Agentonderhoud op prod vraagt geen TOTP-code.
       requestBody:
         required: true
         content:
@@ -4301,7 +4301,6 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
   /zabbix-agents/test:
     post:
       operationId: testZabbixAgentAPI
@@ -4321,7 +4320,7 @@ paths:
       description: |
         action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
         blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
-        rotate geeft de node een nieuwe sleutel en past toe. Een prod-node vraagt totp_code.
+        rotate geeft de node een nieuwe sleutel en past toe. Ook op prod zonder TOTP-code (agentonderhoud).
       requestBody:
         required: true
         content:
@@ -14530,7 +14529,6 @@ components:
         docker_template: { type: string }
         proxy: { type: string }
         token: { type: string, description: Weglaten laat het token staan; leeg haalt het weg }
-        totp_code: { type: string }
     ZabbixAgentNode:
       type: object
       required: [node_id, hostname, ip, cluster_id, cluster_name, cluster_environment, online, supported, docker,
@@ -14578,7 +14576,6 @@ components:
         action: { type: string, enum: [manage, unmanage, apply, rotate] }
         node_ids: { type: array, items: { type: string, format: uuid } }
         all: { type: boolean, description: Alle nodes die nog niet toegepast zijn (apply) of alle nodes }
-        totp_code: { type: string }
     ZabbixAgentNodesResult:
       type: object
       required: [jobs, skipped]

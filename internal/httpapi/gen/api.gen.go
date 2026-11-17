@@ -13942,9 +13942,8 @@ type ZabbixAgentNodesInput struct {
 	Action ZabbixAgentNodesInputAction `json:"action"`
 
 	// All Alle nodes die nog niet toegepast zijn (apply) of alle nodes
-	All      *bool                 `json:"all,omitempty"`
-	NodeIds  *[]openapi_types.UUID `json:"node_ids,omitempty"`
-	TotpCode *string               `json:"totp_code,omitempty"`
+	All     *bool                 `json:"all,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
 }
 
 // ZabbixAgentNodesInputAction defines model for ZabbixAgentNodesInput.Action.
@@ -14007,9 +14006,8 @@ type ZabbixAgentSettingsInput struct {
 	Templates      []string `json:"templates"`
 
 	// Token Weglaten laat het token staan; leeg haalt het weg
-	Token    *string `json:"token,omitempty"`
-	TotpCode *string `json:"totp_code,omitempty"`
-	Version  string  `json:"version"`
+	Token   *string `json:"token,omitempty"`
+	Version string  `json:"version"`
 }
 
 // ZabbixAgentTestResult defines model for ZabbixAgentTestResult.

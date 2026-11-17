@@ -1456,8 +1456,8 @@ ClusterForge-agent, zonder installscript per node:
   blijft staan als `zabbix_agent2.conf.voor-clusterforge`; eigen instellingen horen in `zabbix_agent2.d/`. Waar Docker
   draait, komen de Docker-plugin en de groep `docker` voor de gebruiker zabbix erbij. De oude `zabbix-agent` gaat uit.
 - **Automatisch.** Met de instelling aan krijgt elke node met een agent zabbix-agent2, ook nieuwe nodes, en opnieuw na
-  een gewijzigde instelling of een nieuwe sleutel. Prod alleen met **Ook productie** (één keer TOTP); handmatig
-  toepassen op prod vraagt een code.
+  een gewijzigde instelling of een nieuwe sleutel. Prod alleen met de schakelaar **Ook productie** (zonder TOTP: dit is
+  agentonderhoud).
 - **Zabbix API.** Een API-token (Zabbix: Users → API tokens) van een gebruiker die hosts mag aanmaken en aanpassen,
   versleuteld bewaard en nooit teruggegeven; **Zabbix API testen** probeert het.
 

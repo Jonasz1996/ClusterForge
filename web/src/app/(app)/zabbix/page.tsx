@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useProdTotp } from "@/components/ProdConfirm";
 import { ago } from "@/components/inventory/bits";
 import {
   Alert,
@@ -69,7 +68,6 @@ function SettingsCard({
 }) {
   const save = useSaveZabbixAgentSettings();
   const test = useTestZabbixAgentAPI();
-  const totp = useProdTotp();
   const initial = useMemo(
     () => ({
       server: settings.server,
@@ -89,7 +87,6 @@ function SettingsCard({
   const [form, setForm] = useState(initial);
   const [dirty, setDirty] = useState(false);
   const [token, setToken] = useState("");
-  const [code, setCode] = useState("");
   const f = dirty ? form : initial;
   const set = <K extends keyof typeof initial>(
     k: K,
@@ -98,7 +95,6 @@ function SettingsCard({
     setForm({ ...f, [k]: v });
     setDirty(true);
   };
-  const needsCode = f.auto_prod && !settings.auto_prod;
 
   const submit = () =>
     save.mutate(
@@ -109,13 +105,11 @@ function SettingsCard({
           .map((t) => t.trim())
           .filter(Boolean),
         ...(token.trim() ? { token: token.trim() } : {}),
-        ...(needsCode ? { totp_code: code } : {}),
       },
       {
         onSuccess: () => {
           setDirty(false);
           setToken("");
-          setCode("");
         },
       },
     );
@@ -245,37 +239,13 @@ function SettingsCard({
           <span>
             Ook productie
             <span className="block text-slate-500">
-              Aanzetten vraagt één keer een code uit de app.
+              Ook nodes van prod-clusters krijgen de agent vanzelf.
             </span>
           </span>
         </label>
-        {needsCode &&
-          (totp ? (
-            <Field label="Code uit de app (prod)" htmlFor="zbx-code">
-              <Input
-                id="zbx-code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                className="w-40 font-mono tracking-widest"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-              />
-            </Field>
-          ) : (
-            <Alert>
-              Op prod kan dit alleen met tweestapsverificatie. Zet die aan bij
-              Instellingen.
-            </Alert>
-          ))}
         {isAdmin && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              disabled={
-                !dirty || save.isPending || (needsCode && code.length !== 6)
-              }
-              onClick={submit}
-            >
+            <Button disabled={!dirty || save.isPending} onClick={submit}>
               Bewaren
             </Button>
             {dirty && (
@@ -320,9 +290,7 @@ function NodesCard({
   isAdmin: boolean;
 }) {
   const act = useZabbixAgentNodes();
-  const totp = useProdTotp();
   const [selected, setSelected] = useState<string[]>([]);
-  const [code, setCode] = useState("");
   const groups = useMemo(() => {
     const m = new Map<string, ZabbixAgentNode[]>();
     for (const n of nodes) {
@@ -331,23 +299,16 @@ function NodesCard({
     }
     return [...m.entries()];
   }, [nodes]);
-  const chosen = nodes.filter((n) => selected.includes(n.node_id));
   const ready =
     settings.server !== "" && settings.api_url !== "" && settings.token_set;
   const count = (label: string) =>
     nodes.filter((n) => zabbixAgentState(n).label === label).length;
-  const needsProd = chosen.some((n) => n.cluster_environment === "prod");
 
   const run = (action: ZabbixAgentNodesInput["action"], all = false) => {
-    const prodAction = action === "apply" || action === "rotate";
     act.mutate(
       {
         action,
         ...(all ? { all: true } : { node_ids: selected }),
-        ...(prodAction &&
-        (all ? nodes.some((n) => n.cluster_environment === "prod") : needsProd)
-          ? { totp_code: code }
-          : {}),
       },
       { onSuccess: () => setSelected([]) },
     );
@@ -490,30 +451,6 @@ function NodesCard({
         </div>
         {isAdmin && (
           <div className="space-y-3">
-            {(needsProd ||
-              (selected.length === 0 &&
-                nodes.some((n) => n.cluster_environment === "prod"))) &&
-              (totp ? (
-                <Field
-                  label="Code uit de app (nodig voor prod)"
-                  htmlFor="zbx-nodes-code"
-                >
-                  <Input
-                    id="zbx-nodes-code"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    className="w-40 font-mono tracking-widest"
-                    maxLength={6}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  />
-                </Field>
-              ) : (
-                <Alert>
-                  Op prod kan dit alleen met tweestapsverificatie. Zet die aan
-                  bij Instellingen.
-                </Alert>
-              ))}
             <div className="flex flex-wrap gap-2">
               {selected.length > 0 ? (
                 <>

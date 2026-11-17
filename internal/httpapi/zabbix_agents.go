@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
@@ -48,20 +47,6 @@ func (s *Server) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"settings": set, "nodes": nodes})
 }
 
-// prodConfirm vraagt de TOTP-code als een actie prod raakt; false als het
-// antwoord al geschreven is.
-func (s *Server) prodConfirm(w http.ResponseWriter, r *http.Request, p auth.Principal, code *string, action string) bool {
-	if p.User.TotpEnabledAt == nil {
-		writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie dit doen; zet die aan bij Instellingen")
-		return false
-	}
-	if code == nil || *code == "" {
-		writeError(w, http.StatusConflict, "needs_confirmation", "dit raakt prod; geef de code van je tweestapsverificatie")
-		return false
-	}
-	return !s.authError(w, r, s.auth.Confirm(r.Context(), p, "", *code, action))
-}
-
 func (s *Server) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
 	p, ok := requireAdmin(w, r)
 	if !ok {
@@ -72,14 +57,6 @@ func (s *Server) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	ctx := r.Context()
-	cur, err := s.zabbixAgents.Settings(ctx)
-	if err != nil {
-		s.zabbixAgentError(w, r, err)
-		return
-	}
-	if in.AutoProd && !cur.AutoProd && !s.prodConfirm(w, r, p, in.TotpCode, "zabbix_agents_auto_prod") {
-		return
-	}
 	uid := p.User.ID
 	set, err := s.zabbixAgents.UpdateSettings(ctx, events.User(uid), &uid, zabbixagent.SettingsInput{
 		Settings: zabbixagent.Settings{
@@ -149,7 +126,6 @@ func (s *Server) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var chosen []zabbixagent.Node
-	prod := false
 	for _, n := range nodes {
 		switch {
 		case !all && !contains(want, n.NodeID.String()):
@@ -162,7 +138,6 @@ func (s *Server) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		chosen = append(chosen, n)
-		prod = prod || n.Prod()
 	}
 	if len(chosen) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid", "geen nodes om dit op te doen")
@@ -189,9 +164,6 @@ func (s *Server) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		if prod && !s.prodConfirm(w, r, p, in.TotpCode, "zabbix_agents_prod") {
-			return
-		}
 		for _, n := range chosen {
 			if in.Action == gen.ZabbixAgentNodesInputActionRotate {
 				if _, err := s.zabbixAgents.Rotate(ctx, actor, n.NodeID); err != nil {

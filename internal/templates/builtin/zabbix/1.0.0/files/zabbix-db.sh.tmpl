@@ -30,12 +30,18 @@ ready() {
 	[ "$(sql "SHOW STATUS LIKE 'wsrep_local_state_comment'" | cut -f2)" = Synced ]
 }
 
-# done: het schema staat er helemaal; de rij in config komt als laatste.
+# done: het schema staat er. Gebruikers (Admin, guest) komen pas met de
+# data van het schema, dus een rij in users betekent een geladen schema. De
+# tabel config bestaat vanaf Zabbix 7.4 niet meer (die heet nu settings),
+# dus die telt niet als enige teken.
 done_() {
-	case "$(sql 'SELECT COUNT(*) FROM zabbix.config')" in
-	'' | 0) return 1 ;;
-	*) return 0 ;;
-	esac
+	for t in users settings config; do
+		case "$(sql "SELECT COUNT(*) FROM zabbix.$t")" in
+		'' | 0) ;;
+		*) return 0 ;;
+		esac
+	done
+	return 1
 }
 
 users() {
@@ -79,7 +85,8 @@ setup() {
 	}
 	n=$(sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'zabbix'")
 	if [ "${n:-0}" != 0 ]; then
-		echo "zabbix heeft al $n tabellen maar is niet af; een eerdere import brak af. Verwijder de database zabbix bij Databases, dan begint dit opnieuw" >&2
+		# Nooit iets wissen: bestaande tabellen zijn misschien echte data.
+		echo "de database zabbix heeft al $n tabellen maar geen gebruikers; ClusterForge laadt geen schema over bestaande tabellen. Kijk de database zelf na (mariadb zabbix)" >&2
 		return 1
 	fi
 	schema || {
