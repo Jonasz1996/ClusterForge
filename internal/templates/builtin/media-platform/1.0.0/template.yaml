@@ -290,6 +290,14 @@ roles:
           mode: "0640"
           notify: [service:keepalived:reload]
       - service: { name: keepalived, enabled: true, state: started }
+      # De masters van SeaweedFS hebben een leider (hoogstens 3 minuten).
+      - command:
+          title: SeaweedFS-master antwoordt
+          run: >-
+            for i in $(seq 36); do
+            curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:9333/cluster/status && exit 0;
+            sleep 5; done; echo "de master van SeaweedFS antwoordt niet (journalctl -u cf-seaweedfs)" >&2; exit 1
+          unless: curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:9333/cluster/status
 
 # De sleutels per eigenaar van gezichten (buiten de gedeelde data, zoals op
 # de single) van de VIP-node naar de andere nodes, en de back-ups van de
@@ -313,9 +321,9 @@ syncs:
 
 # Het VIP van het platform komt pas als de bestanden gemount zijn, en dat
 # wacht op de filer, dus op PostgreSQL, dat ClusterForge na de uitrol zet.
-# De uitrol controleert daarom alleen de masters van SeaweedFS.
-checks:
-  - http: { url: "http://{{ (index .nodes 0).address }}:9333/cluster/status", expect: 200, within: 180s }
+# De uitrol controleert daarom alleen de masters van SeaweedFS, en dat op
+# elke node zelf (laatste stap): de server mag poort 9333 van de nodes niet
+# kunnen bereiken (firewall tussen de VLAN's).
 
 services:
   - { name: platform, kind: app, unit: cf-platform, port: 80, depends_on: [seaweedfs, keepalived], strength: hard }
