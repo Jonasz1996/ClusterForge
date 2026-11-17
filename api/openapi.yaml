@@ -4660,6 +4660,32 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/console:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: openDockerConsole
+      summary: Een shell in een draaiende container openen (docker exec, admin, fase 28)
+      description: |
+        Geeft een sessie terug; het verkeer loopt daarna over de websocket /api/v1/pve/console/{session}, zoals bij
+        Proxmox. Op een prodcluster vraagt het tweestapsverificatie (totp_code) of, zonder, het wachtwoord. Alleen het
+        openen komt in het logboek (docker.console_opened), niet wat je typt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DockerConsoleInput" }
+      responses:
+        "201":
+          description: Sessie klaar
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveConsoleOpened" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters
@@ -14781,6 +14807,17 @@ components:
         vmid: { type: integer, description: "Gast-ID; niet bij host" }
         cols: { type: integer }
         rows: { type: integer }
+    DockerConsoleInput:
+      type: object
+      required: [container]
+      properties:
+        container: { type: string, description: "Id of naam van de container" }
+        shell: { type: string, enum: [auto, sh, bash], default: auto }
+        user: { type: string, description: "Gebruiker in de container; leeg is wat het image zegt" }
+        cols: { type: integer }
+        rows: { type: integer }
+        password: { type: string, description: "Op prod, als je geen tweestapsverificatie hebt" }
+        totp_code: { type: string, maxLength: 10, description: "Op prod: je code van tweestapsverificatie" }
     PveConsoleOpened:
       type: object
       required: [session, kind, title]

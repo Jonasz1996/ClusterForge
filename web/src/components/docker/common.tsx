@@ -5,9 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Modal } from "@/components/Modal";
 import { toast } from "@/components/Toast";
-import { Alert, Button, Input, Select } from "@/components/ui";
+import { Alert, Badge, Button, Input, Select } from "@/components/ui";
 import { api, ApiError, unwrap } from "@/lib/api/client";
-import { groupHosts, type DockerCall, type DockerHost } from "@/lib/docker";
+import { envLabel, groupHosts, type DockerCall, type DockerHost } from "@/lib/docker";
 import type { Job } from "@/lib/proxmox";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -211,3 +211,114 @@ export const stateLabel: Record<string, string> = {
   dead: "dood",
   removing: "wordt verwijderd",
 };
+
+// NodeSections zet rijen per cluster en per node onder elkaar, met de
+// nodes die niet kunnen (agent offline of te oud) en hun fouten erbij.
+export function NodeSections<R extends { host: DockerHost }>({
+  hosts,
+  rows,
+  errors,
+  need,
+  filtered,
+  header,
+  children,
+}: {
+  hosts: DockerHost[];
+  rows: R[];
+  errors: { host: DockerHost; error: string }[];
+  need: number;
+  // filtered: er is gezocht of gefilterd; lege nodes vallen dan weg.
+  filtered: boolean;
+  header?: (h: DockerHost) => ReactNode;
+  children: (h: DockerHost, rows: R[]) => ReactNode;
+}) {
+  return (
+    <>
+      {groupHosts(hosts).map((g) => {
+        const ids = new Set(g.hosts.map((h) => h.node_id));
+        const gRows = rows.filter((r) => ids.has(r.host.node_id));
+        const gErr = errors.filter((e) => ids.has(e.host.node_id));
+        const notReady = g.hosts.filter((h) => hostReadyText(h, need));
+        if (filtered && gRows.length === 0) return null;
+        return (
+          <section key={g.key || "los"} className="space-y-2">
+            <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">
+              {g.label}
+              {g.environment && <Badge tone={g.environment === "prod" ? "red" : "slate"}>{envLabel[g.environment] ?? g.environment}</Badge>}
+            </h2>
+            {notReady.map((h) => (
+              <p key={h.node_id} className="text-sm text-slate-500">
+                {h.hostname}: {hostReadyText(h, need)}
+              </p>
+            ))}
+            {gErr.map((e) => (
+              <Alert key={e.host.node_id}>
+                {e.host.hostname}: {e.error}
+              </Alert>
+            ))}
+            {g.hosts
+              .filter((h) => !hostReadyText(h, need) && (!filtered || gRows.some((r) => r.host.node_id === h.node_id)))
+              .filter((h) => !gErr.some((e) => e.host.node_id === h.node_id))
+              .map((h) => (
+                <div key={h.node_id} className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2 text-sm font-medium dark:border-slate-800">
+                    {h.hostname}
+                    {h.vip_holder && <Badge tone="blue">VIP</Badge>}
+                    {header && <div className="ml-auto flex flex-wrap gap-2">{header(h)}</div>}
+                  </div>
+                  {children(
+                    h,
+                    gRows.filter((r) => r.host.node_id === h.node_id),
+                  )}
+                </div>
+              ))}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function hostReadyText(h: DockerHost, need: number) {
+  if (!h.online) return "agent offline";
+  if (!h.supported || h.protocol < need) return `agent te oud (protocol ${h.protocol}, ${need} nodig); werk hem bij via Nodes → Agents bijwerken`;
+  return "";
+}
+
+// rowsFrom maakt van de antwoorden van /docker/all rijen met hun node.
+export function rowsFrom<T, R>(
+  results: NodeResult<T>[] | undefined,
+  hosts: DockerHost[],
+  map: (host: DockerHost, data: T) => R[],
+): { rows: R[]; errors: { host: DockerHost; error: string }[] } {
+  const rows: R[] = [];
+  const errors: { host: DockerHost; error: string }[] = [];
+  for (const r of results ?? []) {
+    const host = hosts.find((h) => h.node_id === r.node_id);
+    if (!host) continue;
+    if (r.error) errors.push({ host, error: r.error });
+    else if (r.data) rows.push(...map(host, r.data));
+  }
+  return { rows, errors };
+}
+
+export function FilterChips<K extends string>({ options, value, onChange }: { options: { key: K; label: string; count?: number }[]; value: K; onChange: (k: K) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map((f) => (
+        <button
+          key={f.key}
+          type="button"
+          onClick={() => onChange(f.key)}
+          className={
+            value === f.key
+              ? "rounded-full border border-brand-600 bg-brand-50 px-3 py-1 text-xs text-brand-700 dark:bg-slate-800 dark:text-white"
+              : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:text-slate-400"
+          }
+        >
+          {f.label} {f.count !== undefined && <span className="tabular-nums">{f.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}

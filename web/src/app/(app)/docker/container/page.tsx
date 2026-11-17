@@ -8,7 +8,7 @@ import { errText, stateLabel, stateTone, useDockerRun } from "@/components/docke
 import { ago, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, cx } from "@/components/ui";
 import { api, unwrap } from "@/lib/api/client";
-import { cpath, useDockerGet, useDockerHosts, type DockerMount, type DockerStat } from "@/lib/docker";
+import { cpath, dockerConsoleHref, useDockerGet, useDockerHosts, type DockerMount, type DockerStat } from "@/lib/docker";
 import { useIsAdmin } from "@/lib/inventory";
 
 export default function Page() {
@@ -165,6 +165,15 @@ function ContainerDetail() {
         <Link href={`/logs?node=${node}&kind=docker&name=${encodeURIComponent(name)}`} className="rounded border border-slate-300 px-3 py-1 hover:border-slate-400 dark:border-slate-700">
           Logs
         </Link>
+        {isAdmin && running && (
+          <Link
+            href={dockerConsoleHref(node, d.Id)}
+            target="_blank"
+            className="rounded border border-slate-300 px-3 py-1 hover:border-slate-400 dark:border-slate-700"
+          >
+            Console
+          </Link>
+        )}
       </div>
 
       {running && <LiveStats node={node} id={d.Id} />}
