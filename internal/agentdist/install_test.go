@@ -206,7 +206,7 @@ func TestInstallTrueNAS(t *testing.T) {
 		return string(out), 0
 	}
 	out, code := run("--server", e.srv, "--token", "cfe_nas")
-	if code != 0 || !strings.Contains(out, "start vanzelf na een update") {
+	if code != 0 || !strings.Contains(out, "start vanzelf na een herstart of update") {
 		t.Fatalf("installeren: %d %s", code, out)
 	}
 	home := filepath.Join(e.root, "data/clusterforge")
@@ -217,17 +217,27 @@ func TestInstallTrueNAS(t *testing.T) {
 		t.Fatalf("koppeling /etc/clusterforge: %q %v", l, err)
 	}
 	unit, err := os.ReadFile(filepath.Join(e.root, "etc/systemd/system/cf-agent.service"))
-	if err != nil || !strings.Contains(string(unit), "ExecStart=/data/clusterforge/bin/cf-agent run") {
+	if err != nil || !strings.Contains(string(unit), "ExecStart=/var/lib/clusterforge/bin/cf-agent run") {
 		t.Fatalf("unit: %v %s", err, unit)
 	}
 	if fi, err := os.Stat(filepath.Join(home, "boot.sh")); err != nil || fi.Mode().Perm() != 0o755 {
 		t.Fatalf("boot.sh: %v", err)
 	}
+	if fi, err := os.Stat(filepath.Join(e.root, "var/lib/clusterforge/bin/cf-agent")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("uitvoerbare kopie: %v", err)
+	}
+	// /data is noexec: daar mag het script niets rechtstreeks uitvoeren.
+	if err := os.Chmod(filepath.Join(home, "bin/cf-agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(home, "boot.sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if b, _ := os.ReadFile(log); string(b) != "enroll cfe_nas\n" {
 		t.Fatalf("aanmelden: %q", b)
 	}
 	out, code = run("--server", e.srv, "--upgrade")
-	if code != 0 || !strings.Contains(out, "bijgewerkt van 0.4.0 naar 0.4.0") {
+	if code != 0 || !strings.Contains(out, "bijgewerkt naar 0.4.0") {
 		t.Fatalf("bijwerken: %d %s", code, out)
 	}
 	if out, code := run("--server", e.srv, "--no-enroll"); code != 2 {
