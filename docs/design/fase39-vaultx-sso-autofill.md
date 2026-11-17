@@ -5,121 +5,91 @@ npm/authentik: als ik ingelogd ben op authentik ben ik ook ingelogd op vaultx
 en vult deze overal automatisch de opgeslagen gegevens in, gebruikersnaam,
 wachtwoord en eventueel MFA-code, allemaal geregeld door de agents."
 
+Antwoord van Jonas op de eerste versie van dit plan (15:55 UTC):
+
+> Alles moet standalone blijven werken als een certificaat vervallen is of
+> nodes down zijn, anders ligt misschien alles plat. Alles blijft werken
+> zoals het is, behalve: als ik bij Authentik aangemeld ben, heb ik echte
+> SSO overal: de wachtwoordkluis en alles wat erin zit, niet via SAML/OAuth
+> maar gewoon automatisch invullen van de gegevens en Tab, Enter.
+
+Daarom is de eerste versie (een inlog-poort in NPM, in het pad van elke
+aanvraag) **geschrapt**: als die poort, de agent of Authentik weg is, zou de
+app onbereikbaar worden. Het nieuwe plan raakt NPM en de apps niet aan.
+
 We bouwen op de hoogste stam bij de start (fase 38, branch
-`claude/project-thread-4bl51a`, bevat fase 32-38). Nummers: agentprotocol
-**57**, migraties vanaf **00130**. Wat fase 35 nog aan NPM/Authentik bouwt,
-neem ik mee zodra het op die branch staat.
+`claude/project-thread-4bl51a`). Nummers: agentprotocol **57**, migraties
+vanaf **00130**.
 
-## Wat er al is (onderzoek)
+## Uitgangspunt: alles faalt naar "zoals nu"
 
-- **VaultX** (repo Jonasz1996/vaultx, cluster uit fase 18 op .157/.158/.159,
-  VIP .160) logt al in via Authentik (OIDC, PKCE, back-channel logout). Ben je
-  bij Authentik aangemeld, dan is "Inloggen met Authentik" één klik zonder
-  wachtwoord. Het **account** is dus al SSO.
-- De **kluis** zelf is end-to-end versleuteld zoals Bitwarden: de browser of
-  app leidt uit je master password de sleutel af, de server ziet alleen
-  versleutelde tekst. VaultX geeft de Bitwarden-apps "premium", dus de
-  officiële Bitwarden-extensie kan al automatisch invullen, ook de TOTP-code.
-- **Fase 35** zet Authentik forward auth op NPM-hosts (blok tussen
-  `# clusterforge-authentik`-markeringen, outpost op het Authentik-VIP) en
-  praat met NPM en Authentik via de agent met een allowlist.
-- VaultX' eigen ontwerp (`00-kernbeslissingen.md`, KB-01/02/03) beschrijft
-  precies deze wens en de valkuil: "Authentik-sessie = kluis open" kan niet
-  zonder dat iets anders de sleutel bewaart.
+| Wat valt weg | Gevolg |
+|---|---|
+| Authentik, sleutelbewaarder of ClusterForge | De extensie vraagt je master password (of PIN); invullen werkt daarna gewoon |
+| VaultX | De extensie werkt met de laatst gesynchroniseerde kluis (versleuteld in de browser), zoals de Bitwarden-apps |
+| De extensie zelf | Je typt zelf, zoals nu |
+| Certificaat vervallen | Niets verandert aan de apps; de extensie praat met VaultX en de sleutelbewaarder, valt anders terug op het master password |
+
+Geen enkele app, geen NPM-host en geen Authentik-provider wordt gewijzigd.
+
+## Hoe het werkt
+
+1. **Browserextensie "VaultX Invuller"** (Chrome, Edge, Firefox; Manifest V3).
+   Ze praat met VaultX zoals de Bitwarden-apps (dezelfde API, dezelfde
+   end-to-end versleuteling), herkent op elke pagina het loginformulier,
+   vult gebruikersnaam en wachtwoord in, en op een volgende stap of in een
+   TOTP-veld de MFA-code, en drukt Enter. Per item instelbaar: alleen
+   invullen, of invullen en versturen (standaard versturen). Nooit op een
+   pagina waarvan het adres niet bij het item past, nooit in een iframe van
+   een ander domein, nooit op http behalve op adressen die je zelf toelaat.
+2. **Ontgrendelen met Authentik.** Eén keer per browser ontgrendel je met je
+   master password; de extensie geeft dan een versleutelde kopie van je
+   kluissleutel aan de **sleutelbewaarder**. Daarna: ben je bij Authentik
+   aangemeld (met MFA), dan vraagt de extensie de sleutel terug en is de kluis
+   open zonder master password. Afmelden bij Authentik of 12 uur zonder
+   Authentik-sessie vergrendelt de kluis weer.
+3. **De sleutelbewaarder draait in de agents op de VaultX-nodes** (.157,
+   .158, .159, achter het VaultX-VIP .160 op een eigen pad). Elke node
+   antwoordt zelf, dus één node down is geen probleem. Hij geeft een
+   sleutel alleen terug met een geldig Authentik-token (handtekening,
+   vervaldatum, MFA gebruikt) én de apparaatsleutel van die browser, zodat
+   een gestolen Authentik-sessie alleen niet volstaat. Wat in de database
+   ligt, is versleuteld met een sleutel die alleen op de VaultX-nodes staat.
+4. **ClusterForge** zet het op via de GUI: sleutelbewaarder aan op het
+   VaultX-cluster, Authentik-applicatie voor de extensie (met MFA-eis),
+   extensie downloaden, lijst van browsers/apparaten met intrekken, logboek
+   van ontgrendelingen, en "Aandacht nodig" als de sleutelbewaarder op een
+   node niet antwoordt.
 
 ## De eerlijke veiligheidsafweging
 
-Er zijn twee aparte dingen: **inloggen** (wie ben je) en **ontgrendelen** (heb
-je de sleutel). Authentik bewijst het eerste, niet het tweede.
-
-| Hoe ontgrendelen | Wat je merkt | Wat het kost |
-|---|---|---|
-| Master password (nu) | Eén keer per apparaat/browserstart typen | Niets: een gestolen database of een gekraakte Authentik geeft geen enkel wachtwoord |
-| PIN of vingerafdruk in de extensie | Na de eerste keer alleen PIN of niets tot de browser sluit | Wie je ontgrendelde pc heeft, heeft je kluis |
-| **Sleutelbewaarder** ("SSO = kluis open", zoals Bitwardens Key Connector) | Aangemeld bij Authentik = kluis open, nergens nog een master password | Wie Authentik overneemt (of je Authentik-sessie steelt) én de sleutelbewaarder bereikt, heeft **alles**. Authentik wordt dan even belangrijk als de kluis: verplicht MFA (passkey) voor VaultX in Authentik, korte sessie, sleutelbewaarder op aparte, beperkte plek. |
-
-**Automatisch invullen** kan op drie manieren, van veilig naar handig:
-
-1. **Echte SSO in de app** (OIDC of header-login via Authentik): geen
-   wachtwoord meer nodig. Altijd de eerste keuze; fase 35 en VaultX fase 5
-   doen dit al voor apps die het kennen.
-2. **Browserextensie** (Bitwarden-extensie met VaultX als server): vult in op
-   jouw apparaat, het wachtwoord bestaat alleen ontsleuteld in jouw browser.
-   Werkt overal, ook buiten NPM. Nadeel: alleen in een browser met de
-   extensie (niet op een vreemde pc).
-3. **Inlog-poort door de agents** (forward auth + invullen op de NPM-nodes):
-   NPM vraagt bij elke aanvraag eerst Authentik, daarna de agent op de
-   NPM-node; die zet de gebruikersnaam en het wachtwoord (Basic-auth) of
-   meldt zelf aan op het loginformulier (met TOTP-code) en geeft de
-   sessiecookie terug. Werkt op elk apparaat zonder extensie. **Maar**: het
-   wachtwoord moet dan ontsleuteld bestaan op de NPM-nodes. Wie root krijgt
-   op een NPM-node, kan die wachtwoorden lezen. Daarom alleen voor apps die
-   je per app aanzet, nooit voor je hele kluis, alleen achter Authentik, en
-   elke invulling in het logboek.
-
-**Voorstel**: alle drie, elk waar het past. Standaard ladder per app:
-SSO als de app het kan, anders extensie, inlog-poort alleen als je het per
-app aanzet. En de sleutelbewaarder als bewuste keuze (vraag 1).
-
-## Hoe de inlog-poort werkt (agents)
-
-- Elke NPM-node (template `nginx-proxy-manager`) krijgt in de agent een
-  **inlog-poort** (protocol 57). De agent maakt zelf een sleutelpaar
-  (X25519); de geheime sleutel verlaat de node nooit
-  (`/etc/clusterforge/inlogpoort.key`, 0600). De publieke sleutel komt in de
-  facts.
-- Je legt een inlog vast in ClusterForge (**Publicatie → Automatisch
-  inloggen**): host, gebruikersnaam, wachtwoord, eventueel TOTP-geheim,
-  soort (Basic of formulier) en wie (Authentik-gebruikers of -groep). De
-  **browser** versleutelt dat naar de publieke sleutel van elke NPM-node.
-  De ClusterForge-server ziet en bewaart alleen versleutelde tekst (migratie
-  00130) en geeft die door aan de agents.
-- Op de host zet ClusterForge naast het Authentik-blok een tweede
-  `auth_request` naar de inlog-poort (markeringen `# clusterforge-inlog`),
-  via de bestaande fase-35-weg (NPM-API, snapshot vooraf, HTTPS-controle,
-  terugdraaien bij fout). De poort luistert alleen op het adres dat de
-  NPM-container bereikt, met een geheim per host in de aanvraag, en vertrouwt
-  alleen de Authentik-gebruiker die de outpost net bevestigde.
-- **Basic-auth**: de agent geeft een `Authorization`-kop terug die NPM naar de
-  app stuurt (een kop van de browser zelf wordt eerst gewist).
-- **Formulier**: bij het eerste bezoek zonder app-sessie meldt de agent zelf
-  aan (recept per app: loginpad, velden, TOTP-veld, succescontrole), en stuurt
-  je browser door met de sessiecookie van de app. Recepten voor wat je draait
-  (o.a. Zabbix, Portainer, Proxmox, PBS, OPNsense, TrueNAS, NPM, Home
-  Assistant); een eigen recept kan in de GUI.
-- **TOTP**: de agent rekent de code zelf uit het geheim, op het moment van
-  aanmelden.
+- De kluis blijft end-to-end versleuteld; de VaultX-server ziet nog steeds
+  nooit een wachtwoord.
+- **Nieuw risico**: wie tegelijk je Authentik-account (met MFA) én een
+  ontgrendelde browser van jou heeft, heeft je kluis. Dat is ongeveer
+  hetzelfde als vandaag met een extensie die ontgrendeld blijft. Wie alleen
+  Authentik overneemt, heeft niets, want de apparaatsleutel ontbreekt.
+- Wie root krijgt op een VaultX-node én op je pc, kan alles. Dat was al zo.
+- Automatisch Enter op een nagemaakte loginpagina is het grootste gevaar
+  van invullen; daarom alleen op exact het adres van het item.
 
 ## Mijlpalen
 
 | | Wat | Agent |
 |---|---|---|
 | **M0** | Dit plan (draft PR). | – |
-| **M1** | **VaultX-SSO nakijken en rechtzetten** via de GUI: pagina VaultX toont per node of OIDC naar het juiste Authentik wijst, sessieduur, back-channel logout, NPM-host `vaultx.jbogaert.be` naar VIP .160 (stond nog naar het oude IP) en of Authentik MFA eist voor de VaultX-applicatie. Knoppen "Rechtzetten" (vaultx-ctl.sh `sso`, node per node) en "MFA verplichten" (Authentik-flow). | – |
-| **M2** | **Inlog-poort** in de agent (Basic-auth), sleutelpaar, versleutelen in de browser, migratie 00130, NPM-blok zetten/weghalen met controle. | 57 |
-| **M3** | Formulier-login + TOTP, recepten, eigen recept, testen tegen echte apps in CI (een testapp met formulier en TOTP achter echte NPM + nagespeelde Authentik, zoals fase 35). | – |
-| **M4** | **Kluis met Authentik ontgrendelen** (sleutelbewaarder) en "Delen met inlog-poort" vanuit de VaultX-webkluis, zodat je wachtwoorden maar op één plek bijhoudt. Dit is werk in de VaultX-repo zelf (zie vraag 2). | – |
-| **M5** | Logboek per invulling, **Aandacht nodig** (inlog faalt, wachtwoord veranderd in de app, TOTP fout, node zonder sleutel), drift (iemand haalde het NPM-blok weg), dashboard-API. | – |
-
-Elke mijlpaal: tests, schermafdrukken desktop en gsm, één gecombineerd image
-op de hoogste stam en het volledige updatecommando. Op de nodes niets
-handmatig: de agents bijwerken gaat via Nodes → Agents bijwerken.
+| **M1** | Extensie: aanmelden bij VaultX met master password, kluis synchroniseren en ontsleutelen (Bitwarden-formaat), loginformulieren herkennen, invullen, TOTP, Enter. Test in CI met echte Chromium tegen een nagespeelde VaultX en testpagina's (gewone login, twee stappen, TOTP-veld, nagemaakt domein). | – |
+| **M2** | Sleutelbewaarder in de agent op de VaultX-nodes, apparaatsleutel per browser, Authentik-token controleren. | 57 |
+| **M3** | ClusterForge-GUI: aanzetten op het VaultX-cluster, Authentik-applicatie met MFA-eis, extensie downloaden, apparaten en intrekken, logboek (migratie 00130). | – |
+| **M4** | Aandacht nodig, dashboard-API, schermafdrukken en het gecombineerde image. | – |
 
 ## Vragen (zonder antwoord geldt het voorstel)
 
-1. **Kluis openen met alleen Authentik (sleutelbewaarder)?** Voorstel: ja,
-   maar alleen samen met verplichte MFA (passkey of TOTP) in Authentik voor
-   VaultX en een sessie van hooguit 12 uur; je master password blijft werken
-   als reserve. Zonder dit blijft het: Authentik voor het account, master
-   password of PIN voor de kluis.
-2. **Schrijfrechten op de VaultX-repo.** M4 is werk in VaultX zelf. Voorstel:
-   voeg `Jonasz1996/vaultx` toe in Project settings → Repositories; ik werk op
-   een eigen tak met een PR. Zonder die rechten bouw ik M1-M3 en M5 en houdt
-   ClusterForge de inloggegevens voor de poort zelf bij (versleuteld).
-3. **Inlog-poort per app aanzetten of overal?** Voorstel: per app, alleen
-   voor apps zonder SSO, en alleen voor jouw Authentik-account. Overal aan
-   zou alle wachtwoorden op de NPM-nodes zetten.
+1. **Enter automatisch?** Voorstel: ja voor alle items, per item uit te
+   zetten.
+2. **Welke browsers?** Voorstel: Chrome/Edge en Firefox. De extensie zelf
+   installeren in je browser is de enige stap die niet via de GUI kan.
 
 ## Stand
 
-- M0: dit plan.
+- M0: plan herschreven na het antwoord van Jonas (geen inlog-poort in NPM).
