@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import { Suspense, useMemo, useState } from "react";
 import { errText, inScope, ScopeBar, stateLabel, stateTone, useDockerAll, useDockerRun, useScope } from "@/components/docker/common";
@@ -55,7 +56,9 @@ function Containers() {
   const all = useDockerAll<ContainerSummary[]>("/containers/json", { all: "1" }, 10_000);
   const [scope, setScope] = useScope();
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<(typeof filters)[number]["key"]>("");
+  const params = useSearchParams();
+  // ?filter=problem komt van Aandacht nodig.
+  const [filter, setFilter] = useState<(typeof filters)[number]["key"]>(() => filters.find((f) => f.key === params.get("filter"))?.key ?? "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { run, modal } = useDockerRun();
   const need = hostsQ.data?.protocol ?? 46;

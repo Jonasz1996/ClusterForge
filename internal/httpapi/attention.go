@@ -164,6 +164,35 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 			names(sm.SSHWaiting)+". Kun je nog inloggen? Bevestig, anders zet de node de oude instellingen terug.", "/kwetsbaarheden/verharding", len(sm.SSHWaiting))
 	}
 
+	// Docker (fase 28): containers die niet gezond draaien en containers
+	// die root op de host geven.
+	if s.docker != nil {
+		if hosts, err := s.docker.Hosts(ctx); err == nil {
+			var bad, risky []string
+			nBad, nRisky := 0, 0
+			for _, h := range hosts {
+				if h.Summary == nil || !h.Online {
+					continue
+				}
+				for _, pr := range h.Summary.Problems {
+					nBad++
+					bad = append(bad, pr.Name+" op "+h.Hostname+" ("+pr.Reason+")")
+				}
+				seen := map[string]bool{}
+				for _, f := range h.Summary.Findings {
+					if f.Serious() && !seen[f.ID] {
+						seen[f.ID] = true
+						nRisky++
+						risky = append(risky, f.Name+" op "+h.Hostname)
+					}
+				}
+			}
+			add("docker-problems", red, plural(nBad, "container draait", "containers draaien")+" niet gezond", names(bad), "/docker/containers?filter=problem", nBad)
+			add("docker-root", amber, plural(nRisky, "container kan", "containers kunnen")+" root worden op de host (privileged of de Docker-socket)",
+				names(risky), "/docker", nRisky)
+		}
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}

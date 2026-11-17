@@ -115,6 +115,7 @@ export const navGroups: NavGroup[] = [
           { href: "/docker/images", label: "Images", keywords: "docker image pull update registry digest" },
           { href: "/docker/volumes", label: "Volumes", keywords: "docker volume opslag" },
           { href: "/docker/networks", label: "Netwerken", keywords: "docker network subnet bridge macvlan" },
+          { href: "/docker/events", label: "Gebeurtenissen", keywords: "docker events crash oom die gestopt" },
           { href: "/docker/cleanup", label: "Opruimen", adminOnly: true, keywords: "docker prune opruimen schijf ruimte" },
         ],
       },
