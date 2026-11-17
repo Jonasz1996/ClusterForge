@@ -28,6 +28,7 @@ import {
   type AIVInstance,
   type AIVOverview,
   type AIVStart,
+  type AIVUnit,
 } from "@/lib/aiverslag";
 
 export default function AIVerslagPage() {
@@ -443,6 +444,20 @@ const unitLabel: Record<string, string> = {
   "nginx.service": "nginx",
 };
 
+function unitState(u: AIVUnit) {
+  if (u.active === "failed")
+    return `mislukt${u.result ? ` (${u.result})` : ""}`;
+  if (u.active === "active")
+    return u.sub === "running"
+      ? "draait"
+      : u.sub === "waiting"
+        ? "wacht"
+        : u.sub;
+  if (u.active === "activating") return "bezig";
+  if (u.active === "inactive" && u.result === "success") return "klaar";
+  return u.active;
+}
+
 function ServiceCard({ o }: { o: AIVOverview }) {
   const v = o.instance;
   return (
@@ -477,8 +492,7 @@ function ServiceCard({ o }: { o: AIVOverview }) {
               {unitLabel[u.name] ?? u.name}
             </span>
             <span className="text-xs text-slate-500">
-              {u.active === "active" ? u.sub : u.active}
-              {u.result && u.result !== "success" ? ` · ${u.result}` : ""}
+              {unitState(u)}
               {u.since ? ` · ${aivDate(u.since)}` : ""}
             </span>
           </li>
