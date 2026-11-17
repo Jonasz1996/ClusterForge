@@ -1,0 +1,18 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De dagelijkse back-up van de homepage (deploy/homepage-backup.sh, zonder
+# de logregels, de 5 nieuwste) op de node die de checks doet, zodat de
+# worker hem daar nakijkt. pg_dump gaat naar de database van het cluster
+# ({{ .params.db_vip }}) met PG* uit homepage.env.
+[Unit]
+Description=Back-up van de homepage ({{ .cluster.slug }})
+
+[Service]
+Type=oneshot
+User=postgres
+Group=homepage
+UMask=0027
+ExecCondition=+/usr/local/lib/clusterforge/homepage-ctl.sh backup-mag
+EnvironmentFile=/etc/cf-homepage/homepage.env
+Environment=BACKUP_DIR=/var/backups/homepage
+ExecStart=/bin/sh /opt/homepage/deploy/homepage-backup.sh
+NoNewPrivileges=true

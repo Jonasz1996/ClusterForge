@@ -1,0 +1,10 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+[Unit]
+Description=Dagelijkse back-up van de homepage ({{ .cluster.slug }})
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

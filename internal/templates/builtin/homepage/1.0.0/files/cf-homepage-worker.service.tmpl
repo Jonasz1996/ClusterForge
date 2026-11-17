@@ -1,0 +1,33 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De worker van de homepage doet alle checks (pings, http, push, back-ups,
+# meldingen) en draait op precies één node: de node met het VIP
+# ({{ .params.vip }}). keepalived en de timer cf-homepage-volg starten en
+# stoppen hem; daarbovenop wacht hij op een slot in de database
+# (homepage-ctl.sh worker), zodat er nooit twee nodes tegelijk checken.
+# Daarom niet enabled.
+[Unit]
+Description=homepage checks (worker) van {{ .cluster.slug }}
+After=network-online.target cf-homepage-api.service
+Wants=network-online.target
+
+[Service]
+User=homepage
+Group=homepage
+WorkingDirectory=/opt/homepage/backend
+# Alleen op de VIP-node, en pas na de overname.
+ExecCondition=+/usr/local/lib/clusterforge/homepage-ctl.sh worker-mag
+EnvironmentFile=-/etc/cf-homepage/homepage.env
+ExecStart=/usr/local/lib/clusterforge/homepage-ctl.sh worker
+RuntimeDirectory=cf-homepage-worker
+Restart=always
+RestartSec=10
+# Nodig voor ping.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=-/mnt/homepage-backup
+LockPersonality=true
+RestrictSUIDSGID=true

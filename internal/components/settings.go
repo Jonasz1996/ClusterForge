@@ -268,6 +268,9 @@ func settingsEffects(p SettingsPlan, spec Spec, nodes []rollNode) []string {
 		if changed["shared_buffers"] {
 			out = append(out, "ClusterForge schrijft shared_buffers in de configuratie van Patroni op elke node.")
 		}
+		if changed["shared_preload_libraries"] {
+			out = append(out, "ClusterForge schrijft shared_preload_libraries in de configuratie van Patroni op elke node; het pakket (zoals TimescaleDB) moet daar al staan.")
+		}
 		if changed["max_connections"] {
 			out = append(out, "max_connections komt in etcd; Patroni geeft het door aan elke node.")
 		}

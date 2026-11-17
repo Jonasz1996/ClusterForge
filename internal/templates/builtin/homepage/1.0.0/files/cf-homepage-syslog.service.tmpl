@@ -1,0 +1,32 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De syslog-ontvanger van de homepage (udp/tcp 514) op elke node: de
+# berichten komen op het VIP ({{ .params.vip }}) binnen. Pas na de overname
+# (tot dan houdt de oude homepage poort 514 vast); homepage-ctl.sh
+# voorstart en volg starten hem dan.
+[Unit]
+Description=homepage syslog-ontvanger van {{ .cluster.slug }}
+After=network-online.target cf-homepage-api.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=homepage
+Group=homepage
+WorkingDirectory=/opt/homepage/backend
+ExecCondition=+/usr/local/lib/clusterforge/homepage-ctl.sh syslog-mag
+EnvironmentFile=-/etc/cf-homepage/homepage.env
+ExecStart=/opt/homepage/.venv/bin/python -m app.syslog.server
+Restart=always
+RestartSec=5
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=homepage-syslog
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -52,6 +52,15 @@ params:
     help: Netwerken (CIDR) van containers op de nodes die PostgreSQL mogen bereiken, gescheiden door spaties, zoals 172.16.0.0/12 voor Docker.
     optional: true
     pattern: "[0-9./]+( [0-9./]+)*"
+  # Bibliotheken die PostgreSQL bij het starten laadt, zoals timescaledb
+  # voor de homepage. Het pakket moet op elke node staan (de template van de
+  # app installeert het); een wijziging herstart PostgreSQL node voor node.
+  - name: shared_preload_libraries
+    type: string
+    label: Vooraf geladen bibliotheken
+    help: Alleen timescaledb, voor een app met TimescaleDB (zoals de homepage). Het pakket van TimescaleDB moet op elke node staan; wijzigen herstart PostgreSQL node voor node.
+    optional: true
+    pattern: "timescaledb"
   - name: replication_password
     type: secret
     label: Wachtwoord van de replicatie

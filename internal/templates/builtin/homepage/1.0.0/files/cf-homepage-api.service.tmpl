@@ -1,0 +1,34 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De api van de homepage op elke node van het cluster tegen dezelfde
+# PostgreSQL ({{ .params.db_vip }}). Zolang de database er niet is of de
+# installatie nog niet is overgenomen, faalt voorstart en probeert systemd
+# het elke 15 s opnieuw. Zoals homepage-api.service van de homepage zelf.
+[Unit]
+Description=homepage api van {{ .cluster.slug }}
+After=network-online.target nginx.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=homepage
+Group=homepage
+WorkingDirectory=/opt/homepage/backend
+# Als root: markering en sleutel nakijken, de configuratie en nginx schrijven.
+ExecStartPre=+/usr/local/lib/clusterforge/homepage-ctl.sh voorstart
+EnvironmentFile=-/etc/cf-homepage/homepage.env
+# alembic onder een slot in de database: nooit twee nodes tegelijk.
+ExecStartPre=/usr/local/lib/clusterforge/homepage-ctl.sh migreren
+ExecStart=/opt/homepage/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-access-log --timeout-graceful-shutdown 10
+Restart=always
+RestartSec=15
+TimeoutStartSec=900
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=-/mnt/homepage-backup
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
