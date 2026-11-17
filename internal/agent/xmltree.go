@@ -101,19 +101,3 @@ func (n *xmlNode) all(name string) []*xmlNode {
 	}
 	return out
 }
-
-// find zoekt het eerste element met deze naam, op elke diepte.
-func (n *xmlNode) find(name string) *xmlNode {
-	if n == nil {
-		return nil
-	}
-	for _, c := range n.Children {
-		if c.Name == name {
-			return c
-		}
-		if f := c.find(name); f != nil {
-			return f
-		}
-	}
-	return nil
-}
