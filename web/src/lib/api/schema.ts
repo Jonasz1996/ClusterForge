@@ -4499,6 +4499,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pbs/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De Proxmox Backup Servers met een agent (fase 32) */
+        get: operations["listPbsServers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pbs/servers/{nodeId}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Overzicht van een PBS - machine, datastores, jobs, mislukte taken en waarschuwingen */
+        get: operations["getPbsOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pbs/servers/{nodeId}/api": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Een pad van de PBS-API lezen via de agent (proxmox-backup-debug api get)
+         * @description Een kijker kan /access, remotes, ACME, meldingen en certificaten niet lezen.
+         */
+        get: operations["getPbsApi"];
+        put?: never;
+        /**
+         * Iets veranderen via de PBS-API, als taak pbs.action (admin)
+         * @description Alleen de aanroepen in internal/pbs/policy.go. Gevaarlijke aanroepen (datastore, groep of namespace
+         *     verwijderen, schijf wissen, herstarten, netwerk toepassen) vragen confirm. Wachtwoorden gaan versleuteld in de taak.
+         */
+        post: operations["callPbsApi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters": {
         parameters: {
             query?: never;
@@ -21762,6 +21825,113 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listPbsServers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getPbsOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getPbsApi: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met velden, zoals {"ns":"pve"} */
+                params?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het antwoord van PBS onder data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    callPbsApi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveCallInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listPveDatacenters: {

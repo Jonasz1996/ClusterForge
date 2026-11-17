@@ -56,7 +56,7 @@ func init() {
 // HostActions zijn de acties die niet over één gast gaan.
 func isHostAction(a string) bool {
 	switch a {
-	case PVETemplate, PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance:
+	case PVETemplate, PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI:
 		return true
 	}
 	return false
@@ -204,6 +204,11 @@ func (p PVERun) validateHost() error {
 			return fmt.Errorf("ongeldige ZFS-pool")
 		}
 	case PVEMaintenance:
+	case PBSAPI:
+		if p.API == nil {
+			return fmt.Errorf("pbs_api zonder aanroep")
+		}
+		return p.API.ValidatePBS()
 	}
 	return nil
 }

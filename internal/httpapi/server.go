@@ -47,6 +47,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
@@ -111,6 +112,7 @@ type Server struct {
 	logs         *logs.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
+	pbs          *pbs.Service
 	docker       *dockerhost.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
@@ -206,6 +208,8 @@ type Deps struct {
 	// Firewall beheert ufw op de nodes (fase 16).
 	Firewall *firewall.Service
 	PVEHosts *pvehost.Service
+	// PBS beheert de Proxmox Backup Servers (fase 32).
+	PBS *pbs.Service
 	// Docker is Docker zoals Portainer (fase 28).
 	Docker  *dockerhost.Service
 	Version string
@@ -252,6 +256,7 @@ func New(d Deps) *Server {
 		firewall:     d.Firewall,
 		security:     d.Security,
 		pvehosts:     d.PVEHosts,
+		pbs:          d.PBS,
 		docker:       d.Docker,
 		recipes:      recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.

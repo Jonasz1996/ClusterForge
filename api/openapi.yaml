@@ -4768,6 +4768,74 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /pbs/servers:
+    get:
+      operationId: listPbsServers
+      summary: De Proxmox Backup Servers met een agent (fase 32)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /pbs/servers/{nodeId}/overview:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPbsOverview
+      summary: Overzicht van een PBS - machine, datastores, jobs, mislukte taken en waarschuwingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pbs/servers/{nodeId}/api:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPbsApi
+      summary: Een pad van de PBS-API lezen via de agent (proxmox-backup-debug api get)
+      description: Een kijker kan /access, remotes, ACME, meldingen en certificaten niet lezen.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: params, in: query, required: false, description: "JSON-object met velden, zoals {\"ns\":\"pve\"}", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van PBS onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: callPbsApi
+      summary: Iets veranderen via de PBS-API, als taak pbs.action (admin)
+      description: |
+        Alleen de aanroepen in internal/pbs/policy.go. Gevaarlijke aanroepen (datastore, groep of namespace
+        verwijderen, schijf wissen, herstarten, netwerk toepassen) vragen confirm. Wachtwoorden gaan versleuteld in de taak.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveCallInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters

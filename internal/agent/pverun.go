@@ -56,6 +56,9 @@ func (r *RunExecutor) host() pveHost {
 
 // pve voert een run pve uit.
 func (r *RunExecutor) pve(ctx context.Context, dir string, p *protocol.PVERun, out io.Writer, st *protocol.RunStatus) (int, error) {
+	if p.Action == protocol.PBSAPI {
+		return r.pbsAPI(ctx, dir, p.API, out, st)
+	}
 	h := r.host()
 	if !h.isHost() {
 		return -1, errNotPVE

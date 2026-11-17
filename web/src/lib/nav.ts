@@ -98,6 +98,15 @@ export const navGroups: NavGroup[] = [
         ],
       },
       { href: "/proxmox/host-updates", label: "Host-updates", keywords: "pve apt upgrade bijwerken kernel herstart onderhoudsmodus rolling" },
+      {
+        href: "/pbs",
+        label: "Backup Server",
+        keywords: "pbs proxmox backup server datastore back-up",
+        tabs: [
+          { href: "/pbs", label: "Overzicht" },
+          { href: "/pbs/taken", label: "Taken", keywords: "pbs task log upid back-up verify gc" },
+        ],
+      },
     ],
   },
   {
