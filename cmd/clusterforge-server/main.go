@@ -80,6 +80,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
+	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -232,6 +233,7 @@ func serve() error {
 	csec.Box = box
 	// Zabbix-agents: zabbix-agent2 met een eigen PSK per node, via runs en de Zabbix API.
 	zba := zabbixagent.NewService(pool, ev, runner, bus, log)
+	zbm := zabbixmon.NewService(pool, ev, zba, log)
 	zba.Box = box
 	// Fase 21: Docker-stacks via agentprotocol 33 en runs.
 	stk := stacks.NewService(pool, ev, runner, bus, log)
@@ -448,6 +450,7 @@ func serve() error {
 	goLoop(ctx, log, "cmps", cmps.Run)
 	goLoop(ctx, log, "crowdsec", csec.Loop)
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
+	goLoop(ctx, log, "zabbixmon", zbm.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)
 	goLoop(ctx, log, "soc", socs.Run)
@@ -469,7 +472,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

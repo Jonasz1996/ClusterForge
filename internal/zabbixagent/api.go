@@ -81,6 +81,11 @@ func (c *Client) call(ctx context.Context, method string, params, out any) error
 	return json.Unmarshal(r.Result, out)
 }
 
+// Call doet één aanvraag naar de API (voor de monitoring van fase 33).
+func (c *Client) Call(ctx context.Context, method string, params, out any) error {
+	return c.call(ctx, method, params, out)
+}
+
 // Version is de versie van Zabbix.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	var v string

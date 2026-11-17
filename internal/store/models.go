@@ -1986,3 +1986,24 @@ type ZabbixAgentSetting struct {
 	UpdatedAt      time.Time
 	UpdatedBy      *uuid.UUID
 }
+
+type ZabbixHostLink struct {
+	Hostid    string
+	NodeID    *uuid.UUID
+	UpdatedAt time.Time
+	UpdatedBy *uuid.UUID
+}
+
+type ZabbixSnapshot struct {
+	At           time.Time
+	Disaster     int32
+	High         int32
+	Average      int32
+	Warning      int32
+	Info         int32
+	Hosts        int32
+	HostsDown    int32
+	HostsUnknown int32
+	Nvps         pgtype.Float8
+	Queue        *int32
+}

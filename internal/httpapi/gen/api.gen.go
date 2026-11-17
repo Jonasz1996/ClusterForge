@@ -2906,22 +2906,22 @@ func (e MetricPanelUnit) Valid() bool {
 
 // Defines values for MetricsRange.
 const (
-	N1h  MetricsRange = "1h"
-	N24h MetricsRange = "24h"
-	N6h  MetricsRange = "6h"
-	N7d  MetricsRange = "7d"
+	MetricsRangeN1h  MetricsRange = "1h"
+	MetricsRangeN24h MetricsRange = "24h"
+	MetricsRangeN6h  MetricsRange = "6h"
+	MetricsRangeN7d  MetricsRange = "7d"
 )
 
 // Valid indicates whether the value is a known member of the MetricsRange enum.
 func (e MetricsRange) Valid() bool {
 	switch e {
-	case N1h:
+	case MetricsRangeN1h:
 		return true
-	case N24h:
+	case MetricsRangeN24h:
 		return true
-	case N6h:
+	case MetricsRangeN6h:
 		return true
-	case N7d:
+	case MetricsRangeN7d:
 		return true
 	default:
 		return false
@@ -4335,6 +4335,27 @@ func (e GetSocParamsWindow) Valid() bool {
 	case SocWindowParam24h:
 		return true
 	case SocWindowParam7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetZabbixOverviewParamsWindow.
+const (
+	GetZabbixOverviewParamsWindowN24h GetZabbixOverviewParamsWindow = "24h"
+	GetZabbixOverviewParamsWindowN30d GetZabbixOverviewParamsWindow = "30d"
+	GetZabbixOverviewParamsWindowN7d  GetZabbixOverviewParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetZabbixOverviewParamsWindow enum.
+func (e GetZabbixOverviewParamsWindow) Valid() bool {
+	switch e {
+	case GetZabbixOverviewParamsWindowN24h:
+		return true
+	case GetZabbixOverviewParamsWindowN30d:
+		return true
+	case GetZabbixOverviewParamsWindowN7d:
 		return true
 	default:
 		return false
@@ -14023,6 +14044,227 @@ type ZabbixAgentsOverview struct {
 	Settings ZabbixAgentSettings `json:"settings"`
 }
 
+// ZabbixCounts defines model for ZabbixCounts.
+type ZabbixCounts struct {
+	Average          int `json:"average"`
+	Disaster         int `json:"disaster"`
+	High             int `json:"high"`
+	Hosts            int `json:"hosts"`
+	HostsDisabled    int `json:"hosts_disabled"`
+	HostsDown        int `json:"hosts_down"`
+	HostsMaintenance int `json:"hosts_maintenance"`
+	HostsOk          int `json:"hosts_ok"`
+	HostsUnknown     int `json:"hosts_unknown"`
+	Info             int `json:"info"`
+
+	// Nodes Actieve ClusterForge-nodes
+	Nodes         int `json:"nodes"`
+	NotClassified int `json:"not_classified"`
+	Suppressed    int `json:"suppressed"`
+	Unacked       int `json:"unacked"`
+	Warning       int `json:"warning"`
+
+	// Watched Daarvan met een Zabbix-host
+	Watched int `json:"watched"`
+}
+
+// ZabbixHANode defines model for ZabbixHANode.
+type ZabbixHANode struct {
+	Address  string                       `json:"address"`
+	LastSeen nullable.Nullable[time.Time] `json:"last_seen"`
+	Name     string                       `json:"name"`
+
+	// Status Een van: active, standby, stopped, unavailable of leeg
+	Status string `json:"status"`
+}
+
+// ZabbixHealth defines model for ZabbixHealth.
+type ZabbixHealth struct {
+	Busiest []struct {
+		Busy float32 `json:"busy"`
+		Name string  `json:"name"`
+	} `json:"busiest"`
+
+	// CacheConfig % gebruikt
+	CacheConfig nullable.Nullable[float32] `json:"cache_config"`
+
+	// CacheHistory % gebruikt
+	CacheHistory nullable.Nullable[float32] `json:"cache_history"`
+
+	// CacheValue % gebruikt
+	CacheValue nullable.Nullable[float32] `json:"cache_value"`
+	Hostid     string                     `json:"hostid"`
+	Name       string                     `json:"name"`
+
+	// Nvps Nodige nieuwe waarden per seconde
+	Nvps               nullable.Nullable[float32]   `json:"nvps"`
+	PreprocessingQueue nullable.Nullable[float32]   `json:"preprocessing_queue"`
+	Queue              nullable.Nullable[float32]   `json:"queue"`
+	Queue10m           nullable.Nullable[float32]   `json:"queue_10m"`
+	Updated            nullable.Nullable[time.Time] `json:"updated"`
+
+	// Uptime Seconden
+	Uptime nullable.Nullable[float32] `json:"uptime"`
+
+	// Values Verwerkte waarden per seconde
+	Values nullable.Nullable[float32] `json:"values"`
+}
+
+// ZabbixHost defines model for ZabbixHost.
+type ZabbixHost struct {
+	// Active Actieve checks. Een van: ok, down, unknown, disabled
+	Active string `json:"active"`
+
+	// Available Een van: ok, down, unknown, none, disabled
+	Available  string   `json:"available"`
+	Enabled    bool     `json:"enabled"`
+	Groups     []string `json:"groups"`
+	Host       string   `json:"host"`
+	Hostid     string   `json:"hostid"`
+	Interfaces []struct {
+		Address string `json:"address"`
+
+		// Available Een van: ok, down, unknown
+		Available string `json:"available"`
+		Error     string `json:"error"`
+
+		// Type Een van: agent, snmp, ipmi, jmx
+		Type string `json:"type"`
+	} `json:"interfaces"`
+	Maintenance bool                              `json:"maintenance"`
+	Name        string                            `json:"name"`
+	Node        nullable.Nullable[ZabbixNodeLink] `json:"node"`
+	Problems    int                               `json:"problems"`
+
+	// Proxy Naam van de proxy; leeg is de server
+	Proxy string `json:"proxy"`
+
+	// Worst Zwaarste open probleem
+	Worst int `json:"worst"`
+}
+
+// ZabbixHostLinkInput defines model for ZabbixHostLinkInput.
+type ZabbixHostLinkInput struct {
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+}
+
+// ZabbixNodeLink defines model for ZabbixNodeLink.
+type ZabbixNodeLink struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+	Hostname    string                                `json:"hostname"`
+	NodeId      openapi_types.UUID                    `json:"node_id"`
+
+	// Source Hoe de koppeling gevonden is. Een van: manual, agent, name, ip
+	Source string `json:"source"`
+}
+
+// ZabbixOverview defines model for ZabbixOverview.
+type ZabbixOverview struct {
+	At time.Time `json:"at"`
+
+	// Configured Adres en token van de Zabbix-API zijn ingesteld
+	Configured bool         `json:"configured"`
+	Counts     ZabbixCounts `json:"counts"`
+
+	// Error Fout van de laatste ronde; leeg als die lukte
+	Error string `json:"error"`
+
+	// FrontendUrl Adres van de Zabbix-webinterface
+	FrontendUrl  string             `json:"frontend_url"`
+	GeneratedAt  time.Time          `json:"generated_at"`
+	Ha           []ZabbixHANode     `json:"ha"`
+	HaError      string             `json:"ha_error"`
+	Health       []ZabbixHealth     `json:"health"`
+	HealthError  string             `json:"health_error"`
+	Hosts        []ZabbixHost       `json:"hosts"`
+	Problems     []ZabbixProblem    `json:"problems"`
+	Proxies      []ZabbixProxy      `json:"proxies"`
+	ProxiesError string             `json:"proxies_error"`
+	State        ZabbixState        `json:"state"`
+	Trend        []ZabbixTrendPoint `json:"trend"`
+	Unwatched    []ZabbixUnwatched  `json:"unwatched"`
+
+	// UpdatedAt Laatste geslaagde ronde
+	UpdatedAt nullable.Nullable[time.Time] `json:"updated_at"`
+	Version   string                       `json:"version"`
+
+	// Window Een van: 24h, 7d, 30d
+	Window string `json:"window"`
+}
+
+// ZabbixProblem defines model for ZabbixProblem.
+type ZabbixProblem struct {
+	Acknowledged bool   `json:"acknowledged"`
+	Eventid      string `json:"eventid"`
+	Hosts        []struct {
+		Hostid string                            `json:"hostid"`
+		Name   string                            `json:"name"`
+		Node   nullable.Nullable[ZabbixNodeLink] `json:"node"`
+	} `json:"hosts"`
+	Name   string `json:"name"`
+	Opdata string `json:"opdata"`
+
+	// Severity 0 niet ingedeeld, 1 info, 2 waarschuwing, 3 gemiddeld, 4 hoog, 5 ramp
+	Severity int       `json:"severity"`
+	Since    time.Time `json:"since"`
+
+	// Suppressed Onderdrukt (onderhoud of symptoom); telt niet mee
+	Suppressed bool `json:"suppressed"`
+	Tags       []struct {
+		Tag   string `json:"tag"`
+		Value string `json:"value"`
+	} `json:"tags"`
+	Triggerid string `json:"triggerid"`
+}
+
+// ZabbixProxy defines model for ZabbixProxy.
+type ZabbixProxy struct {
+	// Compatibility Een van: current, outdated, unsupported of leeg
+	Compatibility string                       `json:"compatibility"`
+	Hosts         int                          `json:"hosts"`
+	LastSeen      nullable.Nullable[time.Time] `json:"last_seen"`
+
+	// Mode Een van: active, passive of leeg
+	Mode    string `json:"mode"`
+	Name    string `json:"name"`
+	Proxyid string `json:"proxyid"`
+
+	// State Een van: online, offline, unknown of leeg
+	State   string `json:"state"`
+	Version string `json:"version"`
+}
+
+// ZabbixState defines model for ZabbixState.
+type ZabbixState struct {
+	// Level Een van: kritiek, probleem, waarschuwing, normaal, onbekend
+	Level   string   `json:"level"`
+	Reasons []string `json:"reasons"`
+}
+
+// ZabbixTrendPoint defines model for ZabbixTrendPoint.
+type ZabbixTrendPoint struct {
+	At        time.Time                  `json:"at"`
+	Average   int                        `json:"average"`
+	Disaster  int                        `json:"disaster"`
+	High      int                        `json:"high"`
+	Hosts     int                        `json:"hosts"`
+	HostsDown int                        `json:"hosts_down"`
+	Info      int                        `json:"info"`
+	Nvps      nullable.Nullable[float32] `json:"nvps"`
+	Queue     nullable.Nullable[int]     `json:"queue"`
+	Warning   int                        `json:"warning"`
+}
+
+// ZabbixUnwatched defines model for ZabbixUnwatched.
+type ZabbixUnwatched struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+	Hostname    string                                `json:"hostname"`
+	Ip          string                                `json:"ip"`
+	NodeId      openapi_types.UUID                    `json:"node_id"`
+}
+
 // AuditActorType defines model for AuditActorType.
 type AuditActorType string
 
@@ -14738,6 +14980,14 @@ type ListTestRunsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetZabbixOverviewParams defines parameters for GetZabbixOverview.
+type GetZabbixOverviewParams struct {
+	Window *GetZabbixOverviewParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetZabbixOverviewParamsWindow defines parameters for GetZabbixOverview.
+type GetZabbixOverviewParamsWindow string
+
 // SetAgentEndpointsJSONRequestBody defines body for SetAgentEndpoints for application/json ContentType.
 type SetAgentEndpointsJSONRequestBody SetAgentEndpointsJSONBody
 
@@ -15190,6 +15440,9 @@ type SetZabbixAgentNodesJSONRequestBody = ZabbixAgentNodesInput
 
 // UpdateZabbixAgentSettingsJSONRequestBody defines body for UpdateZabbixAgentSettings for application/json ContentType.
 type UpdateZabbixAgentSettingsJSONRequestBody = ZabbixAgentSettingsInput
+
+// SetZabbixHostLinkJSONRequestBody defines body for SetZabbixHostLink for application/json ContentType.
+type SetZabbixHostLinkJSONRequestBody = ZabbixHostLinkInput
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -16333,6 +16586,18 @@ type ServerInterface interface {
 	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
 	// (POST /zabbix-agents/test)
 	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
+	// DeleteZabbixHostLink De handmatige koppeling weghalen (admin)
+	// (DELETE /zabbix/hosts/{hostid}/link)
+	DeleteZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string)
+	// SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
+	// (PUT /zabbix/hosts/{hostid}/link)
+	SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string)
+	// GetZabbixOverview Zabbix-monitoring (fase 33)
+	// (GET /zabbix/overview)
+	GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams)
+	// RefreshZabbix Meteen een verzamelronde draaien
+	// (POST /zabbix/refresh)
+	RefreshZabbix(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -18616,6 +18881,30 @@ func (_ Unimplemented) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.
 // TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
 // (POST /zabbix-agents/test)
 func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteZabbixHostLink De handmatige koppeling weghalen (admin)
+// (DELETE /zabbix/hosts/{hostid}/link)
+func (_ Unimplemented) DeleteZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
+// (PUT /zabbix/hosts/{hostid}/link)
+func (_ Unimplemented) SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixOverview Zabbix-monitoring (fase 33)
+// (GET /zabbix/overview)
+func (_ Unimplemented) GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshZabbix Meteen een verzamelronde draaien
+// (POST /zabbix/refresh)
+func (_ Unimplemented) RefreshZabbix(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -29281,6 +29570,105 @@ func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteZabbixHostLink operation middleware
+func (siw *ServerInterfaceWrapper) DeleteZabbixHostLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostid" -------------
+	var hostid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostid", chi.URLParam(r, "hostid"), &hostid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteZabbixHostLink(w, r, hostid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZabbixHostLink operation middleware
+func (siw *ServerInterfaceWrapper) SetZabbixHostLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostid" -------------
+	var hostid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostid", chi.URLParam(r, "hostid"), &hostid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZabbixHostLink(w, r, hostid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixOverview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetZabbixOverviewParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixOverview(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshZabbix operation middleware
+func (siw *ServerInterfaceWrapper) RefreshZabbix(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshZabbix(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -30101,6 +30489,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/zabbix-agents/nodes", wrapper.SetZabbixAgentNodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/overview", wrapper.GetZabbixOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix/refresh", wrapper.RefreshZabbix)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.DeleteZabbixHostLink)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.SetZabbixHostLink)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)

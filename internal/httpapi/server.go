@@ -61,6 +61,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
+	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
 )
 
 type Server struct {
@@ -105,6 +106,7 @@ type Server struct {
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	zabbixAgents *zabbixagent.Service
+	zabbixMon    *zabbixmon.Service
 	soc          *soc.Service
 	security     *security.Service
 	stacks       *stacks.Service
@@ -195,6 +197,8 @@ type Deps struct {
 	CrowdSec *crowdsec.Service
 	// ZabbixAgents zet zabbix-agent2 met een eigen PSK op de nodes.
 	ZabbixAgents *zabbixagent.Service
+	// ZabbixMon leest de Zabbix-API voor de dashboards (fase 33).
+	ZabbixMon *zabbixmon.Service
 	// SOC is het beveiligingsoverzicht (fase 25).
 	SOC *soc.Service
 	// Security is de kwetsbaarheids- en verhardingsmodule (fase 27).
@@ -246,6 +250,7 @@ func New(d Deps) *Server {
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
 		zabbixAgents: d.ZabbixAgents,
+		zabbixMon:    d.ZabbixMon,
 		soc:          d.SOC,
 		stacks:       d.Stacks,
 		logs:         d.Logs,

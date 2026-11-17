@@ -4336,6 +4336,66 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /zabbix/overview:
+    get:
+      operationId: getZabbixOverview
+      summary: Zabbix-monitoring (fase 33)
+      description: |
+        De laatste stand uit de Zabbix-API (elke minuut verzameld): toestand met reden, tellers, open problemen met
+        hun hosts en ClusterForge-nodes, hosts met beschikbaarheid, proxy's, HA-nodes, gezondheid van Zabbix zelf
+        en de nodes zonder Zabbix-host, met de trend van het venster. Ook voor viewers.
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, enum: ["24h", "7d", "30d"], default: "24h" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /zabbix/refresh:
+    post:
+      operationId: refreshZabbix
+      summary: Meteen een verzamelronde draaien
+      description: Hoogstens één ronde per 5 seconden; geeft het bijgewerkte overzicht (venster 24h).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /zabbix/hosts/{hostid}/link:
+    parameters:
+      - name: hostid
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: setZabbixHostLink
+      summary: Een Zabbix-host met de hand aan een node koppelen (admin)
+      description: node_id null betekent dat de host bewust bij geen enkele node hoort.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixHostLinkInput" }
+      responses:
+        "204": { description: Gekoppeld }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteZabbixHostLink
+      summary: De handmatige koppeling weghalen (admin)
+      responses:
+        "204": { description: Weg; de automatische koppeling geldt weer }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /crowdsec:
     get:
       operationId: getCrowdSec
@@ -14582,6 +14642,199 @@ components:
       properties:
         jobs: { type: array, items: { type: string, format: uuid } }
         skipped: { type: array, items: { type: string } }
+    ZabbixHostLinkInput:
+      type: object
+      required: [node_id]
+      properties:
+        node_id: { type: string, format: uuid, nullable: true }
+    ZabbixState:
+      type: object
+      required: [level, reasons]
+      properties:
+        level: { type: string, description: "Een van: kritiek, probleem, waarschuwing, normaal, onbekend" }
+        reasons: { type: array, items: { type: string } }
+    ZabbixNodeLink:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, source]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        source: { type: string, description: "Hoe de koppeling gevonden is. Een van: manual, agent, name, ip" }
+    ZabbixProblem:
+      type: object
+      required: [eventid, triggerid, name, severity, since, acknowledged, suppressed, opdata, tags, hosts]
+      properties:
+        eventid: { type: string }
+        triggerid: { type: string }
+        name: { type: string }
+        severity: { type: integer, description: "0 niet ingedeeld, 1 info, 2 waarschuwing, 3 gemiddeld, 4 hoog, 5 ramp" }
+        since: { type: string, format: date-time }
+        acknowledged: { type: boolean }
+        suppressed: { type: boolean, description: Onderdrukt (onderhoud of symptoom); telt niet mee }
+        opdata: { type: string }
+        tags:
+          type: array
+          items:
+            type: object
+            required: [tag, value]
+            properties:
+              tag: { type: string }
+              value: { type: string }
+        hosts:
+          type: array
+          items:
+            type: object
+            required: [hostid, name, node]
+            properties:
+              hostid: { type: string }
+              name: { type: string }
+              node:
+                allOf: [{ $ref: "#/components/schemas/ZabbixNodeLink" }]
+                nullable: true
+    ZabbixHost:
+      type: object
+      required: [hostid, host, name, enabled, maintenance, available, active, interfaces, proxy, groups, node, problems, worst]
+      properties:
+        hostid: { type: string }
+        host: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        maintenance: { type: boolean }
+        available: { type: string, description: "Een van: ok, down, unknown, none, disabled" }
+        active: { type: string, description: "Actieve checks. Een van: ok, down, unknown, disabled" }
+        interfaces:
+          type: array
+          items:
+            type: object
+            required: [type, address, available, error]
+            properties:
+              type: { type: string, description: "Een van: agent, snmp, ipmi, jmx" }
+              address: { type: string }
+              available: { type: string, description: "Een van: ok, down, unknown" }
+              error: { type: string }
+        proxy: { type: string, description: Naam van de proxy; leeg is de server }
+        groups: { type: array, items: { type: string } }
+        node:
+          allOf: [{ $ref: "#/components/schemas/ZabbixNodeLink" }]
+          nullable: true
+        problems: { type: integer }
+        worst: { type: integer, description: Zwaarste open probleem, -1 zonder }
+    ZabbixProxy:
+      type: object
+      required: [proxyid, name, mode, state, last_seen, version, compatibility, hosts]
+      properties:
+        proxyid: { type: string }
+        name: { type: string }
+        mode: { type: string, description: "Een van: active, passive of leeg" }
+        state: { type: string, description: "Een van: online, offline, unknown of leeg" }
+        last_seen: { type: string, format: date-time, nullable: true }
+        version: { type: string }
+        compatibility: { type: string, description: "Een van: current, outdated, unsupported of leeg" }
+        hosts: { type: integer }
+    ZabbixHANode:
+      type: object
+      required: [name, address, status, last_seen]
+      properties:
+        name: { type: string }
+        address: { type: string }
+        status: { type: string, description: "Een van: active, standby, stopped, unavailable of leeg" }
+        last_seen: { type: string, format: date-time, nullable: true }
+    ZabbixHealth:
+      type: object
+      required: [hostid, name, nvps, queue, queue_10m, preprocessing_queue, cache_config, cache_history, cache_value,
+        values, uptime, busiest, updated]
+      properties:
+        hostid: { type: string }
+        name: { type: string }
+        nvps: { type: number, nullable: true, description: Nodige nieuwe waarden per seconde }
+        queue: { type: number, nullable: true }
+        queue_10m: { type: number, nullable: true }
+        preprocessing_queue: { type: number, nullable: true }
+        cache_config: { type: number, nullable: true, description: "% gebruikt" }
+        cache_history: { type: number, nullable: true, description: "% gebruikt" }
+        cache_value: { type: number, nullable: true, description: "% gebruikt" }
+        values: { type: number, nullable: true, description: Verwerkte waarden per seconde }
+        uptime: { type: number, nullable: true, description: Seconden }
+        busiest:
+          type: array
+          items:
+            type: object
+            required: [name, busy]
+            properties:
+              name: { type: string }
+              busy: { type: number }
+        updated: { type: string, format: date-time, nullable: true }
+    ZabbixUnwatched:
+      type: object
+      required: [node_id, hostname, ip, cluster_id, cluster_name]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        ip: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+    ZabbixCounts:
+      type: object
+      required: [disaster, high, average, warning, info, not_classified, unacked, suppressed, hosts, hosts_ok, hosts_down,
+        hosts_unknown, hosts_disabled, hosts_maintenance, nodes, watched]
+      properties:
+        disaster: { type: integer }
+        high: { type: integer }
+        average: { type: integer }
+        warning: { type: integer }
+        info: { type: integer }
+        not_classified: { type: integer }
+        unacked: { type: integer }
+        suppressed: { type: integer }
+        hosts: { type: integer }
+        hosts_ok: { type: integer }
+        hosts_down: { type: integer }
+        hosts_unknown: { type: integer }
+        hosts_disabled: { type: integer }
+        hosts_maintenance: { type: integer }
+        nodes: { type: integer, description: Actieve ClusterForge-nodes }
+        watched: { type: integer, description: Daarvan met een Zabbix-host }
+    ZabbixTrendPoint:
+      type: object
+      required: [at, disaster, high, average, warning, info, hosts, hosts_down, nvps, queue]
+      properties:
+        at: { type: string, format: date-time }
+        disaster: { type: integer }
+        high: { type: integer }
+        average: { type: integer }
+        warning: { type: integer }
+        info: { type: integer }
+        hosts: { type: integer }
+        hosts_down: { type: integer }
+        nvps: { type: number, nullable: true }
+        queue: { type: integer, nullable: true }
+    ZabbixOverview:
+      type: object
+      required: [configured, generated_at, updated_at, error, state, frontend_url, window, trend, at, version, problems,
+        hosts, proxies, ha, health, unwatched, counts, proxies_error, ha_error, health_error]
+      properties:
+        configured: { type: boolean, description: Adres en token van de Zabbix-API zijn ingesteld }
+        generated_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true, description: Laatste geslaagde ronde }
+        error: { type: string, description: Fout van de laatste ronde; leeg als die lukte }
+        state: { $ref: "#/components/schemas/ZabbixState" }
+        frontend_url: { type: string, description: Adres van de Zabbix-webinterface }
+        window: { type: string, description: "Een van: 24h, 7d, 30d" }
+        trend: { type: array, items: { $ref: "#/components/schemas/ZabbixTrendPoint" } }
+        at: { type: string, format: date-time }
+        version: { type: string }
+        problems: { type: array, items: { $ref: "#/components/schemas/ZabbixProblem" } }
+        hosts: { type: array, items: { $ref: "#/components/schemas/ZabbixHost" } }
+        proxies: { type: array, items: { $ref: "#/components/schemas/ZabbixProxy" } }
+        ha: { type: array, items: { $ref: "#/components/schemas/ZabbixHANode" } }
+        health: { type: array, items: { $ref: "#/components/schemas/ZabbixHealth" } }
+        unwatched: { type: array, items: { $ref: "#/components/schemas/ZabbixUnwatched" } }
+        counts: { $ref: "#/components/schemas/ZabbixCounts" }
+        proxies_error: { type: string }
+        ha_error: { type: string }
+        health_error: { type: string }
     CrowdSecSettings:
       type: object
       required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available]

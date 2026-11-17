@@ -4080,6 +4080,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Zabbix-monitoring (fase 33)
+         * @description De laatste stand uit de Zabbix-API (elke minuut verzameld): toestand met reden, tellers, open problemen met
+         *     hun hosts en ClusterForge-nodes, hosts met beschikbaarheid, proxy's, HA-nodes, gezondheid van Zabbix zelf
+         *     en de nodes zonder Zabbix-host, met de trend van het venster. Ook voor viewers.
+         */
+        get: operations["getZabbixOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Meteen een verzamelronde draaien
+         * @description Hoogstens één ronde per 5 seconden; geeft het bijgewerkte overzicht (venster 24h).
+         */
+        post: operations["refreshZabbix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/hosts/{hostid}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostid: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Een Zabbix-host met de hand aan een node koppelen (admin)
+         * @description node_id null betekent dat de host bewust bij geen enkele node hoort.
+         */
+        put: operations["setZabbixHostLink"];
+        post?: never;
+        /** De handmatige koppeling weghalen (admin) */
+        delete: operations["deleteZabbixHostLink"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec": {
         parameters: {
             query?: never;
@@ -13959,6 +14024,194 @@ export interface components {
             jobs: string[];
             skipped: string[];
         };
+        ZabbixHostLinkInput: {
+            /** Format: uuid */
+            node_id: string | null;
+        };
+        ZabbixState: {
+            /** @description Een van: kritiek, probleem, waarschuwing, normaal, onbekend */
+            level: string;
+            reasons: string[];
+        };
+        ZabbixNodeLink: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            /** @description Hoe de koppeling gevonden is. Een van: manual, agent, name, ip */
+            source: string;
+        };
+        ZabbixProblem: {
+            eventid: string;
+            triggerid: string;
+            name: string;
+            /** @description 0 niet ingedeeld, 1 info, 2 waarschuwing, 3 gemiddeld, 4 hoog, 5 ramp */
+            severity: number;
+            /** Format: date-time */
+            since: string;
+            acknowledged: boolean;
+            /** @description Onderdrukt (onderhoud of symptoom); telt niet mee */
+            suppressed: boolean;
+            opdata: string;
+            tags: {
+                tag: string;
+                value: string;
+            }[];
+            hosts: {
+                hostid: string;
+                name: string;
+                node: components["schemas"]["ZabbixNodeLink"] | null;
+            }[];
+        };
+        ZabbixHost: {
+            hostid: string;
+            host: string;
+            name: string;
+            enabled: boolean;
+            maintenance: boolean;
+            /** @description Een van: ok, down, unknown, none, disabled */
+            available: string;
+            /** @description Actieve checks. Een van: ok, down, unknown, disabled */
+            active: string;
+            interfaces: {
+                /** @description Een van: agent, snmp, ipmi, jmx */
+                type: string;
+                address: string;
+                /** @description Een van: ok, down, unknown */
+                available: string;
+                error: string;
+            }[];
+            /** @description Naam van de proxy; leeg is de server */
+            proxy: string;
+            groups: string[];
+            node: components["schemas"]["ZabbixNodeLink"] | null;
+            problems: number;
+            /** @description Zwaarste open probleem */
+            worst: number;
+        };
+        ZabbixProxy: {
+            proxyid: string;
+            name: string;
+            /** @description Een van: active, passive of leeg */
+            mode: string;
+            /** @description Een van: online, offline, unknown of leeg */
+            state: string;
+            /** Format: date-time */
+            last_seen: string | null;
+            version: string;
+            /** @description Een van: current, outdated, unsupported of leeg */
+            compatibility: string;
+            hosts: number;
+        };
+        ZabbixHANode: {
+            name: string;
+            address: string;
+            /** @description Een van: active, standby, stopped, unavailable of leeg */
+            status: string;
+            /** Format: date-time */
+            last_seen: string | null;
+        };
+        ZabbixHealth: {
+            hostid: string;
+            name: string;
+            /** @description Nodige nieuwe waarden per seconde */
+            nvps: number | null;
+            queue: number | null;
+            queue_10m: number | null;
+            preprocessing_queue: number | null;
+            /** @description % gebruikt */
+            cache_config: number | null;
+            /** @description % gebruikt */
+            cache_history: number | null;
+            /** @description % gebruikt */
+            cache_value: number | null;
+            /** @description Verwerkte waarden per seconde */
+            values: number | null;
+            /** @description Seconden */
+            uptime: number | null;
+            busiest: {
+                name: string;
+                busy: number;
+            }[];
+            /** Format: date-time */
+            updated: string | null;
+        };
+        ZabbixUnwatched: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            ip: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+        };
+        ZabbixCounts: {
+            disaster: number;
+            high: number;
+            average: number;
+            warning: number;
+            info: number;
+            not_classified: number;
+            unacked: number;
+            suppressed: number;
+            hosts: number;
+            hosts_ok: number;
+            hosts_down: number;
+            hosts_unknown: number;
+            hosts_disabled: number;
+            hosts_maintenance: number;
+            /** @description Actieve ClusterForge-nodes */
+            nodes: number;
+            /** @description Daarvan met een Zabbix-host */
+            watched: number;
+        };
+        ZabbixTrendPoint: {
+            /** Format: date-time */
+            at: string;
+            disaster: number;
+            high: number;
+            average: number;
+            warning: number;
+            info: number;
+            hosts: number;
+            hosts_down: number;
+            nvps: number | null;
+            queue: number | null;
+        };
+        ZabbixOverview: {
+            /** @description Adres en token van de Zabbix-API zijn ingesteld */
+            configured: boolean;
+            /** Format: date-time */
+            generated_at: string;
+            /**
+             * Format: date-time
+             * @description Laatste geslaagde ronde
+             */
+            updated_at: string | null;
+            /** @description Fout van de laatste ronde; leeg als die lukte */
+            error: string;
+            state: components["schemas"]["ZabbixState"];
+            /** @description Adres van de Zabbix-webinterface */
+            frontend_url: string;
+            /** @description Een van: 24h, 7d, 30d */
+            window: string;
+            trend: components["schemas"]["ZabbixTrendPoint"][];
+            /** Format: date-time */
+            at: string;
+            version: string;
+            problems: components["schemas"]["ZabbixProblem"][];
+            hosts: components["schemas"]["ZabbixHost"][];
+            proxies: components["schemas"]["ZabbixProxy"][];
+            ha: components["schemas"]["ZabbixHANode"][];
+            health: components["schemas"]["ZabbixHealth"][];
+            unwatched: components["schemas"]["ZabbixUnwatched"][];
+            counts: components["schemas"]["ZabbixCounts"];
+            proxies_error: string;
+            ha_error: string;
+            health_error: string;
+        };
         CrowdSecSettings: {
             auto_apply: boolean;
             bouncer_default: boolean;
@@ -21135,6 +21388,101 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getZabbixOverview: {
+        parameters: {
+            query?: {
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    refreshZabbix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setZabbixHostLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixHostLinkInput"];
+            };
+        };
+        responses: {
+            /** @description Gekoppeld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteZabbixHostLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg; de automatische koppeling geldt weer */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getCrowdSec: {

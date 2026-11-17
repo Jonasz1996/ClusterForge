@@ -70,7 +70,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	// Fases worden naast elkaar gebouwd en elk krijgt een eigen reeks
+	// nummers (bv. fase 32 00096-00099, fase 33 00100+). Wie eerst het image
+	// van een hogere reeks draait, mag daarna de lagere nog krijgen.
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS, goose.WithAllowOutofOrder(true))
 	if err != nil {
 		return fmt.Errorf("migraties laden: %w", err)
 	}

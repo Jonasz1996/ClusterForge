@@ -161,7 +161,17 @@ export const navGroups: NavGroup[] = [
     label: "Bewaking en herstel",
     items: [
       { href: "/monitoring", label: "Monitoring", keywords: "cpu ram grafiek metrics" },
-      { href: "/zabbix", label: "Zabbix-agents", keywords: "zabbix agent2 psk sleutel monitoring proxy" },
+      {
+        href: "/zabbix/overzicht",
+        label: "Zabbix",
+        keywords: "zabbix problemen triggers beschikbaarheid hosts proxy ha dashboard",
+        tabs: [
+          { href: "/zabbix/overzicht", label: "Overzicht" },
+          { href: "/zabbix/problemen", label: "Problemen", keywords: "triggers alerts ernst" },
+          { href: "/zabbix/hosts", label: "Hosts", keywords: "beschikbaarheid koppelen" },
+          { href: "/zabbix", label: "Agents", keywords: "zabbix-agents agent2 psk sleutel" },
+        ],
+      },
       { href: "/logs", label: "Logs", adminOnly: true, keywords: "journald syslog docker logs" },
       {
         href: "/incidenten",
