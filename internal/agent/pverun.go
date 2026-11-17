@@ -59,6 +59,9 @@ func (r *RunExecutor) pve(ctx context.Context, dir string, p *protocol.PVERun, o
 	if p.Action == protocol.PBSAPI {
 		return r.pbsAPI(ctx, dir, p.API, out, st)
 	}
+	if strings.HasPrefix(p.Action, "opn_") {
+		return r.opn(ctx, p, out, st)
+	}
 	h := r.host()
 	if !h.isHost() {
 		return -1, errNotPVE

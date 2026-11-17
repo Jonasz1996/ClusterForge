@@ -67,6 +67,7 @@ type itemCache struct {
 	mu    sync.Mutex
 	items map[string]cached[HostItems]
 	ser   map[string]cached[Series]
+	lat   map[string]cached[[]LatestItem]
 }
 
 const cacheFor = 30 * time.Second
@@ -88,6 +89,25 @@ func (c *itemCache) putItems(k string, v HostItems, now time.Time) {
 		c.items = map[string]cached[HostItems]{}
 	}
 	c.items[k] = cached[HostItems]{now, v}
+}
+
+func (c *itemCache) getLatest(k string, now time.Time) ([]LatestItem, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.lat[k]
+	if !ok || now.Sub(v.at) > cacheFor {
+		return nil, false
+	}
+	return v.v, true
+}
+
+func (c *itemCache) putLatest(k string, v []LatestItem, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lat == nil || len(c.lat) > 200 {
+		c.lat = map[string]cached[[]LatestItem]{}
+	}
+	c.lat[k] = cached[[]LatestItem]{now, v}
 }
 
 func (c *itemCache) getSeries(k string, now time.Time) (Series, bool) {
@@ -172,6 +192,93 @@ func (s *Service) Items(ctx context.Context, hostID string) (HostItems, error) {
 	return out, nil
 }
 
+// maxLatest: zoveel items vraagt één dashboard hoogstens tegelijk.
+const maxLatest = 200
+
+// LatestItem is de laatste waarde van een los item, voor een paneel.
+type LatestItem struct {
+	Item
+	HostID   string `json:"hostid"`
+	HostName string `json:"host_name"`
+}
+
+// Latest geeft de laatste waarde van losse items (voor getal- en
+// meterpanelen). Items van hosts die ClusterForge niet kent, of die weg zijn,
+// ontbreken gewoon in het antwoord.
+func (s *Service) Latest(ctx context.Context, itemIDs []string) ([]LatestItem, error) {
+	ids := make([]string, 0, len(itemIDs))
+	seen := map[string]bool{}
+	for _, id := range itemIDs {
+		id = strings.TrimSpace(id)
+		if _, err := strconv.ParseUint(id, 10, 64); err != nil || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) > maxLatest {
+		return nil, &FieldError{"te veel items tegelijk"}
+	}
+	out := []LatestItem{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	slices.Sort(ids)
+	now := s.Now()
+	ck := strings.Join(ids, ",")
+	if v, ok := s.cache.getLatest(ck, now); ok {
+		return v, nil
+	}
+	api, _, err := s.Client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		rawHostItem
+		Hosts []struct {
+			HostID string `json:"hostid"`
+			Name   string `json:"name"`
+		} `json:"hosts"`
+	}
+	if err := api.Call(ctx, "item.get", map[string]any{
+		"itemids":     ids,
+		"output":      []string{"itemid", "hostid", "name", "key_", "value_type", "units", "lastvalue", "prevvalue", "lastclock", "state", "error"},
+		"selectHosts": []string{"hostid", "name"},
+		"webitems":    true,
+	}, &raw); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	known := map[string]bool{}
+	if s.snap != nil {
+		for _, h := range s.snap.Hosts {
+			known[h.HostID] = true
+		}
+	}
+	s.mu.RUnlock()
+	for _, r := range raw {
+		if !known[r.HostID] {
+			continue
+		}
+		it := LatestItem{Item: Item{
+			ItemID: r.ItemID, Name: r.Name, Key: r.Key, Numeric: numeric(r.ValueType), Units: r.Units,
+			LastValue: r.LastValue, PrevValue: r.PrevValue, LastClock: r.LastClock.time(),
+		}, HostID: r.HostID}
+		if len(r.Hosts) > 0 {
+			it.HostName = r.Hosts[0].Name
+		}
+		if r.State == 1 {
+			it.Error = cmp.Or(r.Error, "item wordt niet ondersteund")
+		}
+		if len(it.LastValue) > 500 {
+			it.LastValue = it.LastValue[:500] + "…"
+		}
+		out = append(out, it)
+	}
+	s.cache.putLatest(ck, out, now)
+	return out, nil
+}
+
 // Ranges zijn de vensters van een grafiek.
 var Ranges = map[string]time.Duration{
 	"1h": time.Hour, "6h": 6 * time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour, "30d": 30 * 24 * time.Hour,
@@ -233,8 +340,10 @@ func (s *Service) ItemSeries(ctx context.Context, itemID, rng string) (Series, e
 		return Series{}, ErrNotNumeric
 	}
 	end := now.Unix()
-	start := now.Add(-d).Unix()
 	step := max(int64(d.Seconds())/SeriesPoints, 1)
+	// De stukjes beginnen op een veelvoud van step, zodat lijnen van
+	// verschillende items in één grafiek op dezelfde tijdstippen liggen.
+	start := now.Add(-d).Unix() / step * step
 	out := Series{ItemID: it.ItemID, HostID: it.HostID, Name: it.Name, Key: it.Key, Units: it.Units, Range: rng}
 	b := newBuckets(start, end, step)
 	if d > 24*time.Hour {

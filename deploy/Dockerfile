@@ -23,11 +23,13 @@ ARG TARGETARCH
 ARG GOFLAGS=
 ARG GOGC=
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/clusterforge-server ./cmd/clusterforge-server
-# De server biedt de agent aan om te downloaden, voor beide architecturen.
-RUN for arch in amd64 arm64; do \
-      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-        -o /out/agents/cf-agent-linux-$arch ./cmd/cf-agent && \
-      (cd /out/agents && sha256sum cf-agent-linux-$arch > cf-agent-linux-$arch.sha256); \
+# De server biedt de agent aan om te downloaden: Linux amd64 en arm64, en
+# FreeBSD amd64 voor OPNsense (fase 34).
+RUN for target in linux-amd64 linux-arm64 freebsd-amd64; do \
+      os=$(echo $target | cut -d- -f1); arch=$(echo $target | cut -d- -f2); \
+      CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/agents/cf-agent-$target ./cmd/cf-agent && \
+      (cd /out/agents && sha256sum cf-agent-$target > cf-agent-$target.sha256) || exit 1; \
     done
 # De map die de server met de scannercontainer deelt (aanmeldbestand).
 RUN mkdir -p /out/scanner

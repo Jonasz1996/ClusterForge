@@ -222,6 +222,8 @@ func (s *Server) dashboardRoutes(r chi.Router) {
 	r.Get("/clusters/{cluster}", s.dashboardCluster)
 	r.Get("/nodes", s.dashboardNodes)
 	r.Get("/soc", s.dashboardSocHandler)
+	r.Get("/zabbix", s.dashboardZabbixHandler)
+	r.Get("/opnsense", s.dashboardOpnsenseHandler)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "onbekend endpoint")
 	})

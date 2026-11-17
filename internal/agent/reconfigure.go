@@ -195,21 +195,13 @@ func (a *Agent) testServer(ctx context.Context, server string) error {
 }
 
 func (a *Agent) armReconfigRollback(ctx context.Context, cfgPath string, after time.Duration) error {
-	a.disarmReconfigRollback(ctx)
 	bin, _ := a.binary()
-	out, err := a.exec(ctx, "systemd-run", "--unit="+reconfigRollbackUnit, "--collect",
-		fmt.Sprintf("--on-active=%ds", max(int(after.Seconds()), 1)), "--timer-property=AccuracySec=1s",
-		"--description=ClusterForge: oud agent.json terugzetten als de agent de server niet bereikt",
-		bin, "reconfigure-rollback", "-config", cfgPath, "-state", a.statePath())
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return armOneShot(ctx, a.exec, reconfigRollbackUnit, "ClusterForge: oud agent.json terugzetten als de agent de server niet bereikt",
+		after, bin, "reconfigure-rollback", "-config", cfgPath, "-state", a.statePath())
 }
 
 func (a *Agent) disarmReconfigRollback(ctx context.Context) {
-	_, _ = a.exec(ctx, "systemctl", "stop", reconfigRollbackUnit+".timer")
-	_, _ = a.exec(ctx, "systemctl", "reset-failed", reconfigRollbackUnit+".timer", reconfigRollbackUnit+".service")
+	disarmOneShot(ctx, a.exec, reconfigRollbackUnit)
 }
 
 func loadReconfigMarker(path string) (*reconfigMarker, error) {
@@ -239,7 +231,7 @@ func (a *Agent) resumeReconfigure(ctx context.Context) {
 		a.reconfRolledBack.Store(m.ToNats)
 		a.Log.Warn("de vorige herconfiguratie werd teruggezet", "nats", m.ToNats, "server", m.ToServer, "reason", m.Reason)
 	case m.Status == upgradePending && a.Config.NatsURL == m.ToNats && a.Config.ServerURL == m.ToServer:
-		if _, err := a.exec(ctx, "systemctl", "is-active", "--quiet", reconfigRollbackUnit+".timer"); err == nil {
+		if oneShotActive(ctx, a.exec, reconfigRollbackUnit) {
 			return
 		}
 		left := max(time.Until(m.Deadline), 5*time.Second)
@@ -314,7 +306,7 @@ func RollbackReconfigure(ctx context.Context, cfgPath, statePath string, log *sl
 		log.Warn("herconfiguratie-status bewaren mislukt", "err", err)
 	}
 	log.Warn("oud agent.json teruggezet", "nats", m.FromNats, "server", m.FromServer, "failed_nats", m.ToNats)
-	out, err := exec(ctx, "systemctl", "--no-block", "restart", "cf-agent")
+	out, err := restartAgent(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("cf-agent herstarten mislukt: %v: %s", err, strings.TrimSpace(string(out)))
 	}

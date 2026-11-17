@@ -31,8 +31,9 @@ import (
 // Kind is de soort taak.
 const Kind = "agents.upgrade"
 
-// Archs zijn de architecturen waarvoor de server een agent aanbiedt.
-var Archs = []string{"amd64", "arm64"}
+// Archs zijn de platforms waarvoor de server een agent aanbiedt: amd64 en
+// arm64 voor Linux, freebsd-amd64 voor OPNsense (protocol.AgentPlatform).
+var Archs = protocol.AgentPlatforms
 
 // Toestand van een agent.
 const (
@@ -70,7 +71,7 @@ type Offer struct {
 func LoadOffer(dir, version string) Offer {
 	o := Offer{Version: version, Protocol: protocol.Version, SHA256: map[string]string{}}
 	for _, arch := range Archs {
-		b, err := os.ReadFile(filepath.Join(dir, "cf-agent-linux-"+arch+".sha256"))
+		b, err := os.ReadFile(filepath.Join(dir, protocol.AgentBinary(arch)+".sha256"))
 		if err != nil {
 			continue
 		}

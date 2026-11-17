@@ -145,13 +145,18 @@ export function useZabbixHostItems(hostid: string | undefined, enabled = true) {
   });
 }
 
-export function useZabbixItemSeries(itemid: string | undefined, range: ZabbixRange) {
-  return useQuery({
+// seriesQuery is de vraag voor één grafieklijn; ook voor useQueries.
+export function seriesQuery(itemid: string | undefined, range: ZabbixRange) {
+  return {
     queryKey: ["zabbix-series", itemid, range],
     queryFn: async () => unwrap(await api.GET("/zabbix/items/{itemid}/series", { params: { path: { itemid: itemid! }, query: { range } } })),
     enabled: !!itemid,
     refetchInterval: range === "1h" || range === "6h" ? 60_000 : 300_000,
-  });
+  };
+}
+
+export function useZabbixItemSeries(itemid: string | undefined, range: ZabbixRange) {
+  return useQuery(seriesQuery(itemid, range));
 }
 
 const numFmt = (max: number) => new Intl.NumberFormat("nl-BE", { maximumFractionDigits: max });
@@ -242,4 +247,162 @@ export function pickKeyItems(items: ZabbixItem[]) {
     if (it) out.push({ label: k.label, item: it });
   }
   return out;
+}
+
+// --- dashboards (M3) -------------------------------------------------------------------
+
+export type ZabbixMetrics = components["schemas"]["ZabbixMetrics"];
+export type ZabbixHostMetrics = components["schemas"]["ZabbixHostMetrics"];
+export type ZabbixEvents = components["schemas"]["ZabbixEvents"];
+export type ZabbixTopCount = components["schemas"]["ZabbixTopCount"];
+
+export function useZabbixMetrics(enabled = true) {
+  return useQuery({
+    queryKey: ["zabbix-metrics"],
+    queryFn: async () => unwrap(await api.GET("/zabbix/metrics")),
+    enabled,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useZabbixEvents(window: ZabbixWindow, enabled = true) {
+  return useQuery({
+    queryKey: ["zabbix-events", window],
+    queryFn: async () => unwrap(await api.GET("/zabbix/events", { params: { query: { window } } })),
+    enabled,
+    refetchInterval: 120_000,
+  });
+}
+
+// --- eigen dashboards (M4) ---
+
+export type ZabbixDashboard = components["schemas"]["ZabbixDashboard"];
+export type ZabbixDashboardInput = components["schemas"]["ZabbixDashboardInput"];
+export type ZabbixPanel = components["schemas"]["ZabbixPanel"];
+export type ZabbixLatestItem = components["schemas"]["ZabbixLatestItem"];
+export type PanelType = "graph" | "stat" | "gauge" | "problems" | "text";
+
+export const panelTypeLabel: Record<PanelType, string> = {
+  graph: "Grafiek",
+  stat: "Getal",
+  gauge: "Meter",
+  problems: "Problemen",
+  text: "Tekst",
+};
+
+const boardsKey = ["zabbix-dashboards"] as const;
+
+export function useZabbixBoards() {
+  return useQuery({
+    queryKey: boardsKey,
+    queryFn: async () => unwrap(await api.GET("/zabbix/dashboards")),
+  });
+}
+
+export function useSaveZabbixBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, body }: { id?: string; body: ZabbixDashboardInput }) =>
+      id
+        ? unwrap(await api.PUT("/zabbix/dashboards/{id}", { params: { path: { id } }, body }))
+        : unwrap(await api.POST("/zabbix/dashboards", { body })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: boardsKey }),
+  });
+}
+
+export function useDeleteZabbixBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await api.DELETE("/zabbix/dashboards/{id}", { params: { path: { id } } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: boardsKey }),
+  });
+}
+
+export function useZabbixLatest(itemids: string[]) {
+  const ids = [...new Set(itemids)].sort().join(",");
+  return useQuery({
+    queryKey: ["zabbix-latest", ids],
+    queryFn: async () => unwrap(await api.GET("/zabbix/items/latest", { params: { query: { itemids: ids } } })),
+    enabled: ids !== "",
+    refetchInterval: 60_000,
+  });
+}
+
+// boardInput maakt van een bewaard of geïmporteerd dashboard wat de server
+// verwacht: alleen de bekende velden, met standaardwaarden waar iets ontbreekt.
+export function boardInput(v: unknown): ZabbixDashboardInput {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const str = (x: unknown) => (typeof x === "string" ? x : "");
+  const num = (x: unknown, d: number) => (typeof x === "number" && Number.isFinite(x) ? x : d);
+  const optNum = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const panels = Array.isArray(o.panels) ? o.panels : [];
+  return {
+    name: str(o.name),
+    description: str(o.description),
+    refresh: num(o.refresh, 60),
+    panels: panels.map((pv) => {
+      const p = (pv && typeof pv === "object" ? pv : {}) as Record<string, unknown>;
+      const items = Array.isArray(p.items) ? p.items : [];
+      return {
+        id: str(p.id),
+        type: str(p.type),
+        title: str(p.title),
+        w: num(p.w, 2),
+        h: num(p.h, 2),
+        items: items.map((iv) => {
+          const i = (iv && typeof iv === "object" ? iv : {}) as Record<string, unknown>;
+          return { itemid: typeof i.itemid === "number" ? String(i.itemid) : str(i.itemid), label: str(i.label) };
+        }),
+        range: str(p.range),
+        warn: optNum(p.warn),
+        crit: optNum(p.crit),
+        max: optNum(p.max),
+        min_severity: num(p.min_severity, 0),
+        hostid: str(p.hostid),
+        text: str(p.text),
+      };
+    }),
+  };
+}
+
+// --- schrijven naar Zabbix (M6) ---
+
+export type ZabbixAckInput = components["schemas"]["ZabbixAckInput"];
+
+export function useAckZabbixProblem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ eventid, body }: { eventid: string; body: ZabbixAckInput }) =>
+      unwrap(await api.POST("/zabbix/problems/{eventid}/acknowledge", { params: { path: { eventid } }, body })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: key });
+      // De server leest Zabbix meteen opnieuw; even later klopt alles.
+      setTimeout(() => void qc.invalidateQueries({ queryKey: key }), 2_500);
+    },
+  });
+}
+
+// Onderhoud naar Zabbix (M6): staat een node in onderhoud, dan zet
+// ClusterForge in Zabbix een onderhoud op zijn host.
+export type ZabbixMaintenance = components["schemas"]["ZabbixMaintenance"];
+
+const maintKey = ["zabbix-maintenance"] as const;
+
+export function useZabbixMaintenance() {
+  return useQuery({
+    queryKey: maintKey,
+    queryFn: async () => unwrap(await api.GET("/zabbix/maintenance")),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useSetZabbixMaintenance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sync: boolean) => unwrap(await api.PUT("/zabbix/maintenance", { body: { sync } })),
+    onSuccess: (m) => {
+      qc.setQueryData(maintKey, m);
+      void qc.invalidateQueries({ queryKey: key });
+    },
+  });
 }

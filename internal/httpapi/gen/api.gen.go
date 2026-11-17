@@ -4341,6 +4341,27 @@ func (e GetSocParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for GetZabbixEventsParamsWindow.
+const (
+	GetZabbixEventsParamsWindowN24h GetZabbixEventsParamsWindow = "24h"
+	GetZabbixEventsParamsWindowN30d GetZabbixEventsParamsWindow = "30d"
+	GetZabbixEventsParamsWindowN7d  GetZabbixEventsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetZabbixEventsParamsWindow enum.
+func (e GetZabbixEventsParamsWindow) Valid() bool {
+	switch e {
+	case GetZabbixEventsParamsWindowN24h:
+		return true
+	case GetZabbixEventsParamsWindowN30d:
+		return true
+	case GetZabbixEventsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetZabbixItemSeriesParamsRange.
 const (
 	GetZabbixItemSeriesParamsRangeN1h  GetZabbixItemSeriesParamsRange = "1h"
@@ -13059,6 +13080,9 @@ type SocCoverage struct {
 	NodeId          openapi_types.UUID                    `json:"node_id"`
 	Online          bool                                  `json:"online"`
 	SecurityUpdates int                                   `json:"security_updates"`
+
+	// Zabbix Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score.
+	Zabbix string `json:"zabbix"`
 }
 
 // SocItem defines model for SocItem.
@@ -13959,6 +13983,19 @@ type VmActionInput struct {
 	Vmstate *bool `json:"vmstate,omitempty"`
 }
 
+// ZabbixAckInput defines model for ZabbixAckInput.
+type ZabbixAckInput struct {
+	Close bool `json:"close"`
+
+	// Message Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter
+	Message  string  `json:"message"`
+	Password *string `json:"password,omitempty"`
+
+	// Severity Nieuwe ernst 0-5; leeg laat hem staan
+	Severity nullable.Nullable[int] `json:"severity,omitempty"`
+	TotpCode *string                `json:"totp_code,omitempty"`
+}
+
 // ZabbixAgentNode defines model for ZabbixAgentNode.
 type ZabbixAgentNode struct {
 	// AgentService Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is
@@ -14071,6 +14108,14 @@ type ZabbixAgentsOverview struct {
 	Settings ZabbixAgentSettings `json:"settings"`
 }
 
+// ZabbixBoardItem defines model for ZabbixBoardItem.
+type ZabbixBoardItem struct {
+	Itemid string `json:"itemid"`
+
+	// Label Eigen naam in de legende; leeg is de naam uit Zabbix
+	Label string `json:"label"`
+}
+
 // ZabbixCounts defines model for ZabbixCounts.
 type ZabbixCounts struct {
 	Average          int `json:"average"`
@@ -14093,6 +14138,50 @@ type ZabbixCounts struct {
 
 	// Watched Daarvan met een Zabbix-host
 	Watched int `json:"watched"`
+}
+
+// ZabbixDashboard defines model for ZabbixDashboard.
+type ZabbixDashboard struct {
+	CreatedAt   time.Time                 `json:"created_at"`
+	Description string                    `json:"description"`
+	Id          openapi_types.UUID        `json:"id"`
+	Name        string                    `json:"name"`
+	Panels      []ZabbixPanel             `json:"panels"`
+	Refresh     int                       `json:"refresh"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
+	UpdatedBy   nullable.Nullable[string] `json:"updated_by"`
+}
+
+// ZabbixDashboardInput defines model for ZabbixDashboardInput.
+type ZabbixDashboardInput struct {
+	Description string        `json:"description"`
+	Name        string        `json:"name"`
+	Panels      []ZabbixPanel `json:"panels"`
+
+	// Refresh Verversen in seconden: 0, 30, 60, 300 of 900
+	Refresh int `json:"refresh"`
+}
+
+// ZabbixEvents defines model for ZabbixEvents.
+type ZabbixEvents struct {
+	Buckets []struct {
+		At time.Time `json:"at"`
+
+		// Severity Aantal nieuwe problemen per ernst 0-5
+		Severity []int `json:"severity"`
+	} `json:"buckets"`
+
+	// Heatmap Per weekdag (0 = maandag) per uur het aantal nieuwe problemen
+	Heatmap [][]int `json:"heatmap"`
+
+	// Mttr Gemiddelde hersteltijd in seconden
+	Mttr        nullable.Nullable[float32] `json:"mttr"`
+	Resolved    int                        `json:"resolved"`
+	TopHosts    []ZabbixTopCount           `json:"top_hosts"`
+	TopTriggers []ZabbixTopCount           `json:"top_triggers"`
+	Total       int                        `json:"total"`
+	Truncated   bool                       `json:"truncated"`
+	Window      string                     `json:"window"`
 }
 
 // ZabbixHANode defines model for ZabbixHANode.
@@ -14121,7 +14210,10 @@ type ZabbixHealth struct {
 	// CacheValue % gebruikt
 	CacheValue nullable.Nullable[float32] `json:"cache_value"`
 	Hostid     string                     `json:"hostid"`
-	Name       string                     `json:"name"`
+
+	// Items itemid per waarde (nvps, queue, queue_10m, …)
+	Items map[string]string `json:"items"`
+	Name  string            `json:"name"`
 
 	// Nvps Nodige nieuwe waarden per seconde
 	Nvps               nullable.Nullable[float32]   `json:"nvps"`
@@ -14182,6 +14274,26 @@ type ZabbixHostLinkInput struct {
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
 }
 
+// ZabbixHostMetrics defines model for ZabbixHostMetrics.
+type ZabbixHostMetrics struct {
+	// Cpu % CPU
+	Cpu nullable.Nullable[float32] `json:"cpu"`
+
+	// Disk % gebruikt op /
+	Disk   nullable.Nullable[float32] `json:"disk"`
+	Hostid string                     `json:"hostid"`
+
+	// Items itemid per cijfer (cpu, memory, disk, load, uptime)
+	Items map[string]string          `json:"items"`
+	Load  nullable.Nullable[float32] `json:"load"`
+
+	// Memory % geheugen
+	Memory nullable.Nullable[float32] `json:"memory"`
+
+	// Uptime Seconden
+	Uptime nullable.Nullable[float32] `json:"uptime"`
+}
+
 // ZabbixItem defines model for ZabbixItem.
 type ZabbixItem struct {
 	// Component De tag component; leeg zonder
@@ -14199,6 +14311,51 @@ type ZabbixItem struct {
 	Numeric   bool   `json:"numeric"`
 	PrevValue string `json:"prev_value"`
 	Units     string `json:"units"`
+}
+
+// ZabbixLatestItem defines model for ZabbixLatestItem.
+type ZabbixLatestItem struct {
+	Component string                       `json:"component"`
+	Error     string                       `json:"error"`
+	HostName  string                       `json:"host_name"`
+	Hostid    string                       `json:"hostid"`
+	Itemid    string                       `json:"itemid"`
+	Key       string                       `json:"key"`
+	LastClock nullable.Nullable[time.Time] `json:"last_clock"`
+	LastValue string                       `json:"last_value"`
+	Name      string                       `json:"name"`
+	Numeric   bool                         `json:"numeric"`
+	PrevValue string                       `json:"prev_value"`
+	Units     string                       `json:"units"`
+}
+
+// ZabbixMaintenance defines model for ZabbixMaintenance.
+type ZabbixMaintenance struct {
+	Active []struct {
+		ActiveTill    time.Time          `json:"active_till"`
+		CreatedAt     time.Time          `json:"created_at"`
+		Hostid        string             `json:"hostid"`
+		Hostname      string             `json:"hostname"`
+		Maintenanceid string             `json:"maintenanceid"`
+		NodeId        openapi_types.UUID `json:"node_id"`
+	} `json:"active"`
+
+	// Error De laatste fout bij het doorzetten; leeg als het lukte
+	Error     string                    `json:"error"`
+	Sync      bool                      `json:"sync"`
+	UpdatedAt time.Time                 `json:"updated_at"`
+	UpdatedBy nullable.Nullable[string] `json:"updated_by"`
+}
+
+// ZabbixMaintenanceInput defines model for ZabbixMaintenanceInput.
+type ZabbixMaintenanceInput struct {
+	Sync bool `json:"sync"`
+}
+
+// ZabbixMetrics defines model for ZabbixMetrics.
+type ZabbixMetrics struct {
+	At    time.Time           `json:"at"`
+	Hosts []ZabbixHostMetrics `json:"hosts"`
 }
 
 // ZabbixNodeLink defines model for ZabbixNodeLink.
@@ -14244,6 +14401,46 @@ type ZabbixOverview struct {
 
 	// Window Een van: 24h, 7d, 30d
 	Window string `json:"window"`
+}
+
+// ZabbixPanel defines model for ZabbixPanel.
+type ZabbixPanel struct {
+	// Crit stat en gauge: vanaf hier rood
+	Crit nullable.Nullable[float32] `json:"crit"`
+
+	// H Hoogte
+	H int `json:"h"`
+
+	// Hostid problems: alleen deze host; leeg is alle
+	Hostid string `json:"hostid"`
+
+	// Id Leeg bij een nieuw paneel; de server geeft er een
+	Id string `json:"id"`
+
+	// Items graph: 1-6; stat en gauge: 1
+	Items []ZabbixBoardItem `json:"items"`
+
+	// Max gauge: de volle meter (leeg: 100)
+	Max nullable.Nullable[float32] `json:"max"`
+
+	// MinSeverity problems: vanaf deze ernst (0-5)
+	MinSeverity int `json:"min_severity"`
+
+	// Range graph: 1h, 6h, 24h, 7d of 30d
+	Range string `json:"range"`
+
+	// Text text: de tekst
+	Text  string `json:"text"`
+	Title string `json:"title"`
+
+	// Type Een van: graph, stat, gauge, problems, text
+	Type string `json:"type"`
+
+	// W Breedte in kolommen
+	W int `json:"w"`
+
+	// Warn stat en gauge: vanaf hier oranje
+	Warn nullable.Nullable[float32] `json:"warn"`
 }
 
 // ZabbixProblem defines model for ZabbixProblem.
@@ -14312,6 +14509,15 @@ type ZabbixState struct {
 	// Level Een van: kritiek, probleem, waarschuwing, normaal, onbekend
 	Level   string   `json:"level"`
 	Reasons []string `json:"reasons"`
+}
+
+// ZabbixTopCount defines model for ZabbixTopCount.
+type ZabbixTopCount struct {
+	Count    int                               `json:"count"`
+	Id       string                            `json:"id"`
+	Name     string                            `json:"name"`
+	Node     nullable.Nullable[ZabbixNodeLink] `json:"node"`
+	Severity int                               `json:"severity"`
 }
 
 // ZabbixTrendPoint defines model for ZabbixTrendPoint.
@@ -14994,6 +15200,26 @@ type GetNodeTimelineParams struct {
 	Limit *TimelineLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetOpnsenseApiParams defines parameters for GetOpnsenseApi.
+type GetOpnsenseApiParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Params JSON-object met velden voor een zoekopdracht
+	Params *string `form:"params,omitempty" json:"params,omitempty"`
+}
+
+// GetOpnsenseConfigctlParams defines parameters for GetOpnsenseConfigctl.
+type GetOpnsenseConfigctlParams struct {
+	Action string `form:"action" json:"action"`
+}
+
+// GetOpnsenseDiffParams defines parameters for GetOpnsenseDiff.
+type GetOpnsenseDiffParams struct {
+	From  string              `form:"from" json:"from"`
+	To    string              `form:"to" json:"to"`
+	Other *openapi_types.UUID `form:"other,omitempty" json:"other,omitempty"`
+}
+
 // GetPbsCoverageParams defines parameters for GetPbsCoverage.
 type GetPbsCoverageParams struct {
 	// Fresh 1 leest alle PBS'en opnieuw in plaats van de laatste ronde
@@ -15064,6 +15290,20 @@ type ListTestRunsParams struct {
 	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
 	Result    *TestRunResult      `form:"result,omitempty" json:"result,omitempty"`
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetZabbixEventsParams defines parameters for GetZabbixEvents.
+type GetZabbixEventsParams struct {
+	Window *GetZabbixEventsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetZabbixEventsParamsWindow defines parameters for GetZabbixEvents.
+type GetZabbixEventsParamsWindow string
+
+// GetZabbixLatestParams defines parameters for GetZabbixLatest.
+type GetZabbixLatestParams struct {
+	// Itemids Item-id's, met komma's gescheiden
+	Itemids string `form:"itemids" json:"itemids"`
 }
 
 // GetZabbixItemSeriesParams defines parameters for GetZabbixItemSeries.
@@ -15427,6 +15667,24 @@ type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
 // ToggleNodeCronJSONRequestBody defines body for ToggleNodeCron for application/json ContentType.
 type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
 
+// DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
+type DownloadOpnsenseBackupJSONRequestBody = PveObject
+
+// StartOpnsenseCarpJSONRequestBody defines body for StartOpnsenseCarp for application/json ContentType.
+type StartOpnsenseCarpJSONRequestBody = PveObject
+
+// StartOpnsenseChangeJSONRequestBody defines body for StartOpnsenseChange for application/json ContentType.
+type StartOpnsenseChangeJSONRequestBody = PveObject
+
+// StartOpnsenseFirmwareJSONRequestBody defines body for StartOpnsenseFirmware for application/json ContentType.
+type StartOpnsenseFirmwareJSONRequestBody = PveObject
+
+// SetOpnsenseKeyJSONRequestBody defines body for SetOpnsenseKey for application/json ContentType.
+type SetOpnsenseKeyJSONRequestBody = PveObject
+
+// PlanOpnsenseChangeJSONRequestBody defines body for PlanOpnsenseChange for application/json ContentType.
+type PlanOpnsenseChangeJSONRequestBody = PveObject
+
 // CallPbsApiJSONRequestBody defines body for CallPbsApi for application/json ContentType.
 type CallPbsApiJSONRequestBody = PveCallInput
 
@@ -15450,6 +15708,18 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
+
+// StartPublishJSONRequestBody defines body for StartPublish for application/json ContentType.
+type StartPublishJSONRequestBody = PveObject
+
+// AdoptPublishHostsJSONRequestBody defines body for AdoptPublishHosts for application/json ContentType.
+type AdoptPublishHostsJSONRequestBody = PveObject
+
+// PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
+type PlanPublishJSONRequestBody = PveObject
+
+// SavePublishSettingsJSONRequestBody defines body for SavePublishSettings for application/json ContentType.
+type SavePublishSettingsJSONRequestBody = PveObject
 
 // StartPveHostActionJSONRequestBody defines body for StartPveHostAction for application/json ContentType.
 type StartPveHostActionJSONRequestBody = PveActionInput
@@ -15544,8 +15814,20 @@ type SetZabbixAgentNodesJSONRequestBody = ZabbixAgentNodesInput
 // UpdateZabbixAgentSettingsJSONRequestBody defines body for UpdateZabbixAgentSettings for application/json ContentType.
 type UpdateZabbixAgentSettingsJSONRequestBody = ZabbixAgentSettingsInput
 
+// CreateZabbixDashboardJSONRequestBody defines body for CreateZabbixDashboard for application/json ContentType.
+type CreateZabbixDashboardJSONRequestBody = ZabbixDashboardInput
+
+// UpdateZabbixDashboardJSONRequestBody defines body for UpdateZabbixDashboard for application/json ContentType.
+type UpdateZabbixDashboardJSONRequestBody = ZabbixDashboardInput
+
 // SetZabbixHostLinkJSONRequestBody defines body for SetZabbixHostLink for application/json ContentType.
 type SetZabbixHostLinkJSONRequestBody = ZabbixHostLinkInput
+
+// SetZabbixMaintenanceJSONRequestBody defines body for SetZabbixMaintenance for application/json ContentType.
+type SetZabbixMaintenanceJSONRequestBody = ZabbixMaintenanceInput
+
+// AcknowledgeZabbixProblemJSONRequestBody defines body for AcknowledgeZabbixProblem for application/json ContentType.
+type AcknowledgeZabbixProblemJSONRequestBody = ZabbixAckInput
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -16404,6 +16686,51 @@ type ServerInterface interface {
 	// GetNodeTimeline De tijdlijn van een node, oudste eerst
 	// (GET /nodes/{nodeId}/timeline)
 	GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams)
+	// DownloadOpnsenseBackup Een back-up downloaden (admin, altijd met code of wachtwoord); de volledige config.xml met geheimen
+	// (POST /opnsense/backups/{backupId}/download)
+	DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, backupId openapi_types.UUID)
+	// ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
+	// (GET /opnsense/clusters)
+	ListOpnsenseClusters(w http.ResponseWriter, r *http.Request)
+	// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+	// (GET /opnsense/firewalls/{nodeId}/api)
+	GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams)
+	// ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
+	// (GET /opnsense/firewalls/{nodeId}/backups)
+	ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseBackup Nu een back-up maken van elke firewall van het cluster (admin)
+	// (POST /opnsense/firewalls/{nodeId}/backups)
+	StartOpnsenseBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseCarp CARP-onderhoudsmodus aan of uit, of een failovertest, als taak opnsense.carp (admin; op prod met code of wachtwoord)
+	// (POST /opnsense/firewalls/{nodeId}/carp)
+	StartOpnsenseCarp(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseChange Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+	// (POST /opnsense/firewalls/{nodeId}/changes)
+	StartOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetOpnsenseConfigctl Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status
+	// (GET /opnsense/firewalls/{nodeId}/configctl)
+	GetOpnsenseConfigctl(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseConfigctlParams)
+	// GetOpnsenseDiff Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen)
+	// (GET /opnsense/firewalls/{nodeId}/diff)
+	GetOpnsenseDiff(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseDiffParams)
+	// GetOpnsenseDrift Welke onderdelen van de configuratie op de backup anders zijn dan op de master
+	// (GET /opnsense/firewalls/{nodeId}/drift)
+	GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
+	// (POST /opnsense/firewalls/{nodeId}/firmware)
+	StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SetOpnsenseKey Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
+	// (POST /opnsense/firewalls/{nodeId}/key)
+	SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// PlanOpnsenseChange Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen
+	// (POST /opnsense/firewalls/{nodeId}/plan)
+	PlanOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ListOpnsenseRevisions De revisies van config.xml, nieuwste eerst
+	// (GET /opnsense/firewalls/{nodeId}/revisions)
+	ListOpnsenseRevisions(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
+	// (POST /opnsense/firewalls/{nodeId}/sync)
+	SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
 	// (GET /pbs/coverage)
 	GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams)
@@ -16461,6 +16788,36 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// StartPublish Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+	// (POST /publish/actions)
+	StartPublish(w http.ResponseWriter, r *http.Request)
+	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+	// (POST /publish/adopt)
+	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+	// (POST /publish/hosts/{hostId}/accept)
+	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
+	// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
+	// (POST /publish/hosts/{hostId}/release)
+	ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int)
+	// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+	// (GET /publish/overview)
+	GetPublishOverview(w http.ResponseWriter, r *http.Request)
+	// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
+	// (POST /publish/plan)
+	PlanPublish(w http.ResponseWriter, r *http.Request)
+	// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
+	// (POST /publish/refresh)
+	RefreshPublish(w http.ResponseWriter, r *http.Request)
+	// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+	// (GET /publish/settings)
+	GetPublishSettings(w http.ResponseWriter, r *http.Request)
+	// SavePublishSettings Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+	// (PUT /publish/settings)
+	SavePublishSettings(w http.ResponseWriter, r *http.Request)
+	// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
+	// (POST /publish/test/{what})
+	TestPublishLink(w http.ResponseWriter, r *http.Request, what string)
 	// ListPveHosts Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
 	// (GET /pve-hosts)
 	ListPveHosts(w http.ResponseWriter, r *http.Request)
@@ -16710,6 +17067,24 @@ type ServerInterface interface {
 	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
 	// (POST /zabbix-agents/test)
 	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
+	// ListZabbixDashboards Eigen Zabbix-dashboards
+	// (GET /zabbix/dashboards)
+	ListZabbixDashboards(w http.ResponseWriter, r *http.Request)
+	// CreateZabbixDashboard Een eigen dashboard bewaren (admin); ook voor een import
+	// (POST /zabbix/dashboards)
+	CreateZabbixDashboard(w http.ResponseWriter, r *http.Request)
+	// DeleteZabbixDashboard Een eigen dashboard weggooien (admin)
+	// (DELETE /zabbix/dashboards/{id})
+	DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetZabbixDashboard Eén eigen dashboard
+	// (GET /zabbix/dashboards/{id})
+	GetZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateZabbixDashboard Een eigen dashboard vervangen (admin)
+	// (PUT /zabbix/dashboards/{id})
+	UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetZabbixEvents Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+	// (GET /zabbix/events)
+	GetZabbixEvents(w http.ResponseWriter, r *http.Request, params GetZabbixEventsParams)
 	// GetZabbixHostItems Laatste waarden van een Zabbix-host (latest data)
 	// (GET /zabbix/hosts/{hostid}/items)
 	GetZabbixHostItems(w http.ResponseWriter, r *http.Request, hostid string)
@@ -16719,12 +17094,27 @@ type ServerInterface interface {
 	// SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
 	// (PUT /zabbix/hosts/{hostid}/link)
 	SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string)
+	// GetZabbixLatest Laatste waarde van losse Zabbix-items
+	// (GET /zabbix/items/latest)
+	GetZabbixLatest(w http.ResponseWriter, r *http.Request, params GetZabbixLatestParams)
 	// GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
 	// (GET /zabbix/items/{itemid}/series)
 	GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams)
+	// GetZabbixMaintenance Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette
+	// (GET /zabbix/maintenance)
+	GetZabbixMaintenance(w http.ResponseWriter, r *http.Request)
+	// SetZabbixMaintenance Onderhoud naar Zabbix aan- of uitzetten (admin)
+	// (PUT /zabbix/maintenance)
+	SetZabbixMaintenance(w http.ResponseWriter, r *http.Request)
+	// GetZabbixMetrics Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+	// (GET /zabbix/metrics)
+	GetZabbixMetrics(w http.ResponseWriter, r *http.Request)
 	// GetZabbixOverview Zabbix-monitoring (fase 33)
 	// (GET /zabbix/overview)
 	GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams)
+	// AcknowledgeZabbixProblem Een probleem in Zabbix bevestigen (admin)
+	// (POST /zabbix/problems/{eventid}/acknowledge)
+	AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request, eventid string)
 	// RefreshZabbix Meteen een verzamelronde draaien
 	// (POST /zabbix/refresh)
 	RefreshZabbix(w http.ResponseWriter, r *http.Request)
@@ -18444,6 +18834,96 @@ func (_ Unimplemented) GetNodeTimeline(w http.ResponseWriter, r *http.Request, n
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// DownloadOpnsenseBackup Een back-up downloaden (admin, altijd met code of wachtwoord); de volledige config.xml met geheimen
+// (POST /opnsense/backups/{backupId}/download)
+func (_ Unimplemented) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, backupId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
+// (GET /opnsense/clusters)
+func (_ Unimplemented) ListOpnsenseClusters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+// (GET /opnsense/firewalls/{nodeId}/api)
+func (_ Unimplemented) GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
+// (GET /opnsense/firewalls/{nodeId}/backups)
+func (_ Unimplemented) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseBackup Nu een back-up maken van elke firewall van het cluster (admin)
+// (POST /opnsense/firewalls/{nodeId}/backups)
+func (_ Unimplemented) StartOpnsenseBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseCarp CARP-onderhoudsmodus aan of uit, of een failovertest, als taak opnsense.carp (admin; op prod met code of wachtwoord)
+// (POST /opnsense/firewalls/{nodeId}/carp)
+func (_ Unimplemented) StartOpnsenseCarp(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseChange Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+// (POST /opnsense/firewalls/{nodeId}/changes)
+func (_ Unimplemented) StartOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseConfigctl Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status
+// (GET /opnsense/firewalls/{nodeId}/configctl)
+func (_ Unimplemented) GetOpnsenseConfigctl(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseConfigctlParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseDiff Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen)
+// (GET /opnsense/firewalls/{nodeId}/diff)
+func (_ Unimplemented) GetOpnsenseDiff(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseDiffParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseDrift Welke onderdelen van de configuratie op de backup anders zijn dan op de master
+// (GET /opnsense/firewalls/{nodeId}/drift)
+func (_ Unimplemented) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
+// (POST /opnsense/firewalls/{nodeId}/firmware)
+func (_ Unimplemented) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetOpnsenseKey Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
+// (POST /opnsense/firewalls/{nodeId}/key)
+func (_ Unimplemented) SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanOpnsenseChange Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen
+// (POST /opnsense/firewalls/{nodeId}/plan)
+func (_ Unimplemented) PlanOpnsenseChange(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOpnsenseRevisions De revisies van config.xml, nieuwste eerst
+// (GET /opnsense/firewalls/{nodeId}/revisions)
+func (_ Unimplemented) ListOpnsenseRevisions(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
+// (POST /opnsense/firewalls/{nodeId}/sync)
+func (_ Unimplemented) SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
 // (GET /pbs/coverage)
 func (_ Unimplemented) GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams) {
@@ -18555,6 +19035,66 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPublish Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+// (POST /publish/actions)
+func (_ Unimplemented) StartPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+// (POST /publish/adopt)
+func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+// (POST /publish/hosts/{hostId}/accept)
+func (_ Unimplemented) AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
+// (POST /publish/hosts/{hostId}/release)
+func (_ Unimplemented) ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+// (GET /publish/overview)
+func (_ Unimplemented) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
+// (POST /publish/plan)
+func (_ Unimplemented) PlanPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
+// (POST /publish/refresh)
+func (_ Unimplemented) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+// (GET /publish/settings)
+func (_ Unimplemented) GetPublishSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishSettings Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+// (PUT /publish/settings)
+func (_ Unimplemented) SavePublishSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
+// (POST /publish/test/{what})
+func (_ Unimplemented) TestPublishLink(w http.ResponseWriter, r *http.Request, what string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19056,6 +19596,42 @@ func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListZabbixDashboards Eigen Zabbix-dashboards
+// (GET /zabbix/dashboards)
+func (_ Unimplemented) ListZabbixDashboards(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateZabbixDashboard Een eigen dashboard bewaren (admin); ook voor een import
+// (POST /zabbix/dashboards)
+func (_ Unimplemented) CreateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteZabbixDashboard Een eigen dashboard weggooien (admin)
+// (DELETE /zabbix/dashboards/{id})
+func (_ Unimplemented) DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixDashboard Eén eigen dashboard
+// (GET /zabbix/dashboards/{id})
+func (_ Unimplemented) GetZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateZabbixDashboard Een eigen dashboard vervangen (admin)
+// (PUT /zabbix/dashboards/{id})
+func (_ Unimplemented) UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixEvents Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+// (GET /zabbix/events)
+func (_ Unimplemented) GetZabbixEvents(w http.ResponseWriter, r *http.Request, params GetZabbixEventsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetZabbixHostItems Laatste waarden van een Zabbix-host (latest data)
 // (GET /zabbix/hosts/{hostid}/items)
 func (_ Unimplemented) GetZabbixHostItems(w http.ResponseWriter, r *http.Request, hostid string) {
@@ -19074,15 +19650,45 @@ func (_ Unimplemented) SetZabbixHostLink(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetZabbixLatest Laatste waarde van losse Zabbix-items
+// (GET /zabbix/items/latest)
+func (_ Unimplemented) GetZabbixLatest(w http.ResponseWriter, r *http.Request, params GetZabbixLatestParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
 // (GET /zabbix/items/{itemid}/series)
 func (_ Unimplemented) GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetZabbixMaintenance Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette
+// (GET /zabbix/maintenance)
+func (_ Unimplemented) GetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetZabbixMaintenance Onderhoud naar Zabbix aan- of uitzetten (admin)
+// (PUT /zabbix/maintenance)
+func (_ Unimplemented) SetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixMetrics Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+// (GET /zabbix/metrics)
+func (_ Unimplemented) GetZabbixMetrics(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetZabbixOverview Zabbix-monitoring (fase 33)
 // (GET /zabbix/overview)
 func (_ Unimplemented) GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcknowledgeZabbixProblem Een probleem in Zabbix bevestigen (admin)
+// (POST /zabbix/problems/{eventid}/acknowledge)
+func (_ Unimplemented) AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request, eventid string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27563,6 +28169,471 @@ func (siw *ServerInterfaceWrapper) GetNodeTimeline(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// DownloadOpnsenseBackup operation middleware
+func (siw *ServerInterfaceWrapper) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "backupId" -------------
+	var backupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "backupId", chi.URLParam(r, "backupId"), &backupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "backupId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadOpnsenseBackup(w, r, backupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOpnsenseClusters operation middleware
+func (siw *ServerInterfaceWrapper) ListOpnsenseClusters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOpnsenseClusters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseApi operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseApiParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "params" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "params", r.URL.Query(), &params.Params, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "params"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "params", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseApi(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOpnsenseBackups operation middleware
+func (siw *ServerInterfaceWrapper) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOpnsenseBackups(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseBackup operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseBackup(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseCarp operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseCarp(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseCarp(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseChange operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseChange(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseConfigctl operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseConfigctl(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseConfigctlParams
+
+	// ------------- Required query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseConfigctl(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseDiffParams
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "other" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "other", r.URL.Query(), &params.Other, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "other"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "other", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseDiff(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseDrift operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseDrift(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOpnsenseFirmware operation middleware
+func (siw *ServerInterfaceWrapper) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOpnsenseFirmware(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOpnsenseKey operation middleware
+func (siw *ServerInterfaceWrapper) SetOpnsenseKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOpnsenseKey(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanOpnsenseChange operation middleware
+func (siw *ServerInterfaceWrapper) PlanOpnsenseChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanOpnsenseChange(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOpnsenseRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListOpnsenseRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOpnsenseRevisions(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncOpnsense operation middleware
+func (siw *ServerInterfaceWrapper) SyncOpnsense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncOpnsense(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPbsCoverage operation middleware
 func (siw *ServerInterfaceWrapper) GetPbsCoverage(w http.ResponseWriter, r *http.Request) {
 
@@ -28054,6 +29125,182 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListVmSnapshots(w, r, proxmoxId, vmid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartPublish operation middleware
+func (siw *ServerInterfaceWrapper) StartPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdoptPublishHosts operation middleware
+func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdoptPublishHosts(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptPublishDrift operation middleware
+func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptPublishDrift(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleasePublishHost operation middleware
+func (siw *ServerInterfaceWrapper) ReleasePublishHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleasePublishHost(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishOverview(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanPublish operation middleware
+func (siw *ServerInterfaceWrapper) PlanPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshPublish operation middleware
+func (siw *ServerInterfaceWrapper) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishSettings operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestPublishLink operation middleware
+func (siw *ServerInterfaceWrapper) TestPublishLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "what" -------------
+	var what string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "what", chi.URLParam(r, "what"), &what, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "what", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestPublishLink(w, r, what)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -29960,6 +31207,145 @@ func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListZabbixDashboards operation middleware
+func (siw *ServerInterfaceWrapper) ListZabbixDashboards(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListZabbixDashboards(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) CreateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateZabbixDashboard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteZabbixDashboard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixDashboard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateZabbixDashboard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixEvents operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetZabbixEventsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetZabbixHostItems operation middleware
 func (siw *ServerInterfaceWrapper) GetZabbixHostItems(w http.ResponseWriter, r *http.Request) {
 
@@ -30038,6 +31424,39 @@ func (siw *ServerInterfaceWrapper) SetZabbixHostLink(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixLatest operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixLatest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetZabbixLatestParams
+
+	// ------------- Required query parameter "itemids" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "itemids", r.URL.Query(), &params.Itemids, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "itemids"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemids", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixLatest(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetZabbixItemSeries operation middleware
 func (siw *ServerInterfaceWrapper) GetZabbixItemSeries(w http.ResponseWriter, r *http.Request) {
 
@@ -30080,6 +31499,48 @@ func (siw *ServerInterfaceWrapper) GetZabbixItemSeries(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixMaintenance operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixMaintenance(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZabbixMaintenance operation middleware
+func (siw *ServerInterfaceWrapper) SetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZabbixMaintenance(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixMetrics(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixMetrics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetZabbixOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetZabbixOverview(w http.ResponseWriter, r *http.Request) {
 
@@ -30104,6 +31565,32 @@ func (siw *ServerInterfaceWrapper) GetZabbixOverview(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetZabbixOverview(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcknowledgeZabbixProblem operation middleware
+func (siw *ServerInterfaceWrapper) AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "eventid" -------------
+	var eventid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "eventid", chi.URLParam(r, "eventid"), &eventid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "eventid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcknowledgeZabbixProblem(w, r, eventid)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -30955,10 +32442,43 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/zabbix/refresh", wrapper.RefreshZabbix)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/metrics", wrapper.GetZabbixMetrics)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/events", wrapper.GetZabbixEvents)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/zabbix/hosts/{hostid}/items", wrapper.GetZabbixHostItems)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/zabbix/items/{itemid}/series", wrapper.GetZabbixItemSeries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/items/latest", wrapper.GetZabbixLatest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/dashboards", wrapper.ListZabbixDashboards)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix/dashboards", wrapper.CreateZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.DeleteZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.GetZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.UpdateZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix/problems/{eventid}/acknowledge", wrapper.AcknowledgeZabbixProblem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/maintenance", wrapper.GetZabbixMaintenance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix/maintenance", wrapper.SetZabbixMaintenance)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.DeleteZabbixHostLink)
@@ -31055,6 +32575,81 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/link", wrapper.LinkPbs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/clusters", wrapper.ListOpnsenseClusters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/api", wrapper.GetOpnsenseApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/configctl", wrapper.GetOpnsenseConfigctl)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/revisions", wrapper.ListOpnsenseRevisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/diff", wrapper.GetOpnsenseDiff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/plan", wrapper.PlanOpnsenseChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/changes", wrapper.StartOpnsenseChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/sync", wrapper.SyncOpnsense)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/key", wrapper.SetOpnsenseKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/carp", wrapper.StartOpnsenseCarp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/firmware", wrapper.StartOpnsenseFirmware)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/backups", wrapper.ListOpnsenseBackups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/backups", wrapper.StartOpnsenseBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/backups/{backupId}/download", wrapper.DownloadOpnsenseBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/settings", wrapper.GetPublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/settings", wrapper.SavePublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/test/{what}", wrapper.TestPublishLink)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/overview", wrapper.GetPublishOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/refresh", wrapper.RefreshPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/plan", wrapper.PlanPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/actions", wrapper.StartPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/adopt", wrapper.AdoptPublishHosts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/hosts/{hostId}/accept", wrapper.AcceptPublishDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/hosts/{hostId}/release", wrapper.ReleasePublishHost)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

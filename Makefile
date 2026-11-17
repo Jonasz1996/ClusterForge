@@ -51,11 +51,12 @@ build: web ## Bouw bin/clusterforge-server met ingebedde webinterface
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/clusterforge-server ./cmd/clusterforge-server
 
 .PHONY: agent
-agent: ## Bouw cf-agent voor amd64 en arm64 in bin/agents (die serveert make dev-server)
+agent: ## Bouw cf-agent voor Linux amd64/arm64 en FreeBSD amd64 (OPNsense) in bin/agents
 	mkdir -p bin/agents
-	for arch in amd64 arm64; do \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o bin/agents/cf-agent-linux-$$arch ./cmd/cf-agent && \
-		(cd bin/agents && sha256sum cf-agent-linux-$$arch > cf-agent-linux-$$arch.sha256); \
+	for target in linux-amd64 linux-arm64 freebsd-amd64; do \
+		os=$$(echo $$target | cut -d- -f1); arch=$$(echo $$target | cut -d- -f2); \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o bin/agents/cf-agent-$$target ./cmd/cf-agent && \
+		(cd bin/agents && sha256sum cf-agent-$$target > cf-agent-$$target.sha256) || exit 1; \
 	done
 
 .PHONY: test

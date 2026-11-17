@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -66,6 +65,15 @@ type Agent struct {
 	// Dial verbindt met de oude MariaDB bij een verhuizing; nil is
 	// net.Dialer.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// WebDial verbindt voor de publicatie (fase 35): lokale API's, de
+	// ontdekking en de controle van een adres; nil is net.Dialer. Tests
+	// sturen het naar een testserver.
+	WebDial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// NPMSnapshotDir en NPMContainer: waar de kopieën van NPM staan (leeg is
+	// /var/lib/cf-npm/cf-snapshots) en welke container NPM is (leeg: de
+	// container met image nginx-proxy-manager, cf-npm eerst). Voor tests.
+	NPMSnapshotDir string
+	NPMContainer   string
 	// DumpDir is de map met de dumps van de databases; leeg is
 	// protocol.DBDumpDir. Tests gebruiken een map.
 	DumpDir string
@@ -263,6 +271,9 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDocker), a.onDocker); err != nil {
 		return err
 	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectWeb), a.onWeb); err != nil {
+		return err
+	}
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectPVE), a.onPVE); err != nil {
 		return err
 	}
@@ -310,21 +321,30 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	a.resumeUpgrade(ctx)
 	a.resumeReconfigure(ctx)
-	a.firewallResume(ctx)
-	a.firewallMonitor(ctx)
-	a.releaseHolds(ctx)
-	// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
-	if res := a.faults.ClearAll(ctx); !res.OK {
-		a.Log.Error("achtergebleven storingen terugdraaien mislukt", "err", res.Error)
-	} else if len(res.Output) > 0 {
-		a.Log.Warn("achtergebleven storingen teruggedraaid", "output", strings.Join(res.Output, "; "))
+	// Op FreeBSD (OPNsense) zijn ufw, nft/tc, journald, /proc en systemd
+	// er niet; die lussen zouden alleen fouten loggen.
+	linux := hostOS != "freebsd"
+	if linux {
+		a.firewallResume(ctx)
+		a.firewallMonitor(ctx)
+		a.releaseHolds(ctx)
+		// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
+		if res := a.faults.ClearAll(ctx); !res.OK {
+			a.Log.Error("achtergebleven storingen terugdraaien mislukt", "err", res.Error)
+		} else if len(res.Output) > 0 {
+			a.Log.Warn("achtergebleven storingen teruggedraaid", "output", strings.Join(res.Output, "; "))
+		}
+		go a.faultLoop(ctx)
 	}
-	go a.faultLoop(ctx)
 	go a.factsLoop(ctx, factsEvery)
 	go a.metricsLoop(ctx, metricsEvery)
-	go a.journalLoop(ctx, or(a.JournalInterval, protocol.JournalInterval))
-	go a.connsLoop(ctx, or(a.ConnsSample, protocol.ConnsSample), or(a.ConnsInterval, protocol.ConnsInterval))
-	go a.cronRunsLoop(ctx, or(a.CronRunsInterval, 5*time.Second))
+	if linux {
+		go a.journalLoop(ctx, or(a.JournalInterval, protocol.JournalInterval))
+		go a.connsLoop(ctx, or(a.ConnsSample, protocol.ConnsSample), or(a.ConnsInterval, protocol.ConnsInterval))
+		go a.cronRunsLoop(ctx, or(a.CronRunsInterval, 5*time.Second))
+	} else {
+		a.opnResume(ctx)
+	}
 
 	t := time.NewTicker(hbEvery)
 	defer t.Stop()
@@ -379,7 +399,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 	if !a.unconfirmed.Load() {
 		hb.BinarySHA256 = a.binarySum()
 	}
-	hb.Arch = runtime.GOARCH
+	hb.Arch = agentPlatform()
 	hb.UpgradeRolledBack, _ = a.rolledBack.Load().(string)
 	hb.ReconfigureRolledBack, _ = a.reconfRolledBack.Load().(string)
 	if a.Config != nil {

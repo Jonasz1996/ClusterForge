@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 49
+const Version = 51
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -223,6 +223,10 @@ type Facts struct {
 
 	// PBS beschrijft de Proxmox Backup Server op deze machine; nil zonder.
 	PBS *PBSFacts `json:"pbs,omitempty"`
+	// Vanaf OPNsenseSince.
+	//
+	// OPNsense beschrijft de OPNsense-firewall op deze machine; nil zonder.
+	OPNsense *OPNsenseFacts `json:"opnsense,omitempty"`
 }
 
 // Tools zijn de gereedschappen die storingsinjectie nodig heeft: nft voor

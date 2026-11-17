@@ -22,6 +22,12 @@ export function installCommand(token: string) {
   return scriptCommand(`--token ${token}`);
 }
 
+// opnsenseCommand is dezelfde regel voor een OPNsense-firewall (fase 34):
+// daar is geen sudo, de shell (menu-optie 8) is al root.
+export function opnsenseCommand(token: string) {
+  return installCommand(token).replace("| sudo sh", "| sh");
+}
+
 export function CopyBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -87,9 +93,12 @@ export function InstallAgent({ nodeId, onClose }: { nodeId?: string; onClose: ()
           meer getoond.
         </p>
         <CopyBlock text={installCommand(result.token)} />
+        <p className="text-sm">Op een OPNsense-firewall: in de shell (menu-optie 8), zonder sudo.</p>
+        <CopyBlock text={opnsenseCommand(result.token)} />
         <p className="text-xs text-slate-500">
-          Het script haalt cf-agent van {agentServerURL()}, controleert de checksum, installeert de systemd-service en
-          meldt de node aan. De node moet {endpoints.data?.nats_url.replace("tls://", "") || "poort 4222 van deze server"}{" "}
+          Het script haalt cf-agent van {agentServerURL()}, controleert de checksum, installeert de service (systemd, of
+          rc.d op OPNsense) en meldt de node aan. Op OPNsense maakt de agent daarna zelf een API-gebruiker
+          clusterforge aan; daar hoef je niets voor te doen. De node moet {endpoints.data?.nats_url.replace("tls://", "") || "poort 4222 van deze server"}{" "}
           kunnen bereiken. Het adres stel je in bij Instellingen, onder Adres voor agents.
         </p>
         <Button variant="secondary" onClick={onClose}>

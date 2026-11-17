@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"context"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -36,6 +38,11 @@ var netColumns = map[int]string{
 // Metrics verzamelt de basismetrics van de node. Namen en labels volgen
 // node_exporter.
 func (c *Collector) Metrics() protocol.Metrics {
+	if c.bsd() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return c.bsdMetrics(ctx)
+	}
 	var m metricSet
 	c.cpuMetrics(&m)
 	if f := strings.Fields(c.read("/proc/loadavg")); len(f) >= 3 {

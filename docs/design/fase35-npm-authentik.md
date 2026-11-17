@@ -122,6 +122,13 @@ de SQLite-database moet mee, en dat is lastig. Daarom:
 
 ## Mijlpalen
 
+Stand 17/11: M0-M6 gebouwd. Getest tegen een echte NPM (SQLite) in CI
+(job "Echte NPM"): publiceren, een kapotte host terugdraaien via de API,
+Authentik aan en uit (met een nagespeelde Authentik), drift herstellen, de
+kopie van database en config terugzetten, het hoofddomein omzetten en
+verwijderen met bevestiging. sqlite3 zet de agent zelf op de NPM-node als
+het ontbreekt.
+
 ### M0 – Instellingen → Domeinen en koppelingen
 - Nieuwe pagina **Instellingen → Domeinen en publicatie**:
   - Hoofddomein (standaard `jbogaert.be`), validatie (geldige DNS-naam).

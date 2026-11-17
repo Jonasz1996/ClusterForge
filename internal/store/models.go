@@ -1504,6 +1504,19 @@ type ObservedConnectionHour struct {
 	Samples   int64
 }
 
+type OpnsenseBackup struct {
+	ID      uuid.UUID
+	NodeID  uuid.UUID
+	TakenAt time.Time
+	Reason  string
+	Sha256  string
+	Size    int32
+	Version string
+	KeyID   string
+	Nonce   string
+	Data    []byte
+}
+
 type ProxmoxBackup struct {
 	ConnectionID uuid.UUID
 	Volid        string
@@ -1598,6 +1611,57 @@ type ProxmoxTask struct {
 	Exitstatus   string
 	StartedAt    time.Time
 	EndedAt      *time.Time
+}
+
+type PublishHost struct {
+	ID           uuid.UUID
+	NpmHostID    int32
+	Domain       string
+	Desired      []byte
+	ClusterID    *uuid.UUID
+	NodeID       *uuid.UUID
+	ServicePort  *int32
+	CreatedByCf  bool
+	AkProviderPk *int32
+	AkAppSlug    *string
+	AkCreated    bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	UpdatedBy    *uuid.UUID
+}
+
+type PublishRead struct {
+	Kind   string
+	Data   []byte
+	Error  string
+	ReadAt time.Time
+}
+
+type PublishService struct {
+	NodeID    uuid.UUID
+	Services  []byte
+	Error     string
+	CheckedAt time.Time
+}
+
+type PublishSetting struct {
+	ID                 bool
+	Domain             string
+	Defaults           []byte
+	NpmClusterID       *uuid.UUID
+	NpmNodeID          *uuid.UUID
+	NpmPort            int32
+	NpmIdentity        string
+	NpmSecretEnc       []byte
+	NpmKeyID           string
+	AuthentikClusterID *uuid.UUID
+	AuthentikNodeID    *uuid.UUID
+	AuthentikPort      int32
+	AuthentikTokenEnc  []byte
+	AuthentikKeyID     string
+	AuthentikOutpost   string
+	UpdatedAt          time.Time
+	UpdatedBy          *uuid.UUID
 }
 
 type RecipeVersion struct {
@@ -1987,11 +2051,37 @@ type ZabbixAgentSetting struct {
 	UpdatedBy      *uuid.UUID
 }
 
+type ZabbixDashboard struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	Refresh     int32
+	Panels      []byte
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+}
+
 type ZabbixHostLink struct {
 	Hostid    string
 	NodeID    *uuid.UUID
 	UpdatedAt time.Time
 	UpdatedBy *uuid.UUID
+}
+
+type ZabbixMaintenance struct {
+	NodeID        uuid.UUID
+	Hostid        string
+	Maintenanceid string
+	ActiveTill    time.Time
+	CreatedAt     time.Time
+}
+
+type ZabbixMonitorSetting struct {
+	ID              bool
+	MaintenanceSync bool
+	UpdatedAt       time.Time
+	UpdatedBy       *uuid.UUID
 }
 
 type ZabbixSnapshot struct {

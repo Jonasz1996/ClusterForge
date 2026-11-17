@@ -54,8 +54,10 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
@@ -298,6 +300,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	pvh.Sync, pvh.Run.Poll, pvh.Box, pvh.RestorePoll = pve, 20*time.Millisecond, box, 20*time.Millisecond
 	pbsSvc := pbs.NewService(pool, ev, log, runner, bus)
 	pbsSvc.Run.Poll, pbsSvc.Box, pbsSvc.Hosts = 20*time.Millisecond, box, pvh
+	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
+	pub := publish.NewService(pool, ev, log, runner, bus, box)
+	pub.Sync = crons
+	opnSvc.Run.Poll, opnSvc.Box = 20*time.Millisecond, box
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
 	dep.Hosts = pvh
 	var wg sync.WaitGroup
@@ -312,7 +318,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: soc.NewService(pool, log), Security: security.NewService(pool, ev, bus, log), Stacks: stk, Logs: logs.NewService(pool, ev, bus, log), Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: soc.NewService(pool, log), Security: security.NewService(pool, ev, bus, log), Stacks: stk, Logs: logs.NewService(pool, ev, bus, log), Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, OPNsense: opnSvc, Publish: pub, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

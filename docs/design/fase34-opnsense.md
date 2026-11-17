@@ -86,11 +86,11 @@ Details van C:
 - Het installatiecommando herkent FreeBSD/OPNsense (`uname`,
   `/usr/local/opnsense/version/core`), zet de binary in
   `/usr/local/sbin/cf-agent`, een rc.d-script `cf_agent` en het
-  inschakelen via `/etc/rc.conf.d/cf_agent`. Omdat OPNsense zijn eigen
-  opstartvolgorde heeft, komt er ook een syshook in
-  `/usr/local/etc/rc.syshook.d/start/` zodat de agent na elke herstart én na
-  een firmware-upgrade zeker opstart. Dat testen we bij een minor- en een
-  major-upgrade.
+  inschakelen via `/etc/rc.conf.d/cf_agent`. OPNsense start bij het
+  opstarten (syshook `start/20-freebsd` → `rc.freebsd`) elk rc.d-script dat
+  in `/etc/rc.conf.d` aan staat; een eigen syshook is niet nodig (nagekeken
+  in de broncode van OPNsense). Dat de agent een firmware-upgrade overleeft,
+  testen we bij de eerste upgrade.
 - Linux-onderdelen (apt, systemd, ufw, docker, `/proc`) melden op FreeBSD
   "niet beschikbaar" in plaats van fouten. Metrics (cpu, geheugen, schijf,
   netwerk, load, temperatuur) komen op FreeBSD uit `sysctl`/`getifaddrs`, zodat
@@ -114,10 +114,11 @@ Elke wijziging, uit welk scherm ook, gaat door dezelfde stappen:
    kunnen raken (regels op de interface waarlangs de server of Jonas' pc
    binnenkomt, NAT, interfaces, gateways, CARP, HA) krijgen een rode
    waarschuwing en vragen de clusternaam overtikken.
-3. **Herstelpunt (agent).** Kopie van `config.xml` + revisienummer. Voor
-   firewallregels gebruiken we daarnaast OPNsense' eigen *savepoint*
-   (`firewall/filter/savepoint` → `apply/<revisie>` →
-   `cancelRollback/<revisie>`), dat zelf na 60 s terugdraait.
+3. **Herstelpunt (agent).** Kopie van `config.xml`. (OPNsense' eigen
+   *savepoint* van de firewallregels bestaat niet meer in de huidige
+   broncode van OPNsense; we vertrouwen er dus niet op. Terugzetten gebeurt
+   met `Config::restoreBackup`, dezelfde functie als *System →
+   Configuration → History*.)
 4. **Toepassen (agent).** Via de API op de master; de agent start meteen een
    **lokale terugdraaitimer** (standaard 120 s, instelbaar 60-600 s).
 5. **Bevestigingsproeven.** Automatisch, alle moeten slagen:
@@ -185,7 +186,7 @@ Koppelingen met wat er al is:
 |---|---|---|
 | **M0** | Agent op OPNsense: FreeBSD-build, installer met rc.d + syshook, metrics uit sysctl, facts `opnsense`, lokale API-gebruiker en sleutel. Firewall-node herkend in Nodes. | protocol 50 |
 | **M1** | Pagina Firewalls (alleen lezen): clusterkop met CARP/pfsync/sync, overzicht, regels, NAT, interfaces, gateways, diensten, revisies met diff. Veilig-wijzigen-mechanisme volledig gebouwd en getest met één onschuldige wijziging (omschrijving van een alias). | – |
-| **M2** | Regels, aliassen, NAT, schema's beheren. Savepoint + lokale timer + proeven + HA-sync. | – |
+| **M2** | Regels, aliassen, NAT, schema's beheren. Herstelpunt + lokale timer + proeven + HA-sync. | – |
 | **M3** | Interfaces/VIP's, gateways, routes, DHCP, Unbound. | – |
 | **M4** | VPN, diensten, plugins, diagnose (staten, live log, ping/traceroute), logs naar fase 23/25. | – |
 | **M5** | HA-beheer: onderhoudsmodus, failovertest, drift master↔backup, clusterbewuste firmware-updates (backup eerst → overschakelen → oude master → terug), back-ups in ClusterForge. | – |
@@ -218,3 +219,73 @@ GUI niet kan aanbieden.
    Dnsmasq, Unbound, ACME, CrowdSec, HAProxy)? Die komen in M3/M4 eerst.
 4. Vanaf welk VLAN beheer je de firewalls (pc 192.168.90.x?) zodat de
    bevestigingsproef precies dat pad test.
+
+## Stand van de bouw
+
+- **M0 (agent)**: FreeBSD-build en installer (rc.d onder daemon(8)), metrics
+  uit sysctl/netstat, facts `opnsense` (CARP per VIP, demotion,
+  onderhoudsmodus, pfsync, HA-instellingen, interfaces, laatste revisie),
+  lokale API-gebruiker `clusterforge` via `OPNsense\Auth\User` (zoals
+  `OPNsense\Auth\API::createKey`), leesverzoeken (`opn_get`, `opn_search`,
+  `opn_configctl` met vaste lijst, revisies zonder geheimen) en de
+  run-acties `opn_api` / `opn_confirm` / `opn_rollback` / `opn_hasync` /
+  `opn_key`. Protocol 50. De terugdraaitimer is een los proces
+  (`daemon -f … cf-agent opn-rollback`), dus hij werkt ook als de agent
+  zelf stopt; na een herstart zet de agent hem terug met de resterende tijd.
+- **M1 (server en GUI)**: `internal/opnsense` groepeert de firewalls per
+  ClusterForge-cluster of, zonder cluster, als paar via pfsync-peer of
+  syncadres, en beoordeelt CARP (split-brain, gemengde rol, demotion,
+  onderhoud, pfsync, API-sleutel, configsync, versies). Wijzigen gaat als
+  taak `opnsense.change`: voorcontrole (precies één master, backup in
+  BACKUP, sleutels ok, clusterslot), basislijn (TCP naar de GUI-poort van
+  elke node en elke CARP-VIP, CARP-rol per node, gateways die al down
+  zijn), toepassen op de master met timer, proeven tot de helft van de
+  terugdraaitijd, bevestigen of meteen terugdraaien, daarna sync naar de
+  backup en controle dat die een nieuwere revisie heeft. Op prod
+  tweestapsverificatie. Extra leesverzoek `opn_facts` (facts van nu) voor
+  de proeven. Allowlist in `policy.go`: aliassen (M1). GUI onder
+  OPNsense: Overzicht (CARP-tabel, nodes, gateways, diensten, interfaces,
+  Sync nu, sleutel plakken), Regels en aliassen (omschrijving van een alias
+  veilig wijzigen), NAT, Revisies (twee revisies of master tegenover
+  backup vergelijken).
+- **M2 (regels en NAT)**: allowlist uitgebreid met firewallregels
+  (`firewall/filter`, ook verplaatsen), port forwards (`d_nat`), uitgaande
+  NAT, 1:1 en NPT (toevoegen, wijzigen, aan/uit, verwijderen, daarna
+  `apply`), en aliassen volledig. Alles in filter en NAT is niveau
+  "toegang": clusternaam overtikken. Het formulier stuurt alleen de velden
+  die veranderden en toont oud → nieuw. Schema's hebben in OPNsense nog
+  geen MVC-API; die volgen als ze er zijn.
+- **M3 (netwerk, DHCP en DNS)**: VIP's, VLAN's, gateways en statische
+  routes (niveau "toegang"), Unbound host-/domein-overrides en -aliassen,
+  Kea-reservaties en Dnsmasq-hosts; leases lezen. Geheime velden
+  (password, psk, secret, privkey …) haalt de server uit de aanroepen en
+  bewaart ze versleuteld in de taak; de agent krijgt ze en laat ze weg uit
+  de uitvoer, ook het logboek ziet ze niet. Interfaces toewijzen heeft geen
+  API in OPNsense en blijft daar.
+- **M4 (VPN, diensten, plugins, diagnose)**: WireGuard-peers en
+  -instanties, OpenVPN-instanties, status van WireGuard/OpenVPN/IPsec;
+  diensten starten/stoppen/herstarten; plugins (alleen `os-*`)
+  installeren of verwijderen op elke firewall apart (`each`: eigen
+  herstelpunt per node, geen sync, niet te mengen met andere wijzigingen);
+  firewalllog live, pf-staten zoeken en wissen (`query_*` als
+  leesverzoek), ARP-tabel. De koppeling met Logs (fase 23) en SOC (fase
+  25) komt in M6.
+- **M5 (HA en firmware)**: tab HA en firmware. CARP-onderhoudsmodus per
+  firewall (`opn_carp`: blijvende vlag + demotion; aanzetten wacht tot de
+  andere firewall MASTER is en de VIP's antwoorden, anders meteen weer
+  uit); failovertest (overnemen, teruggeven, tijden meten). Firmware
+  (`opn_firmware` check/update/upgrade, taak `opnsense.firmware`): eerst
+  elke backup, dan de master in onderhoudsmodus, dan onderhoudsmodus uit;
+  stopt bij de eerste fout zonder de master aan te raken. Drift per
+  onderdeel van config.xml (interfaces, system, HA en CARP-skew tellen niet
+  mee). Back-ups in ClusterForge (migratie 00105, tabel opnsense_backups):
+  volledige config.xml versleuteld met de masterkey, elke dag en na elke
+  wijziging, ongewijzigd geeft geen nieuwe rij, 30 per firewall; downloaden
+  altijd met code of wachtwoord en in het logboek. Een revisie terugzetten
+  (`OPNChange.Restore`) gaat als gewone veilige wijziging op de master
+  (overtikken, terugdraaitimer, proeven, sync).
+- **M6 (overal zichtbaar)**: Aandacht nodig (problemen per firewallcluster,
+  crit rood; onderhoudsmodus die blijft staan; geen back-up in 48 uur),
+  dashboard-API `/api/dashboard/v1/opnsense` (platte velden plus een rij per
+  cluster, `?strict=1`), het filterlog en de andere logs van beide firewalls
+  via Logs (fase 23, werkt vanzelf met de agent), README-sectie OPNsense.

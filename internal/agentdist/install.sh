@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installeert cf-agent als systemd-service en meldt hem aan bij ClusterForge.
+# Installeert cf-agent als systemd-service (op OPNsense/FreeBSD als
+# rc.d-service) en meldt hem aan bij ClusterForge.
 #
 #   curl -fsSL https://clusterforge.example/install/agent.sh \
 #     | sudo sh -s -- --server https://clusterforge.example --token cfe_...
@@ -61,9 +62,99 @@ http://*)
 	;;
 *) echo "--server moet beginnen met https://" >&2; exit 2 ;;
 esac
+# install_freebsd installeert cf-agent op FreeBSD, in de praktijk OPNsense
+# (fase 34): een rc.d-script onder daemon(8), aangezet in /etc/rc.conf.d.
+# OPNsense start bij het opstarten (en na "reload all") elk rc.d-script dat
+# daar aan staat. De agent maakt daarna zelf een API-gebruiker in OPNsense.
+install_freebsd() {
+	if [ "$NO_ENROLL" = 1 ]; then
+		echo "--no-enroll is er niet op FreeBSD; gebruik --token" >&2
+		exit 2
+	fi
+	case "${CF_INSTALL_ARCH:-$(uname -m)}" in
+	amd64 | x86_64) ;;
+	*) echo "op FreeBSD wordt alleen amd64 ondersteund, niet $(uname -m)" >&2; exit 1 ;;
+	esac
+	if [ "$UPGRADE" = 1 ] && { [ ! -f "$ETC/agent.json" ] || [ ! -x "$BIN" ]; }; then
+		echo "deze machine heeft nog geen aangemelde cf-agent; installeer hem met --token" >&2
+		exit 1
+	fi
+	if [ ! -f "$ROOT/usr/local/opnsense/version/core" ]; then
+		echo "let op: dit is geen OPNsense; cf-agent draait, maar zonder firewallbeheer" >&2
+	fi
+	SERVER="${SERVER%/}"
+	TMP="$(mktemp -d)"
+	trap 'rm -rf "$TMP"' EXIT
+	echo "cf-agent downloaden (freebsd-amd64)"
+	curl -fsSL "$SERVER/downloads/cf-agent-freebsd-amd64" -o "$TMP/cf-agent"
+	curl -fsSL "$SERVER/downloads/cf-agent-freebsd-amd64.sha256" -o "$TMP/cf-agent.sha256"
+	EXPECTED="$(cut -d' ' -f1 "$TMP/cf-agent.sha256")"
+	if command -v sha256 >/dev/null 2>&1; then
+		ACTUAL="$(sha256 -q "$TMP/cf-agent")"
+	else
+		ACTUAL="$(sha256sum "$TMP/cf-agent" | cut -d' ' -f1)"
+	fi
+	if [ "$EXPECTED" != "$ACTUAL" ]; then
+		echo "checksum klopt niet; download afgebroken" >&2
+		exit 1
+	fi
+	mkdir -p "$ROOT/usr/local/bin" "$ROOT/usr/local/etc/rc.d" "$ROOT/etc/rc.conf.d"
+	OLD="$("$BIN" version 2>/dev/null || echo geen)"
+	install -m 0755 "$TMP/cf-agent" "$BIN.new"
+	mv -f "$BIN.new" "$BIN"
+	install -d -m 0700 "$ETC"
+	cat >"$ROOT/usr/local/etc/rc.d/cf_agent" <<'RC'
+#!/bin/sh
+#
+# PROVIDE: cf_agent
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# ClusterForge-agent. daemon(8) start hem opnieuw als hij stopt (-r) en
+# stuurt zijn uitvoer naar syslog met de tag cf-agent.
+
+. /etc/rc.subr
+
+name=cf_agent
+rcvar=cf_agent_enable
+
+load_rc_config $name
+: ${cf_agent_enable:="NO"}
+
+pidfile="/var/run/${name}.pid"
+procname="/usr/sbin/daemon"
+command="/usr/sbin/daemon"
+command_args="-r -R 5 -S -T cf-agent -P ${pidfile} /usr/local/bin/cf-agent run"
+
+run_rc_command "$1"
+RC
+	chmod 0755 "$ROOT/usr/local/etc/rc.d/cf_agent"
+	echo 'cf_agent_enable="YES"' >"$ROOT/etc/rc.conf.d/cf_agent"
+	if [ "$UPGRADE" = 1 ]; then
+		service cf_agent restart
+		echo "klaar: cf-agent bijgewerkt van $OLD naar $("$BIN" version); de aanmelding is gebleven"
+		exit 0
+	fi
+	echo "aanmelden bij $SERVER"
+	if [ "$ALLOW_HTTP" = 1 ]; then
+		CF_ENROLL_TOKEN="$TOKEN" "$BIN" enroll -server "$SERVER" -allow-http
+	else
+		CF_ENROLL_TOKEN="$TOKEN" "$BIN" enroll -server "$SERVER"
+	fi
+	service cf_agent restart
+	echo "klaar: cf-agent draait en is aangemeld bij $SERVER"
+}
+
 if [ "$(id -u)" != 0 ]; then
 	echo "draai dit script als root, bijvoorbeeld met sudo" >&2
 	exit 1
+fi
+# CF_INSTALL_OS doet alsof het script op een ander systeem draait; alleen
+# voor de tests.
+OS="${CF_INSTALL_OS:-$(uname -s)}"
+if [ "$OS" = FreeBSD ]; then
+	install_freebsd
+	exit 0
 fi
 if ! command -v systemctl >/dev/null 2>&1; then
 	echo "systemd is nodig voor cf-agent" >&2

@@ -4122,6 +4122,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+         * @description Uit het template Linux by Zabbix agent, in één aanvraag; 30 s gecachet. Voor de dashboards.
+         */
+        get: operations["getZabbixMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+         * @description Uit event.get, hoogstens 10 000 problemen; 60 s gecachet.
+         */
+        get: operations["getZabbixEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/zabbix/hosts/{hostid}/items": {
         parameters: {
             query?: never;
@@ -4156,6 +4196,109 @@ export interface paths {
          */
         get: operations["getZabbixItemSeries"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/items/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Laatste waarde van losse Zabbix-items
+         * @description Voor de getal- en meterpanelen van eigen dashboards. Items van hosts die ClusterForge niet kent, of die weg
+         *     zijn, ontbreken in het antwoord. Hoogstens 200 items; 30 s gecachet.
+         */
+        get: operations["getZabbixLatest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eigen Zabbix-dashboards */
+        get: operations["listZabbixDashboards"];
+        put?: never;
+        /** Een eigen dashboard bewaren (admin); ook voor een import */
+        post: operations["createZabbixDashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/dashboards/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Eén eigen dashboard */
+        get: operations["getZabbixDashboard"];
+        /** Een eigen dashboard vervangen (admin) */
+        put: operations["updateZabbixDashboard"];
+        post?: never;
+        /** Een eigen dashboard weggooien (admin) */
+        delete: operations["deleteZabbixDashboard"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/problems/{eventid}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een probleem in Zabbix bevestigen (admin)
+         * @description Bevestigt met een bericht, en zet eventueel een andere ernst of sluit het probleem (alleen als de trigger
+         *     handmatig sluiten toelaat). Raakt het probleem een node van een prod-cluster, dan is de code van
+         *     tweestapsverificatie (of het wachtwoord) nodig; zonder antwoordt de server 409 needs_confirmation.
+         */
+        post: operations["acknowledgeZabbixProblem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette */
+        get: operations["getZabbixMaintenance"];
+        /**
+         * Onderhoud naar Zabbix aan- of uitzetten (admin)
+         * @description Aan zet een onderhoud (met dataverzameling) in Zabbix voor elke node die in ClusterForge in onderhoud staat; uit haalt de onderhouden van ClusterForge weer weg.
+         */
+        put: operations["setZabbixMaintenance"];
         post?: never;
         delete?: never;
         options?: never;
@@ -4717,6 +4860,439 @@ export interface paths {
         put?: never;
         /** De PBS als storage aan een Proxmox-cluster koppelen (admin) - eigen gebruiker en token, rechten op de datastore, storage met fingerprint */
         post: operations["linkPbs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34) */
+        get: operations["listOpnsenseClusters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/api": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+         * @description Een kijker leest geen gebruikers, sleutels, certificaten, back-ups of VPN-sleutels; niemand leest API-sleutels.
+         */
+        get: operations["getOpnsenseApi"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/configctl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status */
+        get: operations["getOpnsenseConfigctl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** De revisies van config.xml, nieuwste eerst */
+        get: operations["listOpnsenseRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen) */
+        get: operations["getOpnsenseDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen */
+        post: operations["planOpnsenseChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+         * @description Alleen de aanroepen in internal/opnsense/policy.go. Herstelpunt en terugdraaitimer op de firewall,
+         *     proeven, bevestigen of terugdraaien, daarna sync naar de backup. Op prod met tweestapsverificatie
+         *     (totp_code) of anders het wachtwoord (password).
+         */
+        post: operations["startOpnsenseChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De configuratie van de master naar de backup synchroniseren (admin) */
+        post: operations["syncOpnsense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken */
+        post: operations["setOpnsenseKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/carp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** CARP-onderhoudsmodus aan of uit, of een failovertest, als taak opnsense.carp (admin; op prod met code of wachtwoord) */
+        post: operations["startOpnsenseCarp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/firmware": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin) */
+        post: operations["startOpnsenseFirmware"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Welke onderdelen van de configuratie op de backup anders zijn dan op de master */
+        get: operations["getOpnsenseDrift"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud) */
+        get: operations["listOpnsenseBackups"];
+        put?: never;
+        /** Nu een back-up maken van elke firewall van het cluster (admin) */
+        post: operations["startOpnsenseBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/backups/{backupId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een back-up downloaden (admin, altijd met code of wachtwoord); de volledige config.xml met geheimen */
+        post: operations["downloadOpnsenseBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35) */
+        get: operations["getPublishSettings"];
+        /** Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan */
+        put: operations["savePublishSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/test/{what}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                what: "npm" | "authentik";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De koppeling met NPM of Authentik proberen via de agent (admin) */
+        post: operations["testPublishLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35) */
+        get: operations["getPublishOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Diensten, NPM en Authentik nu opnieuw lezen (admin) */
+        post: operations["refreshPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wat een actie zou doen, zonder iets te veranderen (admin) */
+        post: operations["planPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout */
+        post: operations["startPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin) */
+        post: operations["adoptPublishHosts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/hosts/{hostId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin) */
+        post: operations["acceptPublishDrift"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/hosts/{hostId}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een host niet langer beheren; hij blijft in NPM staan (admin) */
+        post: operations["releasePublishHost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14183,6 +14759,104 @@ export interface components {
             jobs: string[];
             skipped: string[];
         };
+        ZabbixLatestItem: {
+            itemid: string;
+            name: string;
+            key: string;
+            numeric: boolean;
+            units: string;
+            last_value: string;
+            prev_value: string;
+            /** Format: date-time */
+            last_clock: string | null;
+            component: string;
+            error: string;
+            hostid: string;
+            host_name: string;
+        };
+        ZabbixBoardItem: {
+            itemid: string;
+            /** @description Eigen naam in de legende; leeg is de naam uit Zabbix */
+            label: string;
+        };
+        ZabbixPanel: {
+            /** @description Leeg bij een nieuw paneel; de server geeft er een */
+            id: string;
+            /** @description Een van: graph, stat, gauge, problems, text */
+            type: string;
+            title: string;
+            /** @description Breedte in kolommen */
+            w: number;
+            /** @description Hoogte */
+            h: number;
+            /** @description graph: 1-6; stat en gauge: 1 */
+            items: components["schemas"]["ZabbixBoardItem"][];
+            /** @description graph: 1h, 6h, 24h, 7d of 30d */
+            range: string;
+            /** @description stat en gauge: vanaf hier oranje */
+            warn: number | null;
+            /** @description stat en gauge: vanaf hier rood */
+            crit: number | null;
+            /** @description gauge: de volle meter (leeg: 100) */
+            max: number | null;
+            /** @description problems: vanaf deze ernst (0-5) */
+            min_severity: number;
+            /** @description problems: alleen deze host; leeg is alle */
+            hostid: string;
+            /** @description text: de tekst */
+            text: string;
+        };
+        ZabbixDashboardInput: {
+            name: string;
+            description: string;
+            /** @description Verversen in seconden: 0, 30, 60, 300 of 900 */
+            refresh: number;
+            panels: components["schemas"]["ZabbixPanel"][];
+        };
+        ZabbixDashboard: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description: string;
+            refresh: number;
+            panels: components["schemas"]["ZabbixPanel"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string | null;
+        };
+        ZabbixAckInput: {
+            /** @description Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter */
+            message: string;
+            close: boolean;
+            /** @description Nieuwe ernst 0-5; leeg laat hem staan */
+            severity?: number | null;
+            totp_code?: string;
+            password?: string;
+        };
+        ZabbixMaintenanceInput: {
+            sync: boolean;
+        };
+        ZabbixMaintenance: {
+            sync: boolean;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string | null;
+            /** @description De laatste fout bij het doorzetten; leeg als het lukte */
+            error: string;
+            active: {
+                /** Format: uuid */
+                node_id: string;
+                hostname: string;
+                hostid: string;
+                maintenanceid: string;
+                /** Format: date-time */
+                active_till: string;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+        };
         ZabbixItem: {
             itemid: string;
             name: string;
@@ -14218,6 +14892,52 @@ export interface components {
             avg: (number | null)[];
             min: (number | null)[];
             max: (number | null)[];
+        };
+        ZabbixHostMetrics: {
+            hostid: string;
+            /** @description % CPU */
+            cpu: number | null;
+            /** @description % geheugen */
+            memory: number | null;
+            /** @description % gebruikt op / */
+            disk: number | null;
+            load: number | null;
+            /** @description Seconden */
+            uptime: number | null;
+            /** @description itemid per cijfer (cpu, memory, disk, load, uptime) */
+            items: {
+                [key: string]: string;
+            };
+        };
+        ZabbixMetrics: {
+            /** Format: date-time */
+            at: string;
+            hosts: components["schemas"]["ZabbixHostMetrics"][];
+        };
+        ZabbixTopCount: {
+            id: string;
+            name: string;
+            count: number;
+            severity: number;
+            node: components["schemas"]["ZabbixNodeLink"] | null;
+        };
+        ZabbixEvents: {
+            window: string;
+            buckets: {
+                /** Format: date-time */
+                at: string;
+                /** @description Aantal nieuwe problemen per ernst 0-5 */
+                severity: number[];
+            }[];
+            total: number;
+            resolved: number;
+            /** @description Gemiddelde hersteltijd in seconden */
+            mttr: number | null;
+            /** @description Per weekdag (0 = maandag) per uur het aantal nieuwe problemen */
+            heatmap: number[][];
+            top_triggers: components["schemas"]["ZabbixTopCount"][];
+            top_hosts: components["schemas"]["ZabbixTopCount"][];
+            truncated: boolean;
         };
         ZabbixHostLinkInput: {
             /** Format: uuid */
@@ -14332,6 +15052,10 @@ export interface components {
             }[];
             /** Format: date-time */
             updated: string | null;
+            /** @description itemid per waarde (nvps, queue, queue_10m, …) */
+            items: {
+                [key: string]: string;
+            };
         };
         ZabbixUnwatched: {
             /** Format: uuid */
@@ -15139,6 +15863,8 @@ export interface components {
             /** @description Leeg als CrowdSec er niet (beheerd) staat; anders een SocState. */
             bouncer: string;
             security_updates: number;
+            /** @description Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score. */
+            zabbix: string;
             gaps: string[];
         };
         /** @enum {string} */
@@ -21629,6 +22355,54 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    getZabbixMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMetrics"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getZabbixEvents: {
+        parameters: {
+            query?: {
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixEvents"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     getZabbixHostItems: {
         parameters: {
             query?: never;
@@ -21680,6 +22454,237 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    getZabbixLatest: {
+        parameters: {
+            query: {
+                /** @description Item-id's, met komma's gescheiden */
+                itemids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixLatestItem"][];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    listZabbixDashboards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixDashboardInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixDashboardInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    acknowledgeZabbixProblem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAckInput"];
+            };
+        };
+        responses: {
+            /** @description Bevestigd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getZabbixMaintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMaintenance"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setZabbixMaintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixMaintenanceInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMaintenance"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     setZabbixHostLink: {
@@ -22552,6 +23557,676 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    listOpnsenseClusters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseApi: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met velden voor een zoekopdracht */
+                params?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het antwoord van OPNsense onder data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseConfigctl: {
+        parameters: {
+            query: {
+                action: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De uitvoer onder data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    listOpnsenseRevisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De revisies onder items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseDiff: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                other?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    planOpnsenseChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Plan, voorcontrole en of er een bevestiging nodig is */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startOpnsenseChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    syncOpnsense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setOpnsenseKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startOpnsenseCarp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    startOpnsenseFirmware: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per backup de onderdelen die verschillen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listOpnsenseBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startOpnsenseBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    downloadOpnsenseBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description config.xml als bijlage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getPublishSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    savePublishSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    testPublishLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                what: "npm" | "authentik";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Wat de agent zag */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getPublishOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    refreshPublish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het nieuwe overzicht */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    planPublish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startPublish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt, met het plan */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    adoptPublishHosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Aantal overgenomen hosts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    acceptPublishDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aanvaard */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    releasePublishHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Losgelaten */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listPveDatacenters: {

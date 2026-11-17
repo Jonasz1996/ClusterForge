@@ -181,10 +181,10 @@ func (a *Agent) upgrade(ctx context.Context, cmd protocol.Command) protocol.Resu
 	if own == "" {
 		return failed(nil, "de eigen binary is niet te lezen: "+bin)
 	}
-	want := strings.ToLower(u.SHA256[runtime.GOARCH])
+	want := strings.ToLower(u.SHA256[agentPlatform()])
 	switch {
 	case want == "":
-		return failed(nil, "de server heeft geen agent voor "+runtime.GOARCH)
+		return failed(nil, "de server heeft geen agent voor "+agentPlatform())
 	case want == own:
 		return protocol.Result{OK: true, Repeat: true, Output: []string{"deze agent is al bijgewerkt (" + a.Version + ")"}}
 	case u.Protocol < protocol.Version:
@@ -266,7 +266,7 @@ func (a *Agent) upgrade(ctx context.Context, cmd protocol.Command) protocol.Resu
 // download haalt de agent voor deze architectuur in de map van bin en
 // controleert de sha256; het geeft het pad van het tijdelijke bestand.
 func (a *Agent) download(ctx context.Context, bin, want string) (string, error) {
-	url := strings.TrimRight(a.Config.ServerURL, "/") + "/downloads/cf-agent-linux-" + runtime.GOARCH
+	url := strings.TrimRight(a.Config.ServerURL, "/") + "/downloads/" + protocol.AgentBinary(agentPlatform())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -312,28 +312,18 @@ func (a *Agent) download(ctx context.Context, bin, want string) (string, error) 
 // agent terugzet. Hij staat buiten cf-agent.service, dus een herstart of een
 // nieuwe agent die niet start, raakt hem niet.
 func (a *Agent) armRollback(ctx context.Context, prev, bin string, after time.Duration) error {
-	a.disarmRollback(ctx)
-	out, err := a.exec(ctx, "systemd-run", "--unit="+rollbackUnit, "--collect",
-		fmt.Sprintf("--on-active=%ds", max(int(after.Seconds()), 1)), "--timer-property=AccuracySec=1s",
-		"--description=ClusterForge: oude cf-agent terugzetten als de nieuwe niet verbindt",
-		prev, "upgrade-rollback", "-binary", bin, "-state", a.statePath())
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return armOneShot(ctx, a.exec, rollbackUnit, "ClusterForge: oude cf-agent terugzetten als de nieuwe niet verbindt",
+		after, prev, "upgrade-rollback", "-binary", bin, "-state", a.statePath())
 }
 
-func (a *Agent) disarmRollback(ctx context.Context) {
-	_, _ = a.exec(ctx, "systemctl", "stop", rollbackUnit+".timer")
-	_, _ = a.exec(ctx, "systemctl", "reset-failed", rollbackUnit+".timer", rollbackUnit+".service")
-}
+func (a *Agent) disarmRollback(ctx context.Context) { disarmOneShot(ctx, a.exec, rollbackUnit) }
 
 func (a *Agent) restartSelf() {
 	if a.Restart != nil {
 		a.Restart()
 		return
 	}
-	if out, err := a.exec(context.Background(), "systemctl", "--no-block", "restart", "cf-agent"); err != nil {
+	if out, err := restartAgent(context.Background(), a.exec); err != nil {
 		a.Log.Error("cf-agent herstarten mislukt; de nieuwe agent start bij de volgende herstart", "err", err, "output", strings.TrimSpace(string(out)))
 	}
 }
@@ -361,7 +351,7 @@ func (a *Agent) resumeUpgrade(ctx context.Context) {
 		// telt de server een agent die crasht of niet aangenomen wordt
 		// niet als bijgewerkt.
 		a.unconfirmed.Store(true)
-		if _, err := a.exec(ctx, "systemctl", "is-active", "--quiet", rollbackUnit+".timer"); err == nil {
+		if oneShotActive(ctx, a.exec, rollbackUnit) {
 			return
 		}
 		left := max(time.Until(m.Deadline), 5*time.Second)
@@ -440,7 +430,7 @@ func RollbackUpgrade(ctx context.Context, bin, statePath string, log *slog.Logge
 		log.Warn("update-status bewaren mislukt", "err", err)
 	}
 	log.Warn("oude agent teruggezet", "version", m.FromVersion, "failed_version", m.ToVersion)
-	out, err := exec(ctx, "systemctl", "--no-block", "restart", "cf-agent")
+	out, err := restartAgent(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("cf-agent herstarten mislukt: %v: %s", err, strings.TrimSpace(string(out)))
 	}

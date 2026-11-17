@@ -4367,6 +4367,38 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ZabbixOverview" }
         "401": { $ref: "#/components/responses/Error" }
+  /zabbix/metrics:
+    get:
+      operationId: getZabbixMetrics
+      summary: Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+      description: Uit het template Linux by Zabbix agent, in één aanvraag; 30 s gecachet. Voor de dashboards.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixMetrics" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /zabbix/events:
+    get:
+      operationId: getZabbixEvents
+      summary: Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+      description: Uit event.get, hoogstens 10 000 problemen; 60 s gecachet.
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, enum: ["24h", "7d", "30d"], default: "24h" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixEvents" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/items:
     get:
       operationId: getZabbixHostItems
@@ -4411,6 +4443,156 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /zabbix/items/latest:
+    get:
+      operationId: getZabbixLatest
+      summary: Laatste waarde van losse Zabbix-items
+      description: |
+        Voor de getal- en meterpanelen van eigen dashboards. Items van hosts die ClusterForge niet kent, of die weg
+        zijn, ontbreken in het antwoord. Hoogstens 200 items; 30 s gecachet.
+      parameters:
+        - name: itemids
+          in: query
+          required: true
+          description: Item-id's, met komma's gescheiden
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ZabbixLatestItem" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /zabbix/dashboards:
+    get:
+      operationId: listZabbixDashboards
+      summary: Eigen Zabbix-dashboards
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ZabbixDashboard" } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createZabbixDashboard
+      summary: Een eigen dashboard bewaren (admin); ook voor een import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixDashboardInput" }
+      responses:
+        "201":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixDashboard" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /zabbix/dashboards/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getZabbixDashboard
+      summary: Eén eigen dashboard
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixDashboard" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateZabbixDashboard
+      summary: Een eigen dashboard vervangen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixDashboardInput" }
+      responses:
+        "200":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixDashboard" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteZabbixDashboard
+      summary: Een eigen dashboard weggooien (admin)
+      responses:
+        "204": { description: Weg }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /zabbix/problems/{eventid}/acknowledge:
+    post:
+      operationId: acknowledgeZabbixProblem
+      summary: Een probleem in Zabbix bevestigen (admin)
+      description: |
+        Bevestigt met een bericht, en zet eventueel een andere ernst of sluit het probleem (alleen als de trigger
+        handmatig sluiten toelaat). Raakt het probleem een node van een prod-cluster, dan is de code van
+        tweestapsverificatie (of het wachtwoord) nodig; zonder antwoordt de server 409 needs_confirmation.
+      parameters:
+        - name: eventid
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixAckInput" }
+      responses:
+        "204": { description: Bevestigd }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /zabbix/maintenance:
+    get:
+      operationId: getZabbixMaintenance
+      summary: "Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixMaintenance" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setZabbixMaintenance
+      summary: Onderhoud naar Zabbix aan- of uitzetten (admin)
+      description: Aan zet een onderhoud (met dataverzameling) in Zabbix voor elke node die in ClusterForge in onderhoud staat; uit haalt de onderhouden van ClusterForge weer weg.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixMaintenanceInput" }
+      responses:
+        "200":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixMaintenance" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/link:
     parameters:
       - name: hostid
@@ -4998,6 +5180,432 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /opnsense/clusters:
+    get:
+      operationId: listOpnsenseClusters
+      summary: De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/api:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseApi
+      summary: Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+      description: Een kijker leest geen gebruikers, sleutels, certificaten, back-ups of VPN-sleutels; niemand leest API-sleutels.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: params, in: query, required: false, description: "JSON-object met velden voor een zoekopdracht", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van OPNsense onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/configctl:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseConfigctl
+      summary: Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status
+      parameters:
+        - { name: action, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: De uitvoer onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/revisions:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listOpnsenseRevisions
+      summary: De revisies van config.xml, nieuwste eerst
+      responses:
+        "200":
+          description: De revisies onder items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/diff:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseDiff
+      summary: Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen)
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string } }
+        - { name: to, in: query, required: true, schema: { type: string } }
+        - { name: other, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/plan:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planOpnsenseChange
+      summary: Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Plan, voorcontrole en of er een bevestiging nodig is
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/changes:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startOpnsenseChange
+      summary: Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+      description: |
+        Alleen de aanroepen in internal/opnsense/policy.go. Herstelpunt en terugdraaitimer op de firewall,
+        proeven, bevestigen of terugdraaien, daarna sync naar de backup. Op prod met tweestapsverificatie
+        (totp_code) of anders het wachtwoord (password).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/sync:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: syncOpnsense
+      summary: De configuratie van de master naar de backup synchroniseren (admin)
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/key:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: setOpnsenseKey
+      summary: Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/carp:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startOpnsenseCarp
+      summary: CARP-onderhoudsmodus aan of uit, of een failovertest, als taak opnsense.carp (admin; op prod met code of wachtwoord)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/firmware:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startOpnsenseFirmware
+      summary: Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/drift:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseDrift
+      summary: Welke onderdelen van de configuratie op de backup anders zijn dan op de master
+      responses:
+        "200":
+          description: Per backup de onderdelen die verschillen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/backups:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listOpnsenseBackups
+      summary: De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: startOpnsenseBackup
+      summary: Nu een back-up maken van elke firewall van het cluster (admin)
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/backups/{backupId}/download:
+    parameters:
+      - { name: backupId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: downloadOpnsenseBackup
+      summary: Een back-up downloaden (admin, altijd met code of wachtwoord); de volledige config.xml met geheimen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: config.xml als bijlage
+          content:
+            application/xml:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /publish/settings:
+    get:
+      operationId: getPublishSettings
+      summary: Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: savePublishSettings
+      summary: Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/test/{what}:
+    parameters:
+      - { name: what, in: path, required: true, schema: { type: string, enum: [npm, authentik] } }
+    post:
+      operationId: testPublishLink
+      summary: De koppeling met NPM of Authentik proberen via de agent (admin)
+      responses:
+        "200":
+          description: Wat de agent zag
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /publish/overview:
+    get:
+      operationId: getPublishOverview
+      summary: Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/refresh:
+    post:
+      operationId: refreshPublish
+      summary: Diensten, NPM en Authentik nu opnieuw lezen (admin)
+      responses:
+        "200":
+          description: Het nieuwe overzicht
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/plan:
+    post:
+      operationId: planPublish
+      summary: Wat een actie zou doen, zonder iets te veranderen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/actions:
+    post:
+      operationId: startPublish
+      summary: Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt, met het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /publish/adopt:
+    post:
+      operationId: adoptPublishHosts
+      summary: Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Aantal overgenomen hosts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/hosts/{hostId}/accept:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: acceptPublishDrift
+      summary: Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+      responses:
+        "204": { description: Aanvaard }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/hosts/{hostId}/release:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: releasePublishHost
+      summary: Een host niet langer beheren; hij blijft in NPM staan (admin)
+      responses:
+        "204": { description: Losgelaten }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters
@@ -14812,6 +15420,99 @@ components:
       properties:
         jobs: { type: array, items: { type: string, format: uuid } }
         skipped: { type: array, items: { type: string } }
+    ZabbixLatestItem:
+      type: object
+      required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error, hostid, host_name]
+      properties:
+        itemid: { type: string }
+        name: { type: string }
+        key: { type: string }
+        numeric: { type: boolean }
+        units: { type: string }
+        last_value: { type: string }
+        prev_value: { type: string }
+        last_clock: { type: string, format: date-time, nullable: true }
+        component: { type: string }
+        error: { type: string }
+        hostid: { type: string }
+        host_name: { type: string }
+    ZabbixBoardItem:
+      type: object
+      required: [itemid, label]
+      properties:
+        itemid: { type: string }
+        label: { type: string, description: Eigen naam in de legende; leeg is de naam uit Zabbix }
+    ZabbixPanel:
+      type: object
+      required: [id, type, title, w, h, items, range, warn, crit, max, min_severity, hostid, text]
+      properties:
+        id: { type: string, description: Leeg bij een nieuw paneel; de server geeft er een }
+        type: { type: string, description: "Een van: graph, stat, gauge, problems, text" }
+        title: { type: string }
+        w: { type: integer, description: Breedte in kolommen, 1-4 }
+        h: { type: integer, description: Hoogte, 1-3 }
+        items: { type: array, items: { $ref: "#/components/schemas/ZabbixBoardItem" }, description: "graph: 1-6; stat en gauge: 1" }
+        range: { type: string, description: "graph: 1h, 6h, 24h, 7d of 30d" }
+        warn: { type: number, nullable: true, description: "stat en gauge: vanaf hier oranje" }
+        crit: { type: number, nullable: true, description: "stat en gauge: vanaf hier rood" }
+        max: { type: number, nullable: true, description: "gauge: de volle meter (leeg: 100)" }
+        min_severity: { type: integer, description: "problems: vanaf deze ernst (0-5)" }
+        hostid: { type: string, description: "problems: alleen deze host; leeg is alle" }
+        text: { type: string, description: "text: de tekst" }
+    ZabbixDashboardInput:
+      type: object
+      required: [name, description, refresh, panels]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        refresh: { type: integer, description: "Verversen in seconden: 0, 30, 60, 300 of 900" }
+        panels: { type: array, items: { $ref: "#/components/schemas/ZabbixPanel" } }
+    ZabbixDashboard:
+      type: object
+      required: [id, name, description, refresh, panels, created_at, updated_at, updated_by]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        refresh: { type: integer }
+        panels: { type: array, items: { $ref: "#/components/schemas/ZabbixPanel" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string, nullable: true }
+    ZabbixAckInput:
+      type: object
+      required: [message, close]
+      properties:
+        message: { type: string, description: Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter }
+        close: { type: boolean }
+        severity: { type: integer, nullable: true, description: "Nieuwe ernst 0-5; leeg laat hem staan" }
+        totp_code: { type: string }
+        password: { type: string }
+    ZabbixMaintenanceInput:
+      type: object
+      required: [sync]
+      properties:
+        sync: { type: boolean }
+    ZabbixMaintenance:
+      type: object
+      required: [sync, updated_at, updated_by, error, active]
+      properties:
+        sync: { type: boolean }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string, nullable: true }
+        error: { type: string, description: De laatste fout bij het doorzetten; leeg als het lukte }
+        active:
+          type: array
+          items:
+            type: object
+            required: [node_id, hostname, hostid, maintenanceid, active_till, created_at]
+            properties:
+              node_id: { type: string, format: uuid }
+              hostname: { type: string }
+              hostid: { type: string }
+              maintenanceid: { type: string }
+              active_till: { type: string, format: date-time }
+              created_at: { type: string, format: date-time }
     ZabbixItem:
       type: object
       required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error]
@@ -14848,6 +15549,57 @@ components:
         avg: { type: array, items: { type: number, nullable: true } }
         min: { type: array, items: { type: number, nullable: true } }
         max: { type: array, items: { type: number, nullable: true } }
+    ZabbixHostMetrics:
+      type: object
+      required: [hostid, cpu, memory, disk, load, uptime, items]
+      properties:
+        hostid: { type: string }
+        cpu: { type: number, nullable: true, description: "% CPU" }
+        memory: { type: number, nullable: true, description: "% geheugen" }
+        disk: { type: number, nullable: true, description: "% gebruikt op /" }
+        load: { type: number, nullable: true }
+        uptime: { type: number, nullable: true, description: Seconden }
+        items: { type: object, additionalProperties: { type: string }, description: "itemid per cijfer (cpu, memory, disk, load, uptime)" }
+    ZabbixMetrics:
+      type: object
+      required: [at, hosts]
+      properties:
+        at: { type: string, format: date-time }
+        hosts: { type: array, items: { $ref: "#/components/schemas/ZabbixHostMetrics" } }
+    ZabbixTopCount:
+      type: object
+      required: [id, name, count, severity, node]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        count: { type: integer }
+        severity: { type: integer }
+        node:
+          allOf: [{ $ref: "#/components/schemas/ZabbixNodeLink" }]
+          nullable: true
+    ZabbixEvents:
+      type: object
+      required: [window, buckets, total, resolved, mttr, heatmap, top_triggers, top_hosts, truncated]
+      properties:
+        window: { type: string }
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [at, severity]
+            properties:
+              at: { type: string, format: date-time }
+              severity: { type: array, items: { type: integer }, description: Aantal nieuwe problemen per ernst 0-5 }
+        total: { type: integer }
+        resolved: { type: integer }
+        mttr: { type: number, nullable: true, description: Gemiddelde hersteltijd in seconden }
+        heatmap:
+          type: array
+          description: Per weekdag (0 = maandag) per uur het aantal nieuwe problemen
+          items: { type: array, items: { type: integer } }
+        top_triggers: { type: array, items: { $ref: "#/components/schemas/ZabbixTopCount" } }
+        top_hosts: { type: array, items: { $ref: "#/components/schemas/ZabbixTopCount" } }
+        truncated: { type: boolean }
     ZabbixHostLinkInput:
       type: object
       required: [node_id]
@@ -14950,7 +15702,7 @@ components:
     ZabbixHealth:
       type: object
       required: [hostid, name, nvps, queue, queue_10m, preprocessing_queue, cache_config, cache_history, cache_value,
-        values, uptime, busiest, updated]
+        values, uptime, busiest, updated, items]
       properties:
         hostid: { type: string }
         name: { type: string }
@@ -14972,6 +15724,7 @@ components:
               name: { type: string }
               busy: { type: number }
         updated: { type: string, format: date-time, nullable: true }
+        items: { type: object, additionalProperties: { type: string }, description: "itemid per waarde (nvps, queue, queue_10m, …)" }
     ZabbixUnwatched:
       type: object
       required: [node_id, hostname, ip, cluster_id, cluster_name]
@@ -15791,7 +16544,7 @@ components:
         detail: { type: string }
     SocCoverage:
       type: object
-      required: [node_id, hostname, cluster_id, cluster_name, online, firewall, crowdsec, bouncer, security_updates, gaps]
+      required: [node_id, hostname, cluster_id, cluster_name, online, firewall, crowdsec, bouncer, security_updates, zabbix, gaps]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -15804,6 +16557,9 @@ components:
           type: string
           description: Leeg als CrowdSec er niet (beheerd) staat; anders een SocState.
         security_updates: { type: integer }
+        zabbix:
+          type: string
+          description: "Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score."
         gaps: { type: array, items: { type: string } }
     SocState:
       type: string

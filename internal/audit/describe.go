@@ -183,6 +183,7 @@ var reauthWhat = map[string]string{
 	"totp_enable":     "tweestapsverificatie aanzetten",
 	"totp_disable":    "tweestapsverificatie uitzetten",
 	"assistant":       "instellingen van de assistent",
+	"zabbix_ack":      "een Zabbix-probleem bevestigen",
 }
 
 var enrollReasons = map[string]string{
@@ -564,6 +565,46 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "incident.resolved":
 		secs, _ := p["duration_seconds"].(float64)
 		return fmt.Sprintf("Incident %s opgelost na %s: %s", name, duration(time.Duration(secs)*time.Second), str(p, "title"))
+	case "zabbix.problem_started":
+		return fmt.Sprintf("Zabbix meldt op %s: %s (%s)", name, zabbixProblem(p, name), str(p, "severity_label"))
+	case "zabbix.problem_resolved":
+		secs, _ := p["duration_s"].(float64)
+		return fmt.Sprintf("Zabbix-probleem op %s opgelost na %s: %s", name, duration(time.Duration(secs)*time.Second), zabbixProblem(p, name))
+	case "zabbix.problem_acknowledged":
+		s := "Zabbix-probleem bevestigd"
+		if name != "" && name != r.SubjectID {
+			s += " op " + name
+		}
+		s += ": " + zabbixProblem(p, name)
+		if from, to := str(p, "from"), str(p, "to"); to != "" {
+			s += ", ernst van " + from + " naar " + to
+		}
+		if b, _ := p["close"].(bool); b {
+			s += ", en gesloten"
+		}
+		return s + colon(str(p, "message"))
+	case "zabbix.maintenance_started":
+		return "Onderhoud in Zabbix gezet voor " + name + ", want de node is in onderhoud"
+	case "zabbix.maintenance_ended":
+		return "Onderhoud in Zabbix weggehaald voor " + name
+	case "zabbix.settings_changed":
+		if b, _ := p["maintenance_sync"].(bool); b {
+			return "Onderhoud doorzetten naar Zabbix aangezet"
+		}
+		return "Onderhoud doorzetten naar Zabbix uitgezet"
+	case "zabbix.host_linked":
+		if h := str(p, "hostname"); h != "" {
+			return fmt.Sprintf("Zabbix-host %s gekoppeld aan node %s", str(p, "hostid"), h)
+		}
+		return fmt.Sprintf("Zabbix-host %s hoort bij geen enkele node", str(p, "hostid"))
+	case "zabbix.host_unlinked":
+		return fmt.Sprintf("Handmatige koppeling van Zabbix-host %s weggehaald", str(p, "hostid"))
+	case "zabbix.dashboard_created":
+		return fmt.Sprintf("Zabbix-dashboard %s gemaakt (%s panelen)", str(p, "name"), num(p["panels"]))
+	case "zabbix.dashboard_updated":
+		return fmt.Sprintf("Zabbix-dashboard %s gewijzigd (%s panelen)", str(p, "name"), num(p["panels"]))
+	case "zabbix.dashboard_deleted":
+		return "Zabbix-dashboard " + str(p, "name") + " weggegooid"
 	case "incident.reopened":
 		return fmt.Sprintf("Incident %s opnieuw geopend: %s", name, str(p, "title"))
 	case "incident.note_updated":
@@ -1492,6 +1533,18 @@ func duration(d time.Duration) string {
 func str(p map[string]any, k string) string {
 	s, _ := p[k].(string)
 	return s
+}
+
+// zabbixProblem is de naam van een Zabbix-probleem zonder de hostnaam
+// ervoor, die de templates er meestal voor zetten.
+func zabbixProblem(p map[string]any, host string) string {
+	n := str(p, "name")
+	for _, h := range []string{host, str(p, "host")} {
+		if h != "" && len(n) > len(h)+2 && strings.EqualFold(n[:len(h)], h) && n[len(h):len(h)+2] == ": " {
+			return n[len(h)+2:]
+		}
+	}
+	return n
 }
 
 func or(a, b string) string {
