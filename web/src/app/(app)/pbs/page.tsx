@@ -235,7 +235,7 @@ function JobsCard({ o }: { o: PbsOverview }) {
   return (
     <Card title="Jobs">
       {o.jobs.length === 0 ? (
-        <Empty>Nog geen jobs. Garbage collection, prune, verify en sync plan je vanaf M3 onder Jobs.</Empty>
+        <Empty>Nog geen jobs. Plan garbage collection, prune, verify en sync onder Backup Server → Jobs.</Empty>
       ) : (
         <div className="relative -mx-4 overflow-x-auto sm:mx-0">
           <table className={tableClass}>

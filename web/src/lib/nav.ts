@@ -106,6 +106,7 @@ export const navGroups: NavGroup[] = [
           { href: "/pbs", label: "Overzicht" },
           { href: "/pbs/datastores", label: "Datastores", keywords: "pbs datastore gc garbage collection prune verify onderhoud" },
           { href: "/pbs/inhoud", label: "Inhoud", keywords: "pbs snapshot groep namespace back-up beschermen notitie verifieer" },
+          { href: "/pbs/jobs", label: "Jobs", keywords: "pbs prune verify sync remote gc schema bandbreedte traffic" },
           { href: "/pbs/taken", label: "Taken", keywords: "pbs task log upid back-up verify gc" },
         ],
       },
