@@ -447,3 +447,47 @@ func TestItemsAndSeries(t *testing.T) {
 		t.Errorf("ongeldig itemid: %v", err)
 	}
 }
+
+func TestSummarize(t *testing.T) {
+	loc := brussels()
+	now := time.Date(2026, 11, 17, 5, 30, 0, 0, loc) // dinsdag
+	from := now.Add(-24 * time.Hour)
+	at := func(h, m int) zint { return zint(time.Date(2026, 11, 17, h, m, 0, 0, loc).Unix()) }
+	host := func(id, n string) []struct {
+		HostID string `json:"hostid"`
+		Name   string `json:"name"`
+	} {
+		return []struct {
+			HostID string `json:"hostid"`
+			Name   string `json:"name"`
+		}{{id, n}}
+	}
+	evs := []rawEvent{
+		{EventID: "1", ObjectID: "t1", Clock: at(4, 10), Name: "CPU hoog", Severity: 4, REventID: "11", Hosts: host("h1", "web01")},
+		{EventID: "2", ObjectID: "t1", Clock: at(4, 50), Name: "CPU hoog", Severity: 4, REventID: "12", Hosts: host("h1", "web01")},
+		{EventID: "3", ObjectID: "t2", Clock: at(5, 5), Name: "Schijf", Severity: 2, Hosts: host("h2", "db1")},
+	}
+	rc := map[string]int64{"11": int64(at(4, 20)), "12": int64(at(5, 10))}
+	n := uuid.New()
+	e := summarize(evs, rc, map[string]*NodeLink{"h2": {NodeID: n, Hostname: "db1"}}, "24h", from, now)
+	if e.Total != 3 || e.Resolved != 2 || e.MTTR == nil || *e.MTTR != 900 {
+		t.Fatalf("tellers: %+v mttr %v", e, e.MTTR)
+	}
+	if len(e.Buckets) != 25 {
+		t.Errorf("stukjes: %d", len(e.Buckets))
+	}
+	last := e.Buckets[len(e.Buckets)-1]
+	if last.Severity[2] != 1 || e.Buckets[len(e.Buckets)-2].Severity[4] != 2 {
+		t.Errorf("laatste stukjes: %+v %+v", e.Buckets[len(e.Buckets)-2], last)
+	}
+	if e.Heatmap[1][4] != 2 || e.Heatmap[1][5] != 1 {
+		t.Errorf("heatmap dinsdag: %v", e.Heatmap[1])
+	}
+	if e.TopTriggers[0].Name != "CPU hoog" || e.TopTriggers[0].Count != 2 || e.TopHosts[1].Node == nil || e.TopHosts[1].Node.NodeID != n {
+		t.Errorf("top: %+v %+v", e.TopTriggers, e.TopHosts)
+	}
+	w := summarize(evs, rc, nil, "7d", now.Add(-7*24*time.Hour), now)
+	if len(w.Buckets) != 8 || w.Buckets[7].Severity[4] != 2 {
+		t.Errorf("per dag: %d %+v", len(w.Buckets), w.Buckets[len(w.Buckets)-1])
+	}
+}

@@ -148,3 +148,25 @@ func (s *Server) GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, ite
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+func (s *Server) GetZabbixMetrics(w http.ResponseWriter, r *http.Request) {
+	out, err := s.zabbixMon.Metrics(r.Context())
+	if err != nil {
+		s.zabbixReadError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) GetZabbixEvents(w http.ResponseWriter, r *http.Request, params gen.GetZabbixEventsParams) {
+	window := "24h"
+	if params.Window != nil && params.Window.Valid() {
+		window = string(*params.Window)
+	}
+	out, err := s.zabbixMon.Events(r.Context(), window)
+	if err != nil {
+		s.zabbixReadError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}

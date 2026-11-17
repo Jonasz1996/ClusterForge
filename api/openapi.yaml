@@ -4367,6 +4367,38 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ZabbixOverview" }
         "401": { $ref: "#/components/responses/Error" }
+  /zabbix/metrics:
+    get:
+      operationId: getZabbixMetrics
+      summary: Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+      description: Uit het template Linux by Zabbix agent, in één aanvraag; 30 s gecachet. Voor de dashboards.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixMetrics" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /zabbix/events:
+    get:
+      operationId: getZabbixEvents
+      summary: Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+      description: Uit event.get, hoogstens 10 000 problemen; 60 s gecachet.
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, enum: ["24h", "7d", "30d"], default: "24h" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixEvents" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/items:
     get:
       operationId: getZabbixHostItems
@@ -14848,6 +14880,57 @@ components:
         avg: { type: array, items: { type: number, nullable: true } }
         min: { type: array, items: { type: number, nullable: true } }
         max: { type: array, items: { type: number, nullable: true } }
+    ZabbixHostMetrics:
+      type: object
+      required: [hostid, cpu, memory, disk, load, uptime, items]
+      properties:
+        hostid: { type: string }
+        cpu: { type: number, nullable: true, description: "% CPU" }
+        memory: { type: number, nullable: true, description: "% geheugen" }
+        disk: { type: number, nullable: true, description: "% gebruikt op /" }
+        load: { type: number, nullable: true }
+        uptime: { type: number, nullable: true, description: Seconden }
+        items: { type: object, additionalProperties: { type: string }, description: "itemid per cijfer (cpu, memory, disk, load, uptime)" }
+    ZabbixMetrics:
+      type: object
+      required: [at, hosts]
+      properties:
+        at: { type: string, format: date-time }
+        hosts: { type: array, items: { $ref: "#/components/schemas/ZabbixHostMetrics" } }
+    ZabbixTopCount:
+      type: object
+      required: [id, name, count, severity, node]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        count: { type: integer }
+        severity: { type: integer }
+        node:
+          allOf: [{ $ref: "#/components/schemas/ZabbixNodeLink" }]
+          nullable: true
+    ZabbixEvents:
+      type: object
+      required: [window, buckets, total, resolved, mttr, heatmap, top_triggers, top_hosts, truncated]
+      properties:
+        window: { type: string }
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [at, severity]
+            properties:
+              at: { type: string, format: date-time }
+              severity: { type: array, items: { type: integer }, description: Aantal nieuwe problemen per ernst 0-5 }
+        total: { type: integer }
+        resolved: { type: integer }
+        mttr: { type: number, nullable: true, description: Gemiddelde hersteltijd in seconden }
+        heatmap:
+          type: array
+          description: Per weekdag (0 = maandag) per uur het aantal nieuwe problemen
+          items: { type: array, items: { type: integer } }
+        top_triggers: { type: array, items: { $ref: "#/components/schemas/ZabbixTopCount" } }
+        top_hosts: { type: array, items: { $ref: "#/components/schemas/ZabbixTopCount" } }
+        truncated: { type: boolean }
     ZabbixHostLinkInput:
       type: object
       required: [node_id]
@@ -14950,7 +15033,7 @@ components:
     ZabbixHealth:
       type: object
       required: [hostid, name, nvps, queue, queue_10m, preprocessing_queue, cache_config, cache_history, cache_value,
-        values, uptime, busiest, updated]
+        values, uptime, busiest, updated, items]
       properties:
         hostid: { type: string }
         name: { type: string }
@@ -14972,6 +15055,7 @@ components:
               name: { type: string }
               busy: { type: number }
         updated: { type: string, format: date-time, nullable: true }
+        items: { type: object, additionalProperties: { type: string }, description: "itemid per waarde (nvps, queue, queue_10m, …)" }
     ZabbixUnwatched:
       type: object
       required: [node_id, hostname, ip, cluster_id, cluster_name]

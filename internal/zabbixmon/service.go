@@ -40,6 +40,7 @@ type Service struct {
 	lastRun    time.Time
 	lastSaved  time.Time
 	cache      itemCache
+	dash       dashCache
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, agents *zabbixagent.Service, log *slog.Logger) *Service {

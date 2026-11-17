@@ -182,6 +182,7 @@ export const navGroups: NavGroup[] = [
         keywords: "zabbix problemen triggers beschikbaarheid hosts proxy ha dashboard",
         tabs: [
           { href: "/zabbix/overzicht", label: "Overzicht" },
+          { href: "/zabbix/dashboards", label: "Dashboards", keywords: "grafana grafieken kiosk tv top cpu geheugen mttr heatmap" },
           { href: "/zabbix/problemen", label: "Problemen", keywords: "triggers alerts ernst" },
           { href: "/zabbix/hosts", label: "Hosts", keywords: "beschikbaarheid koppelen" },
           { href: "/zabbix", label: "Agents", keywords: "zabbix-agents agent2 psk sleutel" },

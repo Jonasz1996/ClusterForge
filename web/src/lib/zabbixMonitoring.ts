@@ -243,3 +243,28 @@ export function pickKeyItems(items: ZabbixItem[]) {
   }
   return out;
 }
+
+// --- dashboards (M3) -------------------------------------------------------------------
+
+export type ZabbixMetrics = components["schemas"]["ZabbixMetrics"];
+export type ZabbixHostMetrics = components["schemas"]["ZabbixHostMetrics"];
+export type ZabbixEvents = components["schemas"]["ZabbixEvents"];
+export type ZabbixTopCount = components["schemas"]["ZabbixTopCount"];
+
+export function useZabbixMetrics(enabled = true) {
+  return useQuery({
+    queryKey: ["zabbix-metrics"],
+    queryFn: async () => unwrap(await api.GET("/zabbix/metrics")),
+    enabled,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useZabbixEvents(window: ZabbixWindow, enabled = true) {
+  return useQuery({
+    queryKey: ["zabbix-events", window],
+    queryFn: async () => unwrap(await api.GET("/zabbix/events", { params: { query: { window } } })),
+    enabled,
+    refetchInterval: 120_000,
+  });
+}

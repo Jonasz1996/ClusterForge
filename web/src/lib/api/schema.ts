@@ -4122,6 +4122,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+         * @description Uit het template Linux by Zabbix agent, in één aanvraag; 30 s gecachet. Voor de dashboards.
+         */
+        get: operations["getZabbixMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+         * @description Uit event.get, hoogstens 10 000 problemen; 60 s gecachet.
+         */
+        get: operations["getZabbixEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/zabbix/hosts/{hostid}/items": {
         parameters: {
             query?: never;
@@ -14219,6 +14259,52 @@ export interface components {
             min: (number | null)[];
             max: (number | null)[];
         };
+        ZabbixHostMetrics: {
+            hostid: string;
+            /** @description % CPU */
+            cpu: number | null;
+            /** @description % geheugen */
+            memory: number | null;
+            /** @description % gebruikt op / */
+            disk: number | null;
+            load: number | null;
+            /** @description Seconden */
+            uptime: number | null;
+            /** @description itemid per cijfer (cpu, memory, disk, load, uptime) */
+            items: {
+                [key: string]: string;
+            };
+        };
+        ZabbixMetrics: {
+            /** Format: date-time */
+            at: string;
+            hosts: components["schemas"]["ZabbixHostMetrics"][];
+        };
+        ZabbixTopCount: {
+            id: string;
+            name: string;
+            count: number;
+            severity: number;
+            node: components["schemas"]["ZabbixNodeLink"] | null;
+        };
+        ZabbixEvents: {
+            window: string;
+            buckets: {
+                /** Format: date-time */
+                at: string;
+                /** @description Aantal nieuwe problemen per ernst 0-5 */
+                severity: number[];
+            }[];
+            total: number;
+            resolved: number;
+            /** @description Gemiddelde hersteltijd in seconden */
+            mttr: number | null;
+            /** @description Per weekdag (0 = maandag) per uur het aantal nieuwe problemen */
+            heatmap: number[][];
+            top_triggers: components["schemas"]["ZabbixTopCount"][];
+            top_hosts: components["schemas"]["ZabbixTopCount"][];
+            truncated: boolean;
+        };
         ZabbixHostLinkInput: {
             /** Format: uuid */
             node_id: string | null;
@@ -14332,6 +14418,10 @@ export interface components {
             }[];
             /** Format: date-time */
             updated: string | null;
+            /** @description itemid per waarde (nvps, queue, queue_10m, …) */
+            items: {
+                [key: string]: string;
+            };
         };
         ZabbixUnwatched: {
             /** Format: uuid */
@@ -21627,6 +21717,54 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getZabbixMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMetrics"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getZabbixEvents: {
+        parameters: {
+            query?: {
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixEvents"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     getZabbixHostItems: {
