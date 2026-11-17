@@ -334,6 +334,7 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Post("/truenas/{node}/call", s.trueNASCall)
 		// AI-verslag (fase 38), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/aiverslag", s.listAIV)
+		api.With(s.requireSession).Get("/aiverslag/summary", s.aivSummary)
 		api.With(s.requireSession).Get("/aiverslag/{node}/overview", s.aivOverview)
 		api.With(s.requireSession).Get("/aiverslag/{node}/api", s.aivGet)
 		api.With(s.requireSession).Post("/aiverslag/{node}/call", s.aivCall)

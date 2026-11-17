@@ -105,7 +105,7 @@ func TestSummarize(t *testing.T) {
 func TestWarnings(t *testing.T) {
 	v := Instance{Online: true, Protocol: protocol.AIVSince, Facts: protocol.AIVFacts{Reachable: true, DataUsedPct: 92},
 		Units: []protocol.AIVUnit{{Name: "aiverslag-web.service", Active: "active"}, {Name: "aiverslag-run.service", Active: "failed", Result: "exit-code"}, {Name: "ollama.service", Active: "inactive"}}}
-	start := json.RawMessage(`{"niveau":{"niveau":"verhoogd","redenen":["incident: scan van 1.2.3.4"]},"feeds":{"fout":2}}`)
+	start := json.RawMessage(`{"niveau":{"niveau":"verhoogd","redenen":["incident: scan van 1.2.3.4"]},"feeds":{"fout":2},"run":{"ts":1000}}`)
 	app := json.RawMessage(`{"meldingen":[{"id":3,"titel":"C2-contact","gezien":false,"ts":9999999999},{"id":2,"titel":"oud","gezien":true,"ts":9999999999}]}`)
 	st, _ := Summarize(json.RawMessage(stateJSON), 5)
 	w := Warnings(v, start, app, st)
@@ -115,14 +115,14 @@ func TestWarnings(t *testing.T) {
 	}
 	all := strings.Join(txt, "\n")
 	for _, want := range []string{"critical: aiverslag-run.service is mislukt (exit-code)", "warning: Ollama draait niet", "warning: schijf van AI-verslag 92% vol",
-		"warning: dreigingsniveau verhoogd: incident: scan van 1.2.3.4", "warning: 2 dreigingsfeed(s) werken niet", "warning: alarm niet gezien: C2-contact", "warning: analyse dns: timeout"} {
+		"warning: dreigingsniveau verhoogd: incident: scan van 1.2.3.4", "warning: 2 dreigingsfeed(s) werken niet", "warning: alarm niet gezien: C2-contact", "warning: analyse dns: timeout", "warning: laatste analyse is"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("mist %q in\n%s", want, all)
 		}
 	}
 	var sum Summary
-	fillLevel(&sum, Overview{Start: json.RawMessage(`{"niveau":{"niveau":"kritiek","redenen":["x"]},"score":{"score":71}}`), State: st})
-	if sum.Niveau != "kritiek" || sum.Score == nil || *sum.Score != 71 || sum.OpenHoog != 1 {
+	fillLevel(&sum, Overview{Start: json.RawMessage(`{"niveau":{"niveau":"kritiek","redenen":["x"]},"score":{"score":71},"incidenten_n":2,"run":{"ts":5}}`), App: app, State: st})
+	if sum.Niveau != "kritiek" || sum.Score == nil || *sum.Score != 71 || sum.OpenHoog != 1 || sum.Incidenten != 2 || sum.Unseen != 1 || sum.LastRun != 5 {
 		t.Fatalf("sum %+v", sum)
 	}
 }

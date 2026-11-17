@@ -114,6 +114,8 @@ export type PublishService = {
   web: boolean;
   published: { host_id: number; domain: string; authentik: AKState }[];
   authentik_default: boolean;
+  internal?: boolean;
+  internal_why?: string;
 };
 
 export type PublishApp = {
@@ -166,6 +168,7 @@ export type PublishOverview = {
     services: number;
     web: number;
     unpublished: number;
+    internal?: number;
     hosts: number;
     managed: number;
     protected: number;

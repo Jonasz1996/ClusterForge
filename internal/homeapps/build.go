@@ -210,6 +210,11 @@ func Build(in Input) Result {
 	for _, r := range in.Services {
 		scope, cl := scopeOf(r, nodes, clusters)
 		e, ok := match(r.Image, r.Unit, r.Container)
+		// Interne poorten (HAProxy-frontends, Patroni, ...) worden geen tegel,
+		// tenzij de catalogus ze kent (CrowdSec, NPM) of ze in NPM staan.
+		if r.Internal && !ok && len(hostsBySvc[r.Key]) == 0 {
+			continue
+		}
 		auto := "catalogus"
 		if !ok && isWeb(r) {
 			if c := cl; c != nil {

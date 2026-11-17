@@ -257,6 +257,31 @@ export function useAIVInstances() {
   });
 }
 
+// AIVSummary is de stand van één AI-verslag na de laatste ronde van de
+// server (elke 5 minuten).
+export type AIVSummary = {
+  instance: AIVInstance;
+  at: string;
+  warnings: { level: "critical" | "warning"; text: string }[];
+  niveau?: AIVNiveau;
+  redenen?: string[];
+  score?: number | null;
+  open_hoog: number;
+  incidenten: number;
+  unseen: number;
+  last_run?: number;
+  error?: string;
+};
+
+export function useAIVSummary() {
+  return useQuery({
+    queryKey: ["aiverslag", "summary"],
+    queryFn: () => call<{ items: AIVSummary[] }>("GET", "/aiverslag/summary"),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
+
 export function useAIVOverview(id: string) {
   return useQuery({
     queryKey: ["aiverslag", id, "overview"],

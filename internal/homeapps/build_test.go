@@ -124,3 +124,29 @@ func TestBuild(t *testing.T) {
 		t.Errorf("genegeerd: %d twijfel, %d apps", len(res.Doubts), len(res.Apps))
 	}
 }
+
+// Interne poorten (HAProxy-frontends, statistieken, Patroni) worden geen
+// tegel en geen twijfel, ook niet via het template van het cluster.
+func TestBuildSkipsInternal(t *testing.T) {
+	now := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	cl := uuid.New()
+	n1 := uuid.New()
+	in := Input{
+		Now:      now,
+		Nodes:    []Node{{ID: n1, Hostname: "hp1", ClusterID: &cl, Online: true}},
+		Clusters: []Cluster{{ID: cl, Slug: "homepage", Name: "Homepage", Template: "homepage", VIP: "192.168.113.159", VIPOwner: "hp1"}},
+		Services: []publish.ServiceRow{
+			{Key: "c80", ClusterID: &cl, Nodes: []publish.NodeShort{{ID: n1, Hostname: "hp1"}}, Port: 80, Kind: "http", Status: 200, Unit: "nginx", Target: "192.168.113.159"},
+			{Key: "c8008", ClusterID: &cl, Nodes: []publish.NodeShort{{ID: n1, Hostname: "hp1"}}, Port: 8008, Kind: "http", Unit: "patroni", Internal: true},
+			{Key: "h1", Nodes: []publish.NodeShort{{ID: n1, Hostname: "hp1"}}, Port: 13100, Kind: "http", Status: 503, Unit: "haproxy", Internal: true},
+			{Key: "h2", Nodes: []publish.NodeShort{{ID: n1, Hostname: "hp1"}}, Port: 7000, Kind: "http", Status: 200, Unit: "haproxy", Internal: true},
+		},
+	}
+	res := Build(in)
+	if len(res.Apps) != 1 || len(res.Doubts) != 0 {
+		t.Fatalf("apps %+v, twijfel %+v", res.Apps, res.Doubts)
+	}
+	if hp := res.Apps[0]; hp.Slug != "homepage" || len(hp.Ports) != 1 {
+		t.Errorf("homepage: %+v", hp)
+	}
+}

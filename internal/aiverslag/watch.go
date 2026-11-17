@@ -25,8 +25,13 @@ type Summary struct {
 	Redenen []string `json:"redenen,omitempty"`
 	Score   *float64 `json:"score,omitempty"`
 	// OpenHoog is het aantal open bevindingen met ernst hoog.
-	OpenHoog int    `json:"open_hoog"`
-	Error    string `json:"error,omitempty"`
+	OpenHoog int `json:"open_hoog"`
+	// Incidenten (open), Unseen (alarmen niet gezien, 7 dagen) en LastRun
+	// (laatste analyse, unix-seconden) voor de SOC-pagina en de dashboard-API.
+	Incidenten int    `json:"incidenten"`
+	Unseen     int    `json:"unseen"`
+	LastRun    int64  `json:"last_run,omitempty"`
+	Error      string `json:"error,omitempty"`
 	// Ext is de stand van de koppeling ext56 (M4).
 	Ext *ExtStatus `json:"ext,omitempty"`
 }
