@@ -38,4 +38,14 @@ func TestOPNsenseAPI(t *testing.T) {
 	if s := c.do("POST", base+"/sync", nil, nil); s != http.StatusNotFound {
 		t.Errorf("sync onbekende firewall: %d", s)
 	}
+	if s := c.do("GET", base+"/backups", nil, nil); s != http.StatusNotFound {
+		t.Errorf("back-ups onbekende firewall: %d", s)
+	}
+	if s := c.do("POST", base+"/carp", map[string]any{"action": "failover_test"}, nil); s != http.StatusNotFound {
+		t.Errorf("failovertest onbekende firewall: %d", s)
+	}
+	// Een back-up downloaden vraagt altijd een code of het wachtwoord.
+	if s := c.do("POST", "/api/v1/opnsense/backups/"+uuid.NewString()+"/download", map[string]any{}, nil); s != http.StatusConflict {
+		t.Errorf("download zonder bevestiging: %d", s)
+	}
 }

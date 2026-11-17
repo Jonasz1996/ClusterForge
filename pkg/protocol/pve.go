@@ -227,6 +227,10 @@ type PVERun struct {
 	OPN    *OPNChange   `json:"opn,omitempty"`
 	Change string       `json:"change,omitempty"`
 	OPNKey *OPNKeyInput `json:"opn_key,omitempty"`
+	// CARPMaintenance hoort bij opn_carp.
+	CARPMaintenance *bool `json:"carp_maintenance,omitempty"`
+	// Firmware hoort bij opn_firmware: check, update of upgrade.
+	Firmware string `json:"firmware,omitempty"`
 }
 
 // PVESetting zijn de instellingen van set; nil laat staan.

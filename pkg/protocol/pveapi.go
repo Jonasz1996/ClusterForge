@@ -58,7 +58,7 @@ func isHostAction(a string) bool {
 	switch a {
 	case PVETemplate, PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI:
 		return true
-	case OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey:
+	case OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey, OPNCarp, OPNFirmware:
 		return true
 	}
 	return false
@@ -222,6 +222,14 @@ func (p PVERun) validateHost() error {
 		k := p.OPNKey
 		if k == nil || !opnKeyPart.MatchString(k.Key) || !opnKeyPart.MatchString(k.Secret) {
 			return fmt.Errorf("ongeldige API-sleutel of geheim")
+		}
+	case OPNCarp:
+		if p.CARPMaintenance == nil {
+			return fmt.Errorf("opn_carp zonder aan of uit")
+		}
+	case OPNFirmware:
+		if p.Firmware != "check" && p.Firmware != "update" && p.Firmware != "upgrade" {
+			return fmt.Errorf("firmware: check, update of upgrade")
 		}
 	}
 	return nil

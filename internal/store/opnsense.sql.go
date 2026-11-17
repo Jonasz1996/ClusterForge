@@ -12,6 +12,87 @@ import (
 	"github.com/google/uuid"
 )
 
+const getOpnsenseBackup = `-- name: GetOpnsenseBackup :one
+SELECT id, node_id, taken_at, reason, sha256, size, version, key_id, nonce, data FROM opnsense_backups WHERE id = $1
+`
+
+func (q *Queries) GetOpnsenseBackup(ctx context.Context, id uuid.UUID) (OpnsenseBackup, error) {
+	row := q.db.QueryRow(ctx, getOpnsenseBackup, id)
+	var i OpnsenseBackup
+	err := row.Scan(
+		&i.ID,
+		&i.NodeID,
+		&i.TakenAt,
+		&i.Reason,
+		&i.Sha256,
+		&i.Size,
+		&i.Version,
+		&i.KeyID,
+		&i.Nonce,
+		&i.Data,
+	)
+	return i, err
+}
+
+const insertOpnsenseBackup = `-- name: InsertOpnsenseBackup :one
+INSERT INTO opnsense_backups (node_id, reason, sha256, size, version, key_id, nonce, data)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, taken_at
+`
+
+type InsertOpnsenseBackupParams struct {
+	NodeID  uuid.UUID
+	Reason  string
+	Sha256  string
+	Size    int32
+	Version string
+	KeyID   string
+	Nonce   string
+	Data    []byte
+}
+
+type InsertOpnsenseBackupRow struct {
+	ID      uuid.UUID
+	TakenAt time.Time
+}
+
+func (q *Queries) InsertOpnsenseBackup(ctx context.Context, arg InsertOpnsenseBackupParams) (InsertOpnsenseBackupRow, error) {
+	row := q.db.QueryRow(ctx, insertOpnsenseBackup,
+		arg.NodeID,
+		arg.Reason,
+		arg.Sha256,
+		arg.Size,
+		arg.Version,
+		arg.KeyID,
+		arg.Nonce,
+		arg.Data,
+	)
+	var i InsertOpnsenseBackupRow
+	err := row.Scan(&i.ID, &i.TakenAt)
+	return i, err
+}
+
+const latestOpnsenseBackup = `-- name: LatestOpnsenseBackup :one
+SELECT id, taken_at, sha256
+FROM opnsense_backups
+WHERE node_id = $1
+ORDER BY taken_at DESC
+LIMIT 1
+`
+
+type LatestOpnsenseBackupRow struct {
+	ID      uuid.UUID
+	TakenAt time.Time
+	Sha256  string
+}
+
+func (q *Queries) LatestOpnsenseBackup(ctx context.Context, nodeID uuid.UUID) (LatestOpnsenseBackupRow, error) {
+	row := q.db.QueryRow(ctx, latestOpnsenseBackup, nodeID)
+	var i LatestOpnsenseBackupRow
+	err := row.Scan(&i.ID, &i.TakenAt, &i.Sha256)
+	return i, err
+}
+
 const listOPNsenseAgents = `-- name: ListOPNsenseAgents :many
 SELECT n.id, n.hostname, coalesce(host(n.primary_ip), '')::text AS address, (f.facts -> 'opnsense')::jsonb AS opnsense,
        n.cluster_id, coalesce(c.name, '')::text AS cluster_name, coalesce(c.environment::text, '')::text AS cluster_environment,
@@ -69,4 +150,81 @@ func (q *Queries) ListOPNsenseAgents(ctx context.Context) ([]ListOPNsenseAgentsR
 		return nil, err
 	}
 	return items, nil
+}
+
+const listOpnsenseBackups = `-- name: ListOpnsenseBackups :many
+SELECT id, node_id, taken_at, reason, sha256, size, version
+FROM opnsense_backups
+WHERE node_id = $1
+ORDER BY taken_at DESC
+`
+
+type ListOpnsenseBackupsRow struct {
+	ID      uuid.UUID
+	NodeID  uuid.UUID
+	TakenAt time.Time
+	Reason  string
+	Sha256  string
+	Size    int32
+	Version string
+}
+
+func (q *Queries) ListOpnsenseBackups(ctx context.Context, nodeID uuid.UUID) ([]ListOpnsenseBackupsRow, error) {
+	rows, err := q.db.Query(ctx, listOpnsenseBackups, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpnsenseBackupsRow{}
+	for rows.Next() {
+		var i ListOpnsenseBackupsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeID,
+			&i.TakenAt,
+			&i.Reason,
+			&i.Sha256,
+			&i.Size,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pruneOpnsenseBackups = `-- name: PruneOpnsenseBackups :exec
+DELETE FROM opnsense_backups b
+WHERE b.node_id = $1
+  AND b.id NOT IN (
+    SELECT k.id FROM opnsense_backups k WHERE k.node_id = $1 ORDER BY k.taken_at DESC LIMIT $2
+  )
+`
+
+type PruneOpnsenseBackupsParams struct {
+	NodeID uuid.UUID
+	Limit  int32
+}
+
+func (q *Queries) PruneOpnsenseBackups(ctx context.Context, arg PruneOpnsenseBackupsParams) error {
+	_, err := q.db.Exec(ctx, pruneOpnsenseBackups, arg.NodeID, arg.Limit)
+	return err
+}
+
+const touchOpnsenseBackup = `-- name: TouchOpnsenseBackup :exec
+UPDATE opnsense_backups SET taken_at = now(), reason = $2 WHERE id = $1
+`
+
+type TouchOpnsenseBackupParams struct {
+	ID     uuid.UUID
+	Reason string
+}
+
+func (q *Queries) TouchOpnsenseBackup(ctx context.Context, arg TouchOpnsenseBackupParams) error {
+	_, err := q.db.Exec(ctx, touchOpnsenseBackup, arg.ID, arg.Reason)
+	return err
 }

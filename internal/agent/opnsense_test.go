@@ -398,3 +398,62 @@ func TestOPNReadRequests(t *testing.T) {
 		t.Fatal("pad buiten /conf/backup")
 	}
 }
+
+// TestOPNRestoreAndBackup: een revisie terugzetten gaat met herstelpunt en
+// herlaadt alles; de back-up geeft de volledige config.xml met geheimen.
+func TestOPNRestoreAndBackup(t *testing.T) {
+	c, calls := opnFake(t)
+	a := &Agent{Collector: c}
+	res := a.handleOPN(context.Background(), protocol.PVERequest{Op: protocol.OPNOpBackup})
+	var xml string
+	if res.Error != "" || json.Unmarshal(res.Data, &xml) != nil || !strings.Contains(xml, "hageheim") {
+		t.Fatalf("back-up %+v", res)
+	}
+	fake := &opnAPIFake{}
+	srv := httptest.NewServer(fake.handler(t, "k", "s"))
+	defer srv.Close()
+	o := c.opnAPI()
+	o.Base, o.Client = srv.URL, srv.Client()
+	if err := o.saveKey(opnKey{Key: "k", Secret: "s", User: "clusterforge"}); err != nil {
+		t.Fatal(err)
+	}
+	inner := c.Run
+	restored := ""
+	c.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == opnPHP {
+			restored = strings.Join(args[1:], " ")
+			return []byte(`{"status":"ok"}`), nil
+		}
+		return inner(ctx, name, args...)
+	}
+	r := &RunExecutor{Root: c.Root, OPN: o}
+	r.Cmd = func(ctx context.Context, _ string, argv, _ []string, out io.Writer) (int, error) {
+		b, _ := c.Run(ctx, argv[0], argv[1:]...)
+		_, _ = out.Write(b)
+		return 0, nil
+	}
+	old := hostOS
+	hostOS = "freebsd"
+	defer func() { hostOS = old }()
+	ch := &protocol.OPNChange{ID: "abcd1234-0009", ConfirmWithin: 120, Description: "terug", Restore: "config-1763340000.5.xml"}
+	if err := ch.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if code, err := r.opn(context.Background(), &protocol.PVERun{Action: protocol.OPNAPI, OPN: ch}, &out, &protocol.RunStatus{}); err != nil || code != 0 {
+		t.Fatalf("terugzetten %d %v\n%s", code, err, out.String())
+	}
+	if !strings.Contains(restored, "config-1763340000.5.xml") {
+		t.Fatalf("geen restore: %q\n%s", restored, out.String())
+	}
+	if !slices.ContainsFunc(*calls, func(s string) bool { return strings.Contains(s, "service reload all") }) {
+		t.Fatalf("niet herladen: %v", *calls)
+	}
+	if p := opnPending(c.Root); p == nil || !p.ReloadAll {
+		t.Fatalf("terugdraaien herlaadt niet alles: %+v", p)
+	}
+	bad := &protocol.OPNChange{ID: "abcd1234-0010", ConfirmWithin: 120, Restore: "../../config.xml"}
+	if bad.Validate() == nil {
+		t.Fatal("ongeldige revisie toegelaten")
+	}
+}

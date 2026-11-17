@@ -459,6 +459,7 @@ func serve() error {
 	goLoop(ctx, log, "cmps", cmps.Run)
 	goLoop(ctx, log, "crowdsec", csec.Loop)
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
+	goLoop(ctx, log, "opnsense", opnSvc.Loop)
 	goLoop(ctx, log, "zabbixmon", zbm.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)

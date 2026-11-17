@@ -64,7 +64,12 @@ type Service struct {
 	// Settle is hoe lang de proeven opnieuw proberen; 0 is de helft van de
 	// terugdraaitijd. Tests verkorten hem.
 	Settle time.Duration
-	cache  getCache
+	// Poll is de pauze tussen twee keer CARP-rollen of firmwarestatus
+	// lezen; 0 is 2 s. Tests verkorten hem.
+	Poll time.Duration
+	// Takeover is hoe lang een overname mag duren; 0 is TakeoverWithin.
+	Takeover time.Duration
+	cache    getCache
 	// Now is er voor tests.
 	Now func() time.Time
 	// Box versleutelt een geplakte API-sleutel in de taak; nil zonder
@@ -78,6 +83,9 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		runner.Register(KindChange, s.runChange)
 		runner.Register(KindSync, s.runSync)
 		runner.Register(KindKey, s.runKey)
+		runner.Register(KindCarp, s.runCarp)
+		runner.Register(KindFirmware, s.runFirmware)
+		runner.Register(KindBackup, s.runBackup)
 	}
 	return s
 }

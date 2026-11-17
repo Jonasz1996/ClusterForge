@@ -44,6 +44,8 @@ type opnChangeState struct {
 	Reason      string             `json:"reason,omitempty"`
 	Calls       []string           `json:"calls,omitempty"`
 	Secret      []string           `json:"secret,omitempty"`
+	// ReloadAll: na terugzetten alle diensten herladen (een hele revisie).
+	ReloadAll bool `json:"reload_all,omitempty"`
 }
 
 func opnChangePath(root, id string) string {
@@ -116,6 +118,10 @@ func (r *RunExecutor) opn(ctx context.Context, p *protocol.PVERun, out io.Writer
 		return r.opnHASync(ctx, c, out)
 	case protocol.OPNKey:
 		return r.opnPasteKey(ctx, c, p.OPNKey, out)
+	case protocol.OPNCarp:
+		return opnCarpMaintenance(ctx, c, *p.CARPMaintenance, out)
+	case protocol.OPNFirmware:
+		return opnFirmware(ctx, c, p.Firmware, out)
 	}
 	return -1, fmt.Errorf("onbekende OPNsense-actie %q", p.Action)
 }
@@ -238,6 +244,7 @@ func (r *RunExecutor) opnApply(ctx context.Context, c *Collector, ch *protocol.O
 	for _, call := range ch.Calls {
 		st.Calls = append(st.Calls, call.Path)
 	}
+	st.ReloadAll = ch.Restore != ""
 	path := opnChangePath(r.Root, ch.ID)
 	if err := saveJSON(path, st); err != nil {
 		return -1, err
@@ -259,6 +266,11 @@ func (r *RunExecutor) opnApply(ctx context.Context, c *Collector, ch *protocol.O
 			return 1, fmt.Errorf("%v; terugzetten mislukte ook: %v", err, rerr)
 		}
 		return 1, err
+	}
+	if ch.Restore != "" {
+		if err := opnRestoreRevision(ctx, c, ch.Restore, ch.Description, out); err != nil {
+			return fail(err)
+		}
 	}
 	for _, call := range append(append([]protocol.OPNCall{}, ch.Calls...), ch.Apply...) {
 		shown, _ := json.Marshal(redactBody(call.Body, ch.Secret))
@@ -365,6 +377,10 @@ func opnRollback(ctx context.Context, c *Collector, st *opnChangeState, reason s
 			_, _ = fmt.Fprintf(out, "toepassen via %s mislukte: %v\n", call.Path, err)
 			continue
 		}
+		applied = true
+	}
+	if st.ReloadAll {
+		opnReloadAll(ctx, c, out)
 		applied = true
 	}
 	if !applied {
@@ -492,6 +508,11 @@ func (a *Agent) handleOPN(ctx context.Context, req protocol.PVERequest) protocol
 		data, err = c.opnRevision(req.Path)
 	case protocol.OPNOpFacts:
 		data, err = json.Marshal(c.opnsense(ctx))
+	case protocol.OPNOpBackup:
+		var b []byte
+		if b, err = os.ReadFile(c.path(opnConfigXML)); err == nil {
+			data, err = json.Marshal(string(b))
+		}
 	default:
 		return protocol.PVEResponse{Error: "onbekend OPNsense-verzoek " + req.Op}
 	}
@@ -590,4 +611,108 @@ func redactConfigXML(s string) string {
 		}
 		return "<" + sub[1] + sub[2] + ">[geheim]</" + sub[4] + ">"
 	})
+}
+
+// opnRestoreRevision zet een revisie uit /conf/backup terug en herlaadt
+// alle diensten, zoals System → Configuration → History.
+func opnRestoreRevision(ctx context.Context, c *Collector, file, desc string, out io.Writer) error {
+	if !protocol.ValidOPNRevisionFile(file) {
+		return fmt.Errorf("ongeldige revisie %q", file)
+	}
+	src := c.path(filepath.Join(opnBackupDir, file))
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("revisie %s bestaat niet (meer)", file)
+	}
+	script := c.path(filepath.Join(opnStateDir, "restore-rev.php"))
+	if err := os.WriteFile(script, []byte(opnRestorePHP), 0o600); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(script) }()
+	_, _ = fmt.Fprintf(out, "$ revisie %s terugzetten\n", file)
+	if res, err := c.run(ctx, opnPHP, script, src, desc); err != nil {
+		return fmt.Errorf("revisie terugzetten mislukte: %v: %s", err, lastLines(strings.TrimSpace(string(res)), 2))
+	}
+	opnReloadAll(ctx, c, out)
+	return nil
+}
+
+// opnReloadAll herlaadt alle diensten (configctl service reload all).
+func opnReloadAll(ctx context.Context, c *Collector, out io.Writer) {
+	_, _ = fmt.Fprintln(out, "$ configctl service reload all")
+	if res, err := c.run(ctx, opnConfigctl, "service", "reload", "all"); err != nil {
+		_, _ = fmt.Fprintf(out, "herladen mislukte: %v %s\n", err, strings.TrimSpace(string(res)))
+	}
+}
+
+// opnCarpPHP zet de onderhoudsmodus zoals OPNsense' eigen knop (Interfaces →
+// Virtual IPs → Status): een vlag in config.xml en demotion +/- 240.
+const opnCarpPHP = `<?php
+require_once('config.inc');
+require_once('util.inc');
+use OPNsense\Core\Config;
+$want = ($argv[1] ?? '') === '1';
+$cnf = Config::getInstance();
+$obj = $cnf->object();
+$has = isset($obj->virtualip_carp_maintenancemode);
+if ($want && !$has) {
+    $obj->addChild('virtualip_carp_maintenancemode');
+    $cnf->save(['description' => 'ClusterForge: CARP-onderhoudsmodus aan', 'username' => 'cf-agent']);
+    set_single_sysctl('net.inet.carp.demotion', '240');
+} elseif (!$want && $has) {
+    unset($obj->virtualip_carp_maintenancemode);
+    $cnf->save(['description' => 'ClusterForge: CARP-onderhoudsmodus uit', 'username' => 'cf-agent']);
+    set_single_sysctl('net.inet.carp.demotion', '-240');
+}
+echo json_encode(['status' => 'ok']) . "\n";
+`
+
+func opnCarpMaintenance(ctx context.Context, c *Collector, want bool, out io.Writer) (int, error) {
+	if f := c.opnsense(ctx); f.CARP.Maintenance == want {
+		_, _ = fmt.Fprintf(out, "onderhoudsmodus staat al %s\n", onOff(want))
+		return 0, nil
+	}
+	if err := os.MkdirAll(c.path(opnStateDir), 0o700); err != nil {
+		return -1, err
+	}
+	script := c.path(filepath.Join(opnStateDir, "carp.php"))
+	if err := os.WriteFile(script, []byte(opnCarpPHP), 0o600); err != nil {
+		return -1, err
+	}
+	defer func() { _ = os.Remove(script) }()
+	arg := "0"
+	if want {
+		arg = "1"
+	}
+	_, _ = fmt.Fprintf(out, "$ CARP-onderhoudsmodus %s\n", onOff(want))
+	res, err := c.run(ctx, opnPHP, script, arg)
+	_, _ = fmt.Fprintln(out, strings.TrimSpace(string(res)))
+	if err != nil {
+		return 1, fmt.Errorf("onderhoudsmodus zetten mislukte: %w", err)
+	}
+	if f := c.opnsense(ctx); f.CARP.Maintenance != want {
+		return 1, fmt.Errorf("de onderhoudsmodus staat na het zetten nog %s", onOff(f.CARP.Maintenance))
+	}
+	return 0, nil
+}
+
+func onOff(b bool) string {
+	if b {
+		return "aan"
+	}
+	return "uit"
+}
+
+// opnFirmware start een update of upgrade via de API; OPNsense draait hem
+// op de achtergrond en herstart daarna als dat nodig is.
+func opnFirmware(ctx context.Context, c *Collector, kind string, out io.Writer) (int, error) {
+	_, _ = fmt.Fprintf(out, "$ POST /api/core/firmware/%s\n", kind)
+	raw, err := c.opnAPI().do(ctx, "core/firmware/"+kind, map[string]any{})
+	if err != nil {
+		return 1, err
+	}
+	_, _ = fmt.Fprintln(out, lastLines(string(raw), 3))
+	if err := opnCheckResult(raw); err != nil {
+		return 1, err
+	}
+	return 0, nil
 }

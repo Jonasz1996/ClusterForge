@@ -41,6 +41,34 @@ type Change struct {
 	// Confirm is de overgetikte naam van het cluster bij een wijziging die
 	// de toegang kan raken.
 	Confirm string `json:"confirm"`
+	// Restore zet een revisie uit /conf/backup terug (bestandsnaam) in
+	// plaats van Calls; altijd met overtikken, proeven en terugdraaitimer.
+	Restore string `json:"restore,omitempty"`
+}
+
+// planFor geeft het plan van een wijziging of een terugzetting.
+func planFor(c Change) (Plan, error) {
+	if c.Restore == "" {
+		return check(c.Calls)
+	}
+	if len(c.Calls) > 0 {
+		return Plan{}, errors.New("terugzetten gaat niet samen met andere aanroepen")
+	}
+	if !protocol.ValidOPNRevisionFile(c.Restore) {
+		return Plan{}, errors.New("ongeldige revisie")
+	}
+	return Plan{Titles: []string{"revisie van " + revisionLabel(c.Restore) + " terugzetten"}, Level: LevelAccess}, nil
+}
+
+// revisionLabel maakt van config-1763340000.5.xml een leesbare tijd.
+func revisionLabel(file string) string {
+	n := strings.TrimSuffix(strings.TrimPrefix(file, "config-"), ".xml")
+	n, _, _ = strings.Cut(n, ".")
+	var sec int64
+	if _, err := fmt.Sscan(n, &sec); err != nil || sec <= 0 {
+		return file
+	}
+	return time.Unix(sec, 0).UTC().Format("2006-01-02 15:04 UTC")
 }
 
 // Check is de uitslag van de voorcontrole.
@@ -190,7 +218,7 @@ func (s *Service) openSecrets(seal *sealed, calls []protocol.OPNCall) error {
 // StartChange zet een wijziging als taak in de wachtrij. id is een node van
 // het cluster; de wijziging gaat altijd naar de master.
 func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.UUID, c Change) (store.Job, error) {
-	plan, err := check(c.Calls)
+	plan, err := planFor(c)
 	if err != nil {
 		return store.Job{}, ValidationError{err.Error()}
 	}
@@ -213,7 +241,7 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 	}
 	title := plan.Title()
 	ch := protocol.OPNChange{
-		ID: uuid.NewString(), Calls: c.Calls, Apply: plan.Apply, ConfirmWithin: within,
+		ID: uuid.NewString(), Calls: c.Calls, Apply: plan.Apply, ConfirmWithin: within, Restore: c.Restore,
 		Description: "ClusterForge: " + truncate(title, 180), RequireMaster: ck.Cluster.HA || ck.Master.Role != "",
 	}
 	if err := ch.Validate(); err != nil {
@@ -236,7 +264,7 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 	}
 	s.event(ctx, actor, ck.Master.NodeID, "opnsense.change_requested", map[string]any{
 		"cluster": ck.Cluster.Name, "firewall": ck.Master.Hostname, "titles": plan.Titles, "calls": c.Calls,
-		"job_id": j.ID.String(), "change": ch.ID, "confirm_within": within,
+		"job_id": j.ID.String(), "change": ch.ID, "confirm_within": within, "restore": c.Restore,
 	})
 	return j, nil
 }
@@ -391,6 +419,14 @@ func (s *Service) runChange(ctx context.Context, j *jobs.Job) error {
 	if err := j.Decode(&p); err != nil {
 		return err
 	}
+	if err := s.runChangeSteps(ctx, j, p); err != nil {
+		return err
+	}
+	s.backupStep(ctx, j, append([]uuid.UUID{p.MasterID}, p.Backups...), "na wijziging")
+	return nil
+}
+
+func (s *Service) runChangeSteps(ctx context.Context, j *jobs.Job, p changeParams) error {
 	defer s.cache.clear()
 	ch := p.Change
 	if err := s.openSecrets(p.Sealed, ch.Calls); err != nil {
@@ -787,8 +823,8 @@ type PlanView struct {
 }
 
 // PlanChange geeft plan en voorcontrole zonder iets te veranderen.
-func (s *Service) PlanChange(ctx context.Context, id uuid.UUID, calls []protocol.OPNCall) (PlanView, error) {
-	plan, err := check(calls)
+func (s *Service) PlanChange(ctx context.Context, id uuid.UUID, c Change) (PlanView, error) {
+	plan, err := planFor(c)
 	if err != nil {
 		return PlanView{}, ValidationError{err.Error()}
 	}

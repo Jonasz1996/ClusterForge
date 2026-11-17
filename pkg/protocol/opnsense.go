@@ -193,6 +193,9 @@ const (
 	// OPNOpRevision geeft één revisie (Path is de bestandsnaam of
 	// "current"), zonder geheimen.
 	OPNOpRevision = "opn_revision"
+	// OPNOpBackup geeft de volledige config.xml, met geheimen; alleen voor
+	// de versleutelde back-ups in ClusterForge.
+	OPNOpBackup = "opn_backup"
 	// OPNOpFacts geeft de facts van nu (OPNsenseFacts), zonder op de
 	// volgende heartbeat te wachten; de proeven na een wijziging gebruiken
 	// het.
@@ -226,10 +229,17 @@ const (
 	// OPNKey zet een met de hand gemaakte API-sleutel op de firewall
 	// (terugval als de agent er zelf geen kan maken).
 	OPNKey = "opn_key"
+	// OPNCarp zet de CARP-onderhoudsmodus aan of uit (PVERun.CARPMaintenance):
+	// de firewall geeft dan al zijn VIP's aan de backup.
+	OPNCarp = "opn_carp"
+	// OPNFirmware start een controle op updates, een update of een upgrade
+	// (PVERun.Firmware: check, update of upgrade); OPNsense draait hem op de
+	// achtergrond en herstart daarna mogelijk.
+	OPNFirmware = "opn_firmware"
 )
 
 func init() {
-	PVEActions = append(PVEActions, OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey)
+	PVEActions = append(PVEActions, OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey, OPNCarp, OPNFirmware)
 }
 
 // OPNCall is één aanroep van de lokale API binnen een wijziging.
@@ -263,7 +273,15 @@ type OPNChange struct {
 	// RequireMaster: weiger als deze node niet voor elke CARP-VIP MASTER
 	// is. De server zet dit altijd behalve op een losse firewall.
 	RequireMaster bool `json:"require_master,omitempty"`
+	// Restore zet een revisie uit /conf/backup terug (bestandsnaam) in
+	// plaats van Calls, en herlaadt daarna alle diensten.
+	Restore string `json:"restore,omitempty"`
 }
+
+var opnRevisionFile = regexp.MustCompile(`^config-[0-9]{9,12}(\.[0-9]{1,6})?\.xml$`)
+
+// ValidOPNRevisionFile is true voor de naam van een revisie in /conf/backup.
+func ValidOPNRevisionFile(f string) bool { return opnRevisionFile.MatchString(f) }
 
 // OPNKeyInput is een met de hand gemaakte API-sleutel (run-actie opn_key).
 type OPNKeyInput struct {
@@ -279,7 +297,11 @@ func (c *OPNChange) Validate() error {
 	if !opnChangeID.MatchString(c.ID) {
 		return fmt.Errorf("ongeldig nummer van de wijziging")
 	}
-	if len(c.Calls) == 0 || len(c.Calls) > 50 || len(c.Apply) > 10 {
+	if c.Restore != "" {
+		if !ValidOPNRevisionFile(c.Restore) || len(c.Calls) > 0 {
+			return fmt.Errorf("ongeldige revisie om terug te zetten")
+		}
+	} else if len(c.Calls) == 0 || len(c.Calls) > 50 || len(c.Apply) > 10 {
 		return fmt.Errorf("een wijziging heeft 1-50 aanroepen en hoogstens 10 om toe te passen")
 	}
 	for _, call := range append(append([]OPNCall{}, c.Calls...), c.Apply...) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -169,6 +170,30 @@ type fakeFW struct {
 	// afterApply loopt na het toepassen (bijvoorbeeld een proef laten falen).
 	afterApply func()
 	down       string
+	// carpFail: de backup neemt niet over.
+	carpFail bool
+}
+
+// setMaster maakt m MASTER voor de VIP en de andere BACKUP.
+func (f *fakeFW) setMaster(m uuid.UUID) {
+	for id, fa := range f.facts {
+		for i := range fa.VIPs {
+			if id == m {
+				fa.VIPs[i].State = "MASTER"
+			} else {
+				fa.VIPs[i].State = "BACKUP"
+			}
+		}
+	}
+}
+
+func (f *fakeFW) config(id uuid.UUID) string {
+	extra := ""
+	if id == f.backup {
+		extra = "<nat><rule>oud</rule></nat>"
+	}
+	return fmt.Sprintf("<?xml version=\"1.0\"?>\n<opnsense>\n<system>\n<hostname>%s</hostname>\n</system>\n<filter><rule>1</rule></filter>%s\n<virtualip><vip><advskew>%d</advskew></vip></virtualip>\n<OPNsense><Firewall><a>1</a></Firewall><Hasync><x>%s</x></Hasync></OPNsense>\n</opnsense>\n",
+		f.facts[id].Hostname, extra, len(extra), id)
 }
 
 func (f *fakeFW) Run(_ context.Context, id uuid.UUID, req protocol.RunRequest) (protocol.RunResponse, error) {
@@ -204,6 +229,20 @@ func (f *fakeFW) Run(_ context.Context, id uuid.UUID, req protocol.RunRequest) (
 		if op.OPNKey.Key == "" {
 			state, exit = protocol.RunFailed, 1
 		}
+	case protocol.OPNCarp:
+		on := *op.CARPMaintenance
+		f.facts[id].CARP.Maintenance = on
+		if !f.carpFail {
+			m := f.master
+			if on && id == f.master {
+				m = f.backup
+			}
+			f.setMaster(m)
+		}
+	case protocol.OPNFirmware:
+		if op.Firmware != "check" {
+			f.facts[id].Version = "26.1.9"
+		}
 	}
 	f.mu.Unlock()
 	if after != nil {
@@ -221,6 +260,16 @@ func (f *fakeFW) PVE(_ context.Context, id uuid.UUID, req protocol.PVERequest) (
 		return protocol.PVEResponse{Data: b}, nil
 	case protocol.OPNOpConfigctl:
 		b, _ := json.Marshal([]map[string]string{{"name": "WAN", "status": f.down}})
+		return protocol.PVEResponse{Data: b}, nil
+	case protocol.OPNOpGet:
+		switch req.Path {
+		case "core/firmware/upgradestatus":
+			return protocol.PVEResponse{Data: json.RawMessage(`{"status":"done"}`)}, nil
+		case "core/firmware/status":
+			return protocol.PVEResponse{Data: json.RawMessage(`{"status":"update","status_msg":"Er zijn 3 updates."}`)}, nil
+		}
+	case protocol.OPNOpBackup, protocol.OPNOpRevision:
+		b, _ := json.Marshal(f.config(id))
 		return protocol.PVEResponse{Data: b}, nil
 	}
 	return protocol.PVEResponse{}, errors.New("onbekend " + req.Op)
@@ -420,5 +469,107 @@ func TestChangeFlow(t *testing.T) {
 	}
 	if strings.Contains(payload, "carp-geheim") {
 		t.Fatal("CARP-wachtwoord in het logboek")
+	}
+
+	// M5: na een wijziging staat er een back-up van elke firewall.
+	list, err := s.Backups(ctx, ida)
+	if err != nil || len(list) != 1 || list[0].Reason != "na wijziging" {
+		t.Fatalf("back-ups: %v %+v", err, list)
+	}
+	var raw []byte
+	if err := pool.QueryRow(ctx, `SELECT data FROM opnsense_backups WHERE id = $1`, list[0].ID).Scan(&raw); err != nil || strings.Contains(string(raw), "<opnsense>") {
+		t.Fatalf("back-up niet versleuteld: %v", err)
+	}
+	name, data, err := s.OpenBackup(ctx, events.System(), list[0].ID)
+	if err != nil || !strings.HasPrefix(name, "config-fw1-") || !strings.Contains(string(data), "<hostname>fw1</hostname>") {
+		t.Fatalf("download: %v %s", err, name)
+	}
+	// Nog een keer met dezelfde inhoud geeft geen nieuwe rij.
+	j, err = s.StartBackup(ctx, events.System(), ida)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("back-up: %s %s", j.Status, j.Error)
+	}
+	if list, _ = s.Backups(ctx, ida); len(list) != 1 || list[0].Reason != "met de hand" {
+		t.Fatalf("ongewijzigde back-up: %+v", list)
+	}
+
+	// Drift: de backup heeft een NAT-regel meer; hostnaam, skew en Hasync
+	// tellen niet mee.
+	d, err := s.Drift(ctx, ida)
+	if err != nil || len(d.Rows) != 1 || strings.Join(d.Rows[0].Sections, ",") != "nat" {
+		t.Fatalf("drift: %v %+v", err, d)
+	}
+
+	// Een revisie terugzetten vraagt het overtikken en gaat als wijziging.
+	if _, err := s.StartChange(ctx, events.System(), ida, Change{Restore: "config-1763340000.5.xml"}); err == nil {
+		t.Fatal("terugzetten zonder overtikken")
+	}
+	if _, err := s.StartChange(ctx, events.System(), ida, Change{Restore: "../config.xml", Confirm: "Firewalls"}); err == nil {
+		t.Fatal("ongeldige revisie toegelaten")
+	}
+	j, err = s.StartChange(ctx, events.System(), ida, Change{Restore: "config-1763340000.5.xml", Confirm: "Firewalls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("terugzetten: %s %s", j.Status, j.Error)
+	}
+
+	// Failovertest: de backup neemt over en geeft terug.
+	s.Poll = 10 * time.Millisecond
+	s.Takeover = 300 * time.Millisecond
+	if _, err := s.StartCarp(ctx, events.System(), ida, CarpInput{Action: CarpTest}); err == nil {
+		t.Fatal("failovertest zonder overtikken")
+	}
+	bus.mu.Lock()
+	bus.actions = nil
+	bus.mu.Unlock()
+	j, err = s.StartCarp(ctx, events.System(), idb, CarpInput{Action: CarpTest, Confirm: "Firewalls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("failovertest: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	if strings.Join(bus.actions, ",") != "opn_carp,opn_carp" || bus.facts[ida].Role() != "master" || bus.facts[ida].CARP.Maintenance {
+		t.Fatalf("failovertest: %v", bus.actions)
+	}
+	// De backup neemt niet over: de onderhoudsmodus gaat vanzelf weer uit.
+	bus.carpFail = true
+	bus.mu.Unlock()
+	j, err = s.StartCarp(ctx, events.System(), ida, CarpInput{Action: CarpOn, Confirm: "Firewalls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusFailed || !strings.Contains(j.Error, "staat weer uit") {
+		t.Fatalf("mislukte overname: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	if bus.facts[ida].CARP.Maintenance {
+		t.Fatal("onderhoudsmodus bleef aan")
+	}
+	bus.carpFail = false
+	bus.actions = nil
+	bus.mu.Unlock()
+
+	// Firmware: eerst de backup, dan de master in onderhoudsmodus.
+	if _, err := s.StartFirmware(ctx, events.System(), ida, FirmwareInput{Mode: "update"}); err == nil {
+		t.Fatal("update zonder overtikken")
+	}
+	j, err = s.StartFirmware(ctx, events.System(), ida, FirmwareInput{Mode: "update", Confirm: "Firewalls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("firmware: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	if strings.Join(bus.actions, ",") != "opn_firmware,opn_carp,opn_firmware,opn_carp" || bus.facts[ida].Version != "26.1.9" || bus.facts[idb].Version != "26.1.9" || bus.facts[ida].Role() != "master" {
+		t.Fatalf("firmware: %v", bus.actions)
 	}
 }

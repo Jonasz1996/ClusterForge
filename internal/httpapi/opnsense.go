@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -118,7 +119,7 @@ func (s *Server) PlanOpnsenseChange(w http.ResponseWriter, r *http.Request, node
 	if !decode(w, r, &in) {
 		return
 	}
-	v, err := s.opnsense.PlanChange(r.Context(), nodeId, in.Calls)
+	v, err := s.opnsense.PlanChange(r.Context(), nodeId, in)
 	if err != nil {
 		s.opnError(w, err)
 		return
@@ -185,4 +186,134 @@ func (s *Server) SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId u
 		return
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// opnConfirm vraagt de code of het wachtwoord als de firewall in een
+// prodcluster zit (of altijd, met always). false: het antwoord is al
+// geschreven.
+func (s *Server) opnConfirm(w http.ResponseWriter, r *http.Request, p auth.Principal, nodeId uuid.UUID, password, code, purpose string, always bool) bool {
+	if !always {
+		prod, err := s.opnsense.IsProd(r.Context(), nodeId)
+		if err != nil {
+			s.opnError(w, err)
+			return false
+		}
+		if !prod {
+			return true
+		}
+	}
+	if password == "" && code == "" {
+		msg := "deze firewall zit in een prodcluster; geef de code van je tweestapsverificatie (of je wachtwoord)"
+		if always {
+			msg = "een back-up bevat alle wachtwoorden en sleutels; geef de code van je tweestapsverificatie (of je wachtwoord)"
+		}
+		writeError(w, http.StatusConflict, "needs_confirmation", msg)
+		return false
+	}
+	return !s.authError(w, r, s.auth.Confirm(r.Context(), p, password, code, purpose))
+}
+
+type opnConfirmInput struct {
+	Password string `json:"password"`
+	TotpCode string `json:"totp_code"`
+}
+
+func (s *Server) StartOpnsenseCarp(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		opnsense.CarpInput
+		opnConfirmInput
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if !s.opnConfirm(w, r, p, nodeId, in.Password, in.TotpCode, "opnsense_carp", false) {
+		return
+	}
+	j, err := s.opnsense.StartCarp(r.Context(), events.User(p.User.ID), nodeId, in.CarpInput)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func (s *Server) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		opnsense.FirmwareInput
+		opnConfirmInput
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Mode != "check" && !s.opnConfirm(w, r, p, nodeId, in.Password, in.TotpCode, "opnsense_firmware", false) {
+		return
+	}
+	j, err := s.opnsense.StartFirmware(r.Context(), events.User(p.User.ID), nodeId, in.FirmwareInput)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func (s *Server) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	d, err := s.opnsense.Drift(r.Context(), nodeId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	list, err := s.opnsense.Backups(r.Context(), nodeId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "keep": opnsense.KeepBackups})
+}
+
+func (s *Server) StartOpnsenseBackup(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	j, err := s.opnsense.StartBackup(r.Context(), events.User(p.User.ID), nodeId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func (s *Server) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, backupId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in opnConfirmInput
+	if !decode(w, r, &in) {
+		return
+	}
+	if !s.opnConfirm(w, r, p, uuid.Nil, in.Password, in.TotpCode, "opnsense_backup_download", true) {
+		return
+	}
+	name, data, err := s.opnsense.OpenBackup(r.Context(), events.User(p.User.ID), backupId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }
