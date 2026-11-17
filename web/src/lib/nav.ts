@@ -113,6 +113,17 @@ export const navGroups: NavGroup[] = [
           { href: "/pbs/systeem", label: "Systeem", keywords: "pbs schijf smart zfs netwerk dns dienst update certificaat syslog herstarten" },
         ],
       },
+      {
+        href: "/opnsense",
+        label: "OPNsense",
+        keywords: "opnsense firewall carp pfsync ha vip gateway router",
+        tabs: [
+          { href: "/opnsense", label: "Overzicht", keywords: "opnsense carp vip master backup pfsync sync gateways interfaces diensten" },
+          { href: "/opnsense/regels", label: "Regels en aliassen", keywords: "opnsense firewall regels rules alias" },
+          { href: "/opnsense/nat", label: "NAT", keywords: "opnsense nat port forward doorsturen outbound 1:1 npt" },
+          { href: "/opnsense/revisies", label: "Revisies", keywords: "opnsense config.xml revisie geschiedenis diff vergelijken master backup" },
+        ],
+      },
     ],
   },
   {

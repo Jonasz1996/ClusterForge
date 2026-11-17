@@ -232,3 +232,19 @@ GUI niet kan aanbieden.
   `opn_key`. Protocol 50. De terugdraaitimer is een los proces
   (`daemon -f … cf-agent opn-rollback`), dus hij werkt ook als de agent
   zelf stopt; na een herstart zet de agent hem terug met de resterende tijd.
+- **M1 (server en GUI)**: `internal/opnsense` groepeert de firewalls per
+  ClusterForge-cluster of, zonder cluster, als paar via pfsync-peer of
+  syncadres, en beoordeelt CARP (split-brain, gemengde rol, demotion,
+  onderhoud, pfsync, API-sleutel, configsync, versies). Wijzigen gaat als
+  taak `opnsense.change`: voorcontrole (precies één master, backup in
+  BACKUP, sleutels ok, clusterslot), basislijn (TCP naar de GUI-poort van
+  elke node en elke CARP-VIP, CARP-rol per node, gateways die al down
+  zijn), toepassen op de master met timer, proeven tot de helft van de
+  terugdraaitijd, bevestigen of meteen terugdraaien, daarna sync naar de
+  backup en controle dat die een nieuwere revisie heeft. Op prod
+  tweestapsverificatie. Extra leesverzoek `opn_facts` (facts van nu) voor
+  de proeven. Allowlist in `policy.go`: aliassen (M1). GUI onder
+  OPNsense: Overzicht (CARP-tabel, nodes, gateways, diensten, interfaces,
+  Sync nu, sleutel plakken), Regels en aliassen (omschrijving van een alias
+  veilig wijzigen), NAT, Revisies (twee revisies of master tegenover
+  backup vergelijken).
