@@ -255,3 +255,10 @@ GUI niet kan aanbieden.
   "toegang": clusternaam overtikken. Het formulier stuurt alleen de velden
   die veranderden en toont oud → nieuw. Schema's hebben in OPNsense nog
   geen MVC-API; die volgen als ze er zijn.
+- **M3 (netwerk, DHCP en DNS)**: VIP's, VLAN's, gateways en statische
+  routes (niveau "toegang"), Unbound host-/domein-overrides en -aliassen,
+  Kea-reservaties en Dnsmasq-hosts; leases lezen. Geheime velden
+  (password, psk, secret, privkey …) haalt de server uit de aanroepen en
+  bewaart ze versleuteld in de taak; de agent krijgt ze en laat ze weg uit
+  de uitvoer, ook het logboek ziet ze niet. Interfaces toewijzen heeft geen
+  API in OPNsense en blijft daar.

@@ -121,6 +121,66 @@ type changeParams struct {
 	Backups  []uuid.UUID        `json:"backups,omitempty"`
 	Change   protocol.OPNChange `json:"change"`
 	Titles   []string           `json:"titles"`
+	// Sealed zijn de geheime velden, versleuteld; sleutel "i|root.veld".
+	Sealed *sealed `json:"sealed,omitempty"`
+}
+
+// sealSecrets haalt de geheime velden uit de aanroepen en versleutelt ze.
+func (s *Service) sealSecrets(calls []protocol.OPNCall) (*sealed, error) {
+	plain := map[string]string{}
+	for i, c := range calls {
+		for _, sp := range secretPaths(c.Body) {
+			root, k, _ := strings.Cut(sp, ".")
+			inner := c.Body[root].(map[string]any)
+			if v, ok := inner[k].(string); ok {
+				plain[fmt.Sprintf("%d|%s", i, sp)] = v
+			}
+			delete(inner, k)
+		}
+	}
+	if len(plain) == 0 {
+		return nil, nil
+	}
+	if s.Box == nil {
+		return nil, ValidationError{"deze server heeft geen masterkey; zonder kan ClusterForge geen wachtwoorden of sleutels doorgeven"}
+	}
+	data, _ := json.Marshal(plain)
+	nonce := uuid.NewString()
+	return &sealed{KeyID: s.Box.KeyID, Nonce: nonce, Data: s.Box.Seal(data, changeAAD(nonce))}, nil
+}
+
+func changeAAD(nonce string) []byte { return []byte("opnsense-change:" + nonce) }
+
+// openSecrets zet de geheime velden terug in de aanroepen.
+func (s *Service) openSecrets(seal *sealed, calls []protocol.OPNCall) error {
+	if seal == nil {
+		return nil
+	}
+	if s.Box == nil {
+		return errors.New("geen masterkey meer: de geheimen van deze taak zijn niet te lezen")
+	}
+	data, err := s.Box.Open(seal.Data, changeAAD(seal.Nonce), seal.KeyID)
+	if err != nil {
+		return fmt.Errorf("de geheimen van deze taak zijn niet te lezen: %w", err)
+	}
+	var plain map[string]string
+	if err := json.Unmarshal(data, &plain); err != nil {
+		return err
+	}
+	for key, v := range plain {
+		idx, sp, _ := strings.Cut(key, "|")
+		root, k, _ := strings.Cut(sp, ".")
+		var i int
+		if _, err := fmt.Sscan(idx, &i); err != nil || i < 0 || i >= len(calls) {
+			return errors.New("ongeldige geheimen in de taak")
+		}
+		inner, ok := calls[i].Body[root].(map[string]any)
+		if !ok {
+			return errors.New("ongeldige geheimen in de taak")
+		}
+		inner[k] = v
+	}
+	return nil
 }
 
 // StartChange zet een wijziging als taak in de wachtrij. id is een node van
@@ -155,7 +215,12 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 	if err := ch.Validate(); err != nil {
 		return store.Job{}, ValidationError{err.Error()}
 	}
-	p := changeParams{Cluster: ck.Cluster.Name, MasterID: ck.Master.NodeID, Master: ck.Master.Hostname, Change: ch, Titles: plan.Titles}
+	ch.Secret = plan.Secret
+	seal, err := s.sealSecrets(ch.Calls)
+	if err != nil {
+		return store.Job{}, err
+	}
+	p := changeParams{Cluster: ck.Cluster.Name, MasterID: ck.Master.NodeID, Master: ck.Master.Hostname, Change: ch, Titles: plan.Titles, Sealed: seal}
 	for _, b := range ck.Backup {
 		p.Backups = append(p.Backups, b.NodeID)
 	}
@@ -322,6 +387,9 @@ func (s *Service) runChange(ctx context.Context, j *jobs.Job) error {
 	}
 	defer s.cache.clear()
 	ch := p.Change
+	if err := s.openSecrets(p.Sealed, ch.Calls); err != nil {
+		return err
+	}
 	nodes := append([]uuid.UUID{p.MasterID}, p.Backups...)
 
 	var base baseline

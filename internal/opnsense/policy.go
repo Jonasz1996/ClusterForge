@@ -100,7 +100,45 @@ func natRules(ctrl, what string) []*rule {
 	}
 }
 
-var rules = append(append(append(append(append(append([]*rule{
+// items zijn de regels voor een lijst in een MVC-model met
+// add<X>/set<X>/del<X>/toggle<X> (zoals unbound/settings/addHostOverride).
+func items(base, x, root, what, apply, level string) []*rule {
+	named := func(verb string) func(map[string]string, map[string]any) string {
+		return func(_ map[string]string, b map[string]any) string {
+			for _, k := range []string{"description", "descr", "hostname", "host", "name", "domain", "network", "vlanif", "subnet"} {
+				if v := field(b, root, k); v != "" && v != "<nil>" {
+					return what + " " + v + " " + verb
+				}
+			}
+			return what + " " + verb
+		}
+	}
+	out := []*rule{
+		rl(base+`/add`+x, root, ruleKey, apply, level, named("toevoegen")),
+		rl(base+`/set`+x+`/`+segUUID, root, ruleKey, apply, level, named("wijzigen")),
+		rl(base+`/del`+x+`/`+segUUID, "", "", apply, level,
+			func(map[string]string, map[string]any) string { return what + " verwijderen" }),
+	}
+	if x != "Item" || !strings.HasPrefix(base, "interfaces/") {
+		out = append(out, rl(base+`/toggle`+x+`/`+segUUID+`(/(?P<on>[01]))?`, "", "", apply, level, toggleTitle(what)))
+	}
+	return out
+}
+
+// netRules zijn M3: netwerk, routering, DHCP en DNS.
+var netRules = slices.Concat(
+	items("interfaces/vip_settings", "Item", "vip", "VIP", "interfaces/vip_settings/reconfigure", LevelAccess),
+	items("interfaces/vlan_settings", "Item", "vlan", "VLAN", "interfaces/vlan_settings/reconfigure", LevelAccess),
+	items("routing/settings", "Gateway", "gateway_item", "gateway", "routing/settings/reconfigure", LevelAccess),
+	items("routes/routes", "route", "route", "statische route", "routes/routes/reconfigure", LevelAccess),
+	items("unbound/settings", "HostOverride", "host", "DNS-override", "unbound/service/reconfigure", LevelNormal),
+	items("unbound/settings", "HostAlias", "alias", "DNS-alias", "unbound/service/reconfigure", LevelNormal),
+	items("unbound/settings", "DomainOverride", "domain", "domein-override", "unbound/service/reconfigure", LevelNormal),
+	items("kea/dhcpv4", "Reservation", "reservation", "DHCP-reservatie", "kea/service/reconfigure", LevelNormal),
+	items("dnsmasq/settings", "Host", "host", "Dnsmasq-host", "dnsmasq/service/reconfigure", LevelNormal),
+)
+
+var rules = append(append(append(append(append(append(append([]*rule{
 	rl(`firewall/filter/moveRuleBefore/`+segUUID+`/(?P<before>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`, "", "",
 		"firewall/filter/apply", LevelAccess, func(map[string]string, map[string]any) string { return "firewallregel verplaatsen" }),
 },
@@ -109,6 +147,7 @@ var rules = append(append(append(append(append(append([]*rule{
 	natRules("source_nat", "uitgaande NAT-regel")...),
 	natRules("one_to_one", "1:1-regel")...),
 	natRules("npt", "NPT-regel")...),
+	netRules...),
 	baseRules...)
 
 var baseRules = []*rule{
@@ -134,6 +173,30 @@ type Plan struct {
 	Titles []string           `json:"titles"`
 	Apply  []protocol.OPNCall `json:"apply"`
 	Level  string             `json:"level"`
+	// Secret zijn de geheime velden (punt-paden, zoals vip.password); ze
+	// gaan versleuteld in de taak en nooit in de uitvoer.
+	Secret []string `json:"secret,omitempty"`
+}
+
+// secretFields zijn veldnamen die altijd geheim zijn, in elk onderdeel.
+var secretFields = []string{"password", "psk", "secret", "privkey", "private_key", "pre_shared_key", "presharedkey", "key"}
+
+// secretPaths geeft de geheime velden die in body staan.
+func secretPaths(body map[string]any) []string {
+	var out []string
+	for root, v := range body {
+		inner, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		for k := range inner {
+			if slices.Contains(secretFields, k) {
+				out = append(out, root+"."+k)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Title is één zin voor de taak en het logboek.
@@ -172,6 +235,11 @@ func check(calls []protocol.OPNCall) (Plan, error) {
 		}
 		if x.level == LevelAccess {
 			p.Level = LevelAccess
+		}
+		for _, sp := range secretPaths(c.Body) {
+			if !slices.Contains(p.Secret, sp) {
+				p.Secret = append(p.Secret, sp)
+			}
 		}
 	}
 	sort.Strings(apply)

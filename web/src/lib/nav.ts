@@ -121,6 +121,8 @@ export const navGroups: NavGroup[] = [
           { href: "/opnsense", label: "Overzicht", keywords: "opnsense carp vip master backup pfsync sync gateways interfaces diensten" },
           { href: "/opnsense/regels", label: "Regels en aliassen", keywords: "opnsense firewall regels rules alias" },
           { href: "/opnsense/nat", label: "NAT", keywords: "opnsense nat port forward doorsturen outbound 1:1 npt" },
+          { href: "/opnsense/netwerk", label: "Netwerk", keywords: "opnsense vip carp vlan gateway route routering" },
+          { href: "/opnsense/dhcp-dns", label: "DHCP en DNS", keywords: "opnsense dhcp kea dnsmasq lease reservatie unbound dns override" },
           { href: "/opnsense/revisies", label: "Revisies", keywords: "opnsense config.xml revisie geschiedenis diff vergelijken master backup" },
         ],
       },

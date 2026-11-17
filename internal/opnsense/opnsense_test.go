@@ -60,6 +60,19 @@ func TestCheck(t *testing.T) {
 	if _, err := check([]protocol.OPNCall{{Path: "firewall/d_nat/addRule", Body: map[string]any{"rule": map[string]any{"a": map[string]any{"b": map[string]any{"c": "1"}}}}}}); err == nil {
 		t.Error("te diep genest toegelaten")
 	}
+	p, err = check([]protocol.OPNCall{
+		{Path: "unbound/settings/addHostOverride", Body: map[string]any{"host": map[string]any{"hostname": "nas", "domain": "thuis", "server": "192.168.10.50"}}},
+		{Path: "kea/dhcpv4/setReservation/" + aliasUUID, Body: map[string]any{"reservation": map[string]any{"hw_address": "aa:bb:cc:dd:ee:ff"}}},
+	})
+	if err != nil || p.Level != LevelNormal || len(p.Apply) != 2 || p.Titles[0] != "DNS-override nas toevoegen" {
+		t.Fatalf("plan M3: %+v %v", p, err)
+	}
+	if p, err := check([]protocol.OPNCall{{Path: "interfaces/vip_settings/delItem/" + aliasUUID}}); err != nil || p.Level != LevelAccess {
+		t.Fatalf("VIP verwijderen: %+v %v", p, err)
+	}
+	if _, err := check([]protocol.OPNCall{{Path: "interfaces/vip_settings/toggleItem/" + aliasUUID}}); err == nil {
+		t.Error("toggleItem op VIP's bestaat niet en hoort geweigerd")
+	}
 	if readAllowed("auth/user/searchApiKey", true) || readAllowed("system/user/get", false) || !readAllowed("firewall/alias/searchItem", false) {
 		t.Error("readAllowed")
 	}
@@ -140,6 +153,7 @@ type fakeFW struct {
 	backup  uuid.UUID
 	actions []string
 	pending string
+	gotBody []map[string]any
 	// afterApply loopt na het toepassen (bijvoorbeeld een proef laten falen).
 	afterApply func()
 	down       string
@@ -162,6 +176,9 @@ func (f *fakeFW) Run(_ context.Context, id uuid.UUID, req protocol.RunRequest) (
 			state, exit = protocol.RunFailed, 1
 		}
 		f.pending = op.OPN.ID
+		for _, c := range op.OPN.Calls {
+			f.gotBody = append(f.gotBody, c.Body)
+		}
 		f.facts[id].Config.Time++
 		after = f.afterApply
 	case protocol.OPNConfirm, protocol.OPNRollback:
@@ -344,5 +361,31 @@ func TestChangeFlow(t *testing.T) {
 	}
 	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
 		t.Fatalf("sleutel: %s %v", j.Status, j.Error)
+	}
+
+	// Een CARP-wachtwoord gaat versleuteld in de taak en komt aan bij de agent.
+	vip := Change{Calls: []protocol.OPNCall{{Path: "interfaces/vip_settings/setItem/" + aliasUUID, Body: map[string]any{"vip": map[string]any{"subnet": "192.168.10.1", "password": "carp-geheim"}}}}, Confirm: "Firewalls"}
+	j, err = s.StartChange(ctx, events.System(), ida, vip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(j.Params), "carp-geheim") {
+		t.Fatal("CARP-wachtwoord leesbaar in de taak")
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("VIP: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	last := bus.gotBody[len(bus.gotBody)-1]
+	bus.mu.Unlock()
+	if last["vip"].(map[string]any)["password"] != "carp-geheim" {
+		t.Fatalf("agent kreeg %v", last)
+	}
+	var payload string
+	if err := pool.QueryRow(ctx, `SELECT payload::text FROM events WHERE action = 'opnsense.change_requested' ORDER BY id DESC LIMIT 1`).Scan(&payload); err != nil || !strings.Contains(payload, "192.168.10.1") {
+		t.Fatalf("logboek: %v %s", err, payload)
+	}
+	if strings.Contains(payload, "carp-geheim") {
+		t.Fatal("CARP-wachtwoord in het logboek")
 	}
 }
