@@ -116,6 +116,7 @@ export type OpnDiff = {
 export type OpnCall = { path: string; body?: Record<string, unknown> };
 
 export type OpnPlan = {
+  each?: boolean;
   titles: string[];
   apply: string[] | null;
   level: "normal" | "access";

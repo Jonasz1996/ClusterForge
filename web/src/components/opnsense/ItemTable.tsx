@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ChangedList, EditForm, toBody, type FieldSpec, type Pending } from "@/components/opnsense/edit";
 import { ChangeDialog, ClusterStrip, JobBanner } from "@/components/opnsense/bits";
@@ -33,6 +33,8 @@ export type ItemSpec = {
   toggle?: boolean;
   // readonly: alleen lezen (leases).
   readonly?: boolean;
+  // noAdd: wel wijzigen, niet toevoegen (zoals een WireGuard-instantie, die sleutels nodig heeft).
+  noAdd?: boolean;
   hint?: string;
 };
 
@@ -65,7 +67,7 @@ export function ItemTable({ n, s, admin, onChange }: { n: OpnFirewall; s: ItemSp
               {all.length > 8 && (
                 <Input placeholder="Zoeken" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
               )}
-              {canEdit && (
+              {canEdit && !s.noAdd && (
                 <Button variant="secondary" onClick={() => setEdit("new")}>
                   Toevoegen
                 </Button>
@@ -174,7 +176,16 @@ export function ifaceOptions(n: OpnFirewall, current?: string): [string, string]
 
 // ItemTiles toont een reeks ItemTables voor een cluster, met de melding van
 // de taak en de wijzigingsdialoog.
-export function ItemTiles({ c, specs }: { c: OpnCluster; specs: ItemSpec[] }) {
+export function ItemTiles({
+  c,
+  specs,
+  extra,
+}: {
+  c: OpnCluster;
+  specs: ItemSpec[];
+  // extra zijn eigen vensters vóór de lijsten, met dezelfde wijzigingsdialoog.
+  extra?: (n: OpnFirewall, admin: boolean, onChange: (p: Pending) => void) => ReactNode;
+}) {
   const n = readNode(c);
   const me = useMe();
   const admin = me.data?.user.role === "admin";
@@ -186,6 +197,7 @@ export function ItemTiles({ c, specs }: { c: OpnCluster; specs: ItemSpec[] }) {
       <JobBanner result={result} />
       {n && (
         <TileGrid>
+          {extra?.(n, admin, setPending)}
           {specs.map((s) => (
             <Win key={s.search} wide={s.cols.length > 4}>
               <ItemTable n={n} s={s} admin={admin} onChange={setPending} />

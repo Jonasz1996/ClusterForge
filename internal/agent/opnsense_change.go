@@ -501,8 +501,8 @@ func (a *Agent) handleOPN(ctx context.Context, req protocol.PVERequest) protocol
 	return protocol.PVEResponse{Data: data}
 }
 
-// Zoekopdrachten veranderen niets: search* en get* via POST.
-var opnSearchPath = regexp.MustCompile(`^[a-z][a-z0-9_]*/[a-z][a-z0-9_]*/(search|get)[A-Za-z0-9_]*(/[A-Za-z0-9_.:-]+){0,2}$`)
+// Zoekopdrachten veranderen niets: search*, get* en query_* (staten) via POST.
+var opnSearchPath = regexp.MustCompile(`^[a-z][a-z0-9_]*/[a-z][a-z0-9_]*/(search|get|query_)[A-Za-z0-9_]*(/[A-Za-z0-9_.:-]+){0,2}$`)
 
 func opnConfigctlRead(ctx context.Context, c *Collector, action string) (json.RawMessage, error) {
 	if !slices.Contains(protocol.OPNReadActions, action) {

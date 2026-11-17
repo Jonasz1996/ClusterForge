@@ -39,6 +39,8 @@ type rule struct {
 	// apply is de aanroep die de wijziging actief maakt.
 	apply string
 	level string
+	// each: niet gesynchroniseerd, dus op elke firewall apart (plugins).
+	each bool
 }
 
 func rl(path, root, keys, apply, level string, title func(m map[string]string, body map[string]any) string) *rule {
@@ -46,6 +48,11 @@ func rl(path, root, keys, apply, level string, title func(m map[string]string, b
 	if keys != "" {
 		x.keys = regexp.MustCompile("^(" + keys + ")$")
 	}
+	return x
+}
+
+func (x *rule) onEach() *rule {
+	x.each = true
 	return x
 }
 
@@ -138,7 +145,35 @@ var netRules = slices.Concat(
 	items("dnsmasq/settings", "Host", "host", "Dnsmasq-host", "dnsmasq/service/reconfigure", LevelNormal),
 )
 
-var rules = append(append(append(append(append(append(append([]*rule{
+var svcWord = map[string]string{"start": "starten", "stop": "stoppen", "restart": "herstarten"}
+
+// opsRules zijn M4: VPN, diensten, plugins en staten.
+var opsRules = slices.Concat(
+	items("wireguard/client", "Client", "client", "WireGuard-peer", "wireguard/service/reconfigure", LevelNormal),
+	items("wireguard/server", "Server", "server", "WireGuard-instantie", "wireguard/service/reconfigure", LevelAccess),
+	items("openvpn/instances", "", "instance", "OpenVPN-instantie", "openvpn/service/reconfigure", LevelAccess),
+	[]*rule{
+		rl(`core/service/(?P<cmd>start|stop|restart)/(?P<svc>[a-z0-9_-]{1,40})(/(?P<id>[A-Za-z0-9_.-]{1,64}))?`, "", "", "", LevelNormal,
+			func(m map[string]string, _ map[string]any) string {
+				name := m["svc"]
+				if m["id"] != "" {
+					name += " (" + m["id"] + ")"
+				}
+				return "dienst " + name + " " + svcWord[m["cmd"]]
+			}),
+		rl(`core/firmware/(?P<cmd>install|remove)/(?P<pkg>os-[a-z0-9_.-]{1,60})`, "", "", "", LevelNormal,
+			func(m map[string]string, _ map[string]any) string {
+				if m["cmd"] == "install" {
+					return "plugin " + m["pkg"] + " installeren"
+				}
+				return "plugin " + m["pkg"] + " verwijderen"
+			}).onEach(),
+		rl(`diagnostics/firewall/del_state/(?P<id>[0-9a-f]{1,32})/(?P<creator>[0-9a-f]{1,16})`, "", "", "", LevelNormal,
+			func(map[string]string, map[string]any) string { return "verbinding (pf-staat) wissen" }),
+	},
+)
+
+var rules = append(append(append(append(append(append(append(append([]*rule{
 	rl(`firewall/filter/moveRuleBefore/`+segUUID+`/(?P<before>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`, "", "",
 		"firewall/filter/apply", LevelAccess, func(map[string]string, map[string]any) string { return "firewallregel verplaatsen" }),
 },
@@ -148,6 +183,7 @@ var rules = append(append(append(append(append(append(append([]*rule{
 	natRules("one_to_one", "1:1-regel")...),
 	natRules("npt", "NPT-regel")...),
 	netRules...),
+	opsRules...),
 	baseRules...)
 
 var baseRules = []*rule{
@@ -176,6 +212,8 @@ type Plan struct {
 	// Secret zijn de geheime velden (punt-paden, zoals vip.password); ze
 	// gaan versleuteld in de taak en nooit in de uitvoer.
 	Secret []string `json:"secret,omitempty"`
+	// Each: op elke firewall apart in plaats van synchroniseren.
+	Each bool `json:"each,omitempty"`
 }
 
 // secretFields zijn veldnamen die altijd geheim zijn, in elk onderdeel.
@@ -236,9 +274,17 @@ func check(calls []protocol.OPNCall) (Plan, error) {
 		if x.level == LevelAccess {
 			p.Level = LevelAccess
 		}
+		p.Each = p.Each || x.each
 		for _, sp := range secretPaths(c.Body) {
 			if !slices.Contains(p.Secret, sp) {
 				p.Secret = append(p.Secret, sp)
+			}
+		}
+	}
+	if p.Each {
+		for _, c := range calls {
+			if x, _, _ := match(c); !x.each {
+				return Plan{}, fmt.Errorf("plugins installeren of verwijderen gaat apart van andere wijzigingen")
 			}
 		}
 	}
@@ -354,5 +400,5 @@ func readAllowed(path string, admin bool) bool {
 // firewall/alias/searchItem.
 func IsSearch(path string) bool {
 	parts := strings.Split(path, "/")
-	return len(parts) >= 3 && strings.HasPrefix(parts[2], "search")
+	return len(parts) >= 3 && (strings.HasPrefix(parts[2], "search") || strings.HasPrefix(parts[2], "query_"))
 }

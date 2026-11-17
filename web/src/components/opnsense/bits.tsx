@@ -182,9 +182,11 @@ export function ChangeDialog({
                   antwoorden.
                 </li>
                 <li>
-                  {plan.backups.length > 0
-                    ? `Bevestigen en synchroniseren naar ${plan.backups.join(", ")}; die moet de nieuwe configuratie krijgen.`
-                    : "Bevestigen."}
+                  {plan.each && plan.backups.length > 0
+                    ? `Bevestigen, en daarna hetzelfde op ${plan.backups.join(", ")} met een eigen herstelpunt (plugins gaan niet mee met de sync).`
+                    : plan.backups.length > 0
+                      ? `Bevestigen en synchroniseren naar ${plan.backups.join(", ")}; die moet de nieuwe configuratie krijgen.`
+                      : "Bevestigen."}
                 </li>
               </ol>
             )}

@@ -73,6 +73,18 @@ func TestCheck(t *testing.T) {
 	if _, err := check([]protocol.OPNCall{{Path: "interfaces/vip_settings/toggleItem/" + aliasUUID}}); err == nil {
 		t.Error("toggleItem op VIP's bestaat niet en hoort geweigerd")
 	}
+	p, err = check([]protocol.OPNCall{{Path: "core/service/restart/unbound"}, {Path: "core/service/stop/openvpn/1"}})
+	if err != nil || len(p.Apply) != 0 || p.Titles[0] != "dienst unbound herstarten" {
+		t.Fatalf("plan M4: %+v %v", p, err)
+	}
+	for _, bad := range []string{"core/firmware/install/pkg", "core/firmware/upgrade", "core/service/restart/a;b", "wireguard/server/setServer/x"} {
+		if _, err := check([]protocol.OPNCall{{Path: bad}}); err == nil {
+			t.Errorf("toegelaten: %s", bad)
+		}
+	}
+	if !IsSearch("diagnostics/firewall/query_states") || IsSearch("core/firmware/info") {
+		t.Error("IsSearch")
+	}
 	if readAllowed("auth/user/searchApiKey", true) || readAllowed("system/user/get", false) || !readAllowed("firewall/alias/searchItem", false) {
 		t.Error("readAllowed")
 	}
@@ -172,7 +184,7 @@ func (f *fakeFW) Run(_ context.Context, id uuid.UUID, req protocol.RunRequest) (
 	var after func()
 	switch op.Action {
 	case protocol.OPNAPI:
-		if id != f.master || !op.OPN.RequireMaster {
+		if op.OPN.RequireMaster != (id == f.master) {
 			state, exit = protocol.RunFailed, 1
 		}
 		f.pending = op.OPN.ID
@@ -361,6 +373,27 @@ func TestChangeFlow(t *testing.T) {
 	}
 	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
 		t.Fatalf("sleutel: %s %v", j.Status, j.Error)
+	}
+
+	// Een plugin gaat op elke firewall apart, zonder sync.
+	bus.mu.Lock()
+	bus.actions = nil
+	bus.mu.Unlock()
+	j, err = s.StartChange(ctx, events.System(), ida, Change{Calls: []protocol.OPNCall{{Path: "core/firmware/install/os-crowdsec"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("plugin: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	got = strings.Join(bus.actions, ",")
+	bus.mu.Unlock()
+	if got != "opn_api,opn_confirm,opn_api,opn_confirm" {
+		t.Fatalf("acties plugin: %s", got)
+	}
+	if _, err := s.StartChange(ctx, events.System(), ida, Change{Calls: []protocol.OPNCall{{Path: "core/firmware/install/os-crowdsec"}, {Path: "core/service/restart/unbound"}}}); err == nil {
+		t.Fatal("plugin en dienst samen toegelaten")
 	}
 
 	// Een CARP-wachtwoord gaat versleuteld in de taak en komt aan bij de agent.

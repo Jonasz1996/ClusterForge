@@ -262,3 +262,11 @@ GUI niet kan aanbieden.
   bewaart ze versleuteld in de taak; de agent krijgt ze en laat ze weg uit
   de uitvoer, ook het logboek ziet ze niet. Interfaces toewijzen heeft geen
   API in OPNsense en blijft daar.
+- **M4 (VPN, diensten, plugins, diagnose)**: WireGuard-peers en
+  -instanties, OpenVPN-instanties, status van WireGuard/OpenVPN/IPsec;
+  diensten starten/stoppen/herstarten; plugins (alleen `os-*`)
+  installeren of verwijderen op elke firewall apart (`each`: eigen
+  herstelpunt per node, geen sync, niet te mengen met andere wijzigingen);
+  firewalllog live, pf-staten zoeken en wissen (`query_*` als
+  leesverzoek), ARP-tabel. De koppeling met Logs (fase 23) en SOC (fase
+  25) komt in M6.

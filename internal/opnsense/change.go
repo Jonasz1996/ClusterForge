@@ -115,12 +115,16 @@ func orDash(s string) string {
 
 // changeParams zijn de parameters van een wijzigingstaak.
 type changeParams struct {
-	Cluster  string             `json:"cluster"`
-	MasterID uuid.UUID          `json:"master_id"`
-	Master   string             `json:"master"`
-	Backups  []uuid.UUID        `json:"backups,omitempty"`
-	Change   protocol.OPNChange `json:"change"`
-	Titles   []string           `json:"titles"`
+	Cluster     string             `json:"cluster"`
+	MasterID    uuid.UUID          `json:"master_id"`
+	Master      string             `json:"master"`
+	Backups     []uuid.UUID        `json:"backups,omitempty"`
+	Change      protocol.OPNChange `json:"change"`
+	Titles      []string           `json:"titles"`
+	BackupNames []string           `json:"backup_names,omitempty"`
+	// Each: ook op elke backup apart toepassen in plaats van te
+	// synchroniseren (plugins).
+	Each bool `json:"each,omitempty"`
 	// Sealed zijn de geheime velden, versleuteld; sleutel "i|root.veld".
 	Sealed *sealed `json:"sealed,omitempty"`
 }
@@ -223,7 +227,9 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 	p := changeParams{Cluster: ck.Cluster.Name, MasterID: ck.Master.NodeID, Master: ck.Master.Hostname, Change: ch, Titles: plan.Titles, Sealed: seal}
 	for _, b := range ck.Backup {
 		p.Backups = append(p.Backups, b.NodeID)
+		p.BackupNames = append(p.BackupNames, b.Hostname)
 	}
+	p.Each = plan.Each
 	j, err := s.enqueue(ctx, actor, ck.Cluster, KindChange, title+" op "+ck.Cluster.Name, ck.Master.NodeID, p)
 	if err != nil {
 		return store.Job{}, err
@@ -440,45 +446,26 @@ func (s *Service) runChange(ctx context.Context, j *jobs.Job) error {
 	}
 	j.Done("Voorcontrole", &base)
 
-	if err := j.Step(ctx, "Toepassen op "+p.Master, func(ctx context.Context, st *jobs.Step) error {
-		for _, t := range p.Titles {
-			st.Logf("• %s", t)
-		}
-		res, err := s.do(ctx, st, st, p.MasterID, protocol.PVERun{Action: protocol.OPNAPI, OPN: &ch}, "OPNsense-wijziging op "+p.Master)
-		if err != nil {
-			return err
-		}
-		if res.State != protocol.RunOK {
-			return fmt.Errorf("%s; de oude configuratie staat terug", noderun.Describe(res))
-		}
-		return nil
-	}); err != nil {
+	if err := s.applyOn(ctx, j, p.MasterID, p.Master, ch, p, base, ""); err != nil {
 		return err
 	}
-
-	if err := j.Step(ctx, "Proeven en bevestigen", func(ctx context.Context, st *jobs.Step) error {
-		why := s.verify(ctx, st, p, base)
-		if why == "" {
-			res, err := s.do(ctx, st, st, p.MasterID, protocol.PVERun{Action: protocol.OPNConfirm, Change: ch.ID}, "OPNsense-wijziging bevestigen")
-			if err != nil {
+	if p.Each {
+		// Niet gesynchroniseerd (plugins): op elke backup apart, met een
+		// eigen herstelpunt en timer.
+		for i, b := range p.Backups {
+			bch := ch
+			bch.ID = fmt.Sprintf("%s-b%d", ch.ID[:min(len(ch.ID), 56)], i+1)
+			bch.RequireMaster = false
+			name := b.String()
+			if i < len(p.BackupNames) {
+				name = p.BackupNames[i]
+			}
+			if err := s.applyOn(ctx, j, b, name, bch, p, base, " op "+name); err != nil {
 				return err
 			}
-			if res.State != protocol.RunOK {
-				return fmt.Errorf("bevestigen mislukte: %s", noderun.Describe(res))
-			}
-			st.Logf("bevestigd")
-			return nil
 		}
-		st.Logf("proef mislukt: %s; terugdraaien", why)
-		res, err := s.do(ctx, st, st, p.MasterID, protocol.PVERun{Action: protocol.OPNRollback, Change: ch.ID}, "OPNsense-wijziging terugdraaien")
-		if err != nil || res.State != protocol.RunOK {
-			return fmt.Errorf("proef mislukt (%s); de firewall draait zelf terug zodra de timer afloopt", why)
-		}
-		return fmt.Errorf("proef mislukt (%s); de oude configuratie staat terug", why)
-	}); err != nil {
-		return err
+		return nil
 	}
-
 	if len(p.Backups) == 0 {
 		return nil
 	}
@@ -489,6 +476,46 @@ func (s *Service) runChange(ctx context.Context, j *jobs.Job) error {
 // anders waarom niet. Hij probeert opnieuw tot ongeveer de helft van de
 // terugdraaitijd, zodat een herlaadbeurt van een paar seconden geen
 // terugdraaien geeft.
+// applyOn past ch toe op één node, doet de proeven en bevestigt of draait
+// terug.
+func (s *Service) applyOn(ctx context.Context, j *jobs.Job, node uuid.UUID, host string, ch protocol.OPNChange, p changeParams, base baseline, suffix string) error {
+	if err := j.Step(ctx, "Toepassen op "+host, func(ctx context.Context, st *jobs.Step) error {
+		for _, t := range p.Titles {
+			st.Logf("• %s", t)
+		}
+		res, err := s.do(ctx, st, st, node, protocol.PVERun{Action: protocol.OPNAPI, OPN: &ch}, "OPNsense-wijziging op "+host)
+		if err != nil {
+			return err
+		}
+		if res.State != protocol.RunOK {
+			return fmt.Errorf("%s; de oude configuratie staat terug", noderun.Describe(res))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return j.Step(ctx, "Proeven en bevestigen"+suffix, func(ctx context.Context, st *jobs.Step) error {
+		why := s.verify(ctx, st, p, base)
+		if why == "" {
+			res, err := s.do(ctx, st, st, node, protocol.PVERun{Action: protocol.OPNConfirm, Change: ch.ID}, "OPNsense-wijziging bevestigen")
+			if err != nil {
+				return err
+			}
+			if res.State != protocol.RunOK {
+				return fmt.Errorf("bevestigen mislukte: %s", noderun.Describe(res))
+			}
+			st.Logf("bevestigd")
+			return nil
+		}
+		st.Logf("proef mislukt: %s; terugdraaien", why)
+		res, err := s.do(ctx, st, st, node, protocol.PVERun{Action: protocol.OPNRollback, Change: ch.ID}, "OPNsense-wijziging terugdraaien")
+		if err != nil || res.State != protocol.RunOK {
+			return fmt.Errorf("proef mislukt (%s); de firewall draait zelf terug zodra de timer afloopt", why)
+		}
+		return fmt.Errorf("proef mislukt (%s); de oude configuratie staat terug", why)
+	})
+}
+
 func (s *Service) verify(ctx context.Context, st *jobs.Step, p changeParams, base baseline) string {
 	if s.Wait > 0 {
 		select {
@@ -741,6 +768,8 @@ func textDiff(a, b, from, to string) (string, int) {
 
 // PlanView is wat de GUI toont voor hij een wijziging start.
 type PlanView struct {
+	// Each: op elke firewall apart (plugins), geen sync.
+	Each   bool     `json:"each,omitempty"`
 	Titles []string `json:"titles"`
 	Apply  []string `json:"apply"`
 	Level  string   `json:"level"`
@@ -768,7 +797,7 @@ func (s *Service) PlanChange(ctx context.Context, id uuid.UUID, calls []protocol
 		return PlanView{}, err
 	}
 	v := PlanView{
-		Titles: plan.Titles, Level: plan.Level, OK: ck.OK, Why: ck.Why, Cluster: ck.Cluster.Name, Backups: []string{},
+		Titles: plan.Titles, Level: plan.Level, Each: plan.Each, OK: ck.OK, Why: ck.Why, Cluster: ck.Cluster.Name, Backups: []string{},
 		Prod: ck.Cluster.Environment == "prod", ConfirmWithin: DefaultConfirmWithin,
 	}
 	for _, a := range plan.Apply {
