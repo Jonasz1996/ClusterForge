@@ -151,6 +151,16 @@ export const navGroups: NavGroup[] = [
           { href: "/docker/cleanup", label: "Opruimen", adminOnly: true, keywords: "docker prune opruimen schijf ruimte" },
         ],
       },
+      {
+        href: "/publicatie",
+        label: "Publicatie",
+        keywords: "npm nginx proxy manager authentik subdomein domein jbogaert publiceren ssl certificaat forward auth",
+        tabs: [
+          { href: "/publicatie", label: "Diensten", keywords: "diensten poorten containers vip publiceren" },
+          { href: "/publicatie/npm", label: "Proxy hosts", keywords: "npm nginx proxy host overnemen drift ssl" },
+          { href: "/publicatie/authentik", label: "Authentik", keywords: "authentik sso applicatie provider outpost forward auth" },
+        ],
+      },
       { href: "/databases", label: "Databases", keywords: "mariadb galera postgresql patroni dump" },
       { href: "/cronjobs", label: "Cronjobs", keywords: "cron rsync planning" },
     ],

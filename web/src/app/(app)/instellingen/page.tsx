@@ -16,6 +16,7 @@ import { meQueryKey, useMe } from "@/lib/auth";
 import { useIsAdmin } from "@/lib/inventory";
 import { useTheme, type Theme } from "@/lib/theme";
 import { AgentEndpointsCard } from "@/components/settings/AgentEndpointsCard";
+import { PublishSettingsCard } from "@/components/settings/PublishSettingsCard";
 
 const sections: { id: string; label: string }[] = [
   { id: "tweestap", label: "Tweestapsverificatie" },
@@ -27,6 +28,7 @@ const sections: { id: string; label: string }[] = [
   { id: "locatie", label: "Locatie van ClusterForge" },
   { id: "agents-bijwerken", label: "Agents bijwerken" },
   { id: "dashboard-api", label: "Dashboard-API" },
+  { id: "publicatie", label: "Domeinen en publicatie" },
 ];
 
 export default function SettingsPage() {
@@ -93,6 +95,11 @@ export default function SettingsPage() {
         <Tile>
           <div id="dashboard-api" className="scroll-mt-20">
             <ApiTokensCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile wide>
+          <div id="publicatie" className="scroll-mt-20">
+            <PublishSettingsCard isAdmin={isAdmin} />
           </div>
         </Tile>
       </TileGrid>
