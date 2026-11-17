@@ -349,7 +349,13 @@ func (f *paramFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.calls = append(f.calls, req.Method)
 	f.mu.Unlock()
-	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + f.fn(req.Method, req.Params) + `,"id":1}`))
+	res := f.fn(req.Method, req.Params)
+	if msg, ok := strings.CutPrefix(res, "ERR:"); ok {
+		b, _ := json.Marshal(msg)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32500,"message":"Application error.","data":` + string(b) + `},"id":1}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + res + `,"id":1}`))
 }
 
 func TestItemsAndSeries(t *testing.T) {
@@ -412,7 +418,7 @@ func TestItemsAndSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if se.Source != "history" || se.Units != "%" || len(se.Timestamps) != len(se.Avg) || len(se.Avg) != SeriesPoints {
+	if se.Source != "history" || se.Units != "%" || len(se.Timestamps) != len(se.Avg) || (len(se.Avg) != SeriesPoints && len(se.Avg) != SeriesPoints+1) {
 		t.Fatalf("reeks: %+v", se)
 	}
 	if se.Avg[0] == nil || *se.Avg[0] != 20 || *se.Min[0] != 10 || *se.Max[0] != 30 || se.Avg[1] != nil {
@@ -445,5 +451,285 @@ func TestItemsAndSeries(t *testing.T) {
 	}
 	if _, err := s.ItemSeries(context.Background(), "1;drop", "1h"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("ongeldig itemid: %v", err)
+	}
+}
+
+func TestSummarize(t *testing.T) {
+	loc := brussels()
+	now := time.Date(2026, 11, 17, 5, 30, 0, 0, loc) // dinsdag
+	from := now.Add(-24 * time.Hour)
+	at := func(h, m int) zint { return zint(time.Date(2026, 11, 17, h, m, 0, 0, loc).Unix()) }
+	host := func(id, n string) []struct {
+		HostID string `json:"hostid"`
+		Name   string `json:"name"`
+	} {
+		return []struct {
+			HostID string `json:"hostid"`
+			Name   string `json:"name"`
+		}{{id, n}}
+	}
+	evs := []rawEvent{
+		{EventID: "1", ObjectID: "t1", Clock: at(4, 10), Name: "CPU hoog", Severity: 4, REventID: "11", Hosts: host("h1", "web01")},
+		{EventID: "2", ObjectID: "t1", Clock: at(4, 50), Name: "CPU hoog", Severity: 4, REventID: "12", Hosts: host("h1", "web01")},
+		{EventID: "3", ObjectID: "t2", Clock: at(5, 5), Name: "Schijf", Severity: 2, Hosts: host("h2", "db1")},
+	}
+	rc := map[string]int64{"11": int64(at(4, 20)), "12": int64(at(5, 10))}
+	n := uuid.New()
+	e := summarize(evs, rc, map[string]*NodeLink{"h2": {NodeID: n, Hostname: "db1"}}, "24h", from, now)
+	if e.Total != 3 || e.Resolved != 2 || e.MTTR == nil || *e.MTTR != 900 {
+		t.Fatalf("tellers: %+v mttr %v", e, e.MTTR)
+	}
+	if len(e.Buckets) != 25 {
+		t.Errorf("stukjes: %d", len(e.Buckets))
+	}
+	last := e.Buckets[len(e.Buckets)-1]
+	if last.Severity[2] != 1 || e.Buckets[len(e.Buckets)-2].Severity[4] != 2 {
+		t.Errorf("laatste stukjes: %+v %+v", e.Buckets[len(e.Buckets)-2], last)
+	}
+	if e.Heatmap[1][4] != 2 || e.Heatmap[1][5] != 1 {
+		t.Errorf("heatmap dinsdag: %v", e.Heatmap[1])
+	}
+	if e.TopTriggers[0].Name != "CPU hoog" || e.TopTriggers[0].Count != 2 || e.TopHosts[1].Node == nil || e.TopHosts[1].Node.NodeID != n {
+		t.Errorf("top: %+v %+v", e.TopTriggers, e.TopHosts)
+	}
+	w := summarize(evs, rc, nil, "7d", now.Add(-7*24*time.Hour), now)
+	if len(w.Buckets) != 8 || w.Buckets[7].Severity[4] != 2 {
+		t.Errorf("per dag: %d %+v", len(w.Buckets), w.Buckets[len(w.Buckets)-1])
+	}
+}
+
+func TestBoardNormalize(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	in := BoardInput{Name: "  Databanken ", Refresh: 60, Panels: []Panel{
+		{Type: PanelGraph, Title: "CPU", W: 9, H: 0, Items: []BoardItem{{ItemID: " 42 ", Label: "db1"}}, Range: "2h", Warn: f(80), Text: "weg"},
+		{ID: "a", Type: PanelGauge, Items: []BoardItem{{ItemID: "7"}}, Max: f(100), Crit: f(90)},
+		{ID: "a", Type: PanelProblems, MinSeverity: 9, Items: []BoardItem{{ItemID: "1"}}},
+		{Type: PanelText, Text: " uitleg "},
+	}}
+	if err := in.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	g := in.Panels[0]
+	if in.Name != "Databanken" || g.W != 4 || g.H != 1 || g.Range != "24h" || g.Warn != nil || g.Text != "" || g.Items[0].ItemID != "42" || g.ID == "" {
+		t.Errorf("grafiek: %+v", g)
+	}
+	if in.Panels[1].ID != "a" || in.Panels[2].ID == "a" || in.Panels[2].MinSeverity != 5 || len(in.Panels[2].Items) != 0 || in.Panels[3].Text != "uitleg" {
+		t.Errorf("panelen: %+v", in.Panels)
+	}
+
+	bad := []BoardInput{
+		{Name: "", Refresh: 60},
+		{Name: "x", Refresh: 45},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: "kaart"}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelGraph}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelStat, Items: []BoardItem{{ItemID: "1"}, {ItemID: "2"}}}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelStat, Items: []BoardItem{{ItemID: "abc"}}}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelGauge, Items: []BoardItem{{ItemID: "1"}}, Max: f(0)}}},
+		{Name: "x", Refresh: 60, Panels: make([]Panel, MaxPanels+1)},
+	}
+	for i, b := range bad {
+		var fe *FieldError
+		if err := b.Normalize(); !errors.As(err, &fe) {
+			t.Errorf("%d: verwacht een fout, kreeg %v", i, err)
+		}
+	}
+}
+
+func TestBoards(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	in := BoardInput{Name: "Databanken", Refresh: 60, Panels: []Panel{{Type: PanelStat, Items: []BoardItem{{ItemID: "5"}}}}}
+	b, err := s.CreateBoard(ctx, events.System(), nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Name != "Databanken" || len(b.Panels) != 1 || b.Panels[0].ID == "" || b.Panels[0].W != 1 {
+		t.Fatalf("bewaard: %+v", b)
+	}
+	if _, err := s.CreateBoard(ctx, events.System(), nil, BoardInput{Name: "databanken", Refresh: 0}); !errors.Is(err, ErrBoardExists) {
+		t.Errorf("dubbele naam: %v", err)
+	}
+	in.Name, in.Panels = "Databank", append(in.Panels, Panel{Type: PanelText, Text: "hallo"})
+	b2, err := s.UpdateBoard(ctx, events.System(), nil, b.ID, in)
+	if err != nil || b2.Name != "Databank" || len(b2.Panels) != 2 || !b2.UpdatedAt.After(b.CreatedAt.Add(-time.Second)) {
+		t.Fatalf("bijgewerkt: %+v %v", b2, err)
+	}
+	all, err := s.Boards(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("lijst: %v %v", all, err)
+	}
+	if err := s.DeleteBoard(ctx, events.System(), b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Board(ctx, b.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("na weggooien: %v", err)
+	}
+	if _, err := s.UpdateBoard(ctx, events.System(), nil, b.ID, in); !errors.Is(err, ErrNotFound) {
+		t.Errorf("bijwerken van een weg dashboard: %v", err)
+	}
+}
+
+func TestNotices(t *testing.T) {
+	now := time.Date(2026, 11, 17, 6, 0, 0, 0, time.UTC)
+	node := &NodeLink{Hostname: "db1"}
+	snap := &Snapshot{
+		HA:      []HANode{{Name: "a", Status: "standby"}, {Name: "b", Status: "unavailable"}},
+		Proxies: []Proxy{{Name: "p1", State: "offline"}, {Name: "p2", State: "online"}},
+		Problems: []Problem{
+			{Name: "oud en hoog", Severity: 4, Since: now.Add(-time.Hour), Hosts: []HostRef{{Name: "db1"}}},
+			{Name: "net nieuw", Severity: 5, Since: now.Add(-time.Minute), Hosts: []HostRef{{Name: "db2"}}},
+			{Name: "bevestigd", Severity: 5, Since: now.Add(-time.Hour), Acknowledged: true},
+			{Name: "gemiddeld", Severity: 3, Since: now.Add(-time.Hour)},
+		},
+		Hosts:     []Host{{Node: node, Enabled: true, Available: AvailDown}, {Node: node, Enabled: true, Maintenance: true, Available: AvailDown}},
+		Unwatched: []NodeRef{{Hostname: "plex1"}},
+	}
+	got := map[string]Notice{}
+	for _, n := range notices(snap, "", now, now) {
+		got[n.ID] = n
+	}
+	if len(got) != 5 || !got["zabbix-ha"].Red || got["zabbix-proxy"].Count != 1 || got["zabbix-unacked"].Count != 1 ||
+		got["zabbix-unacked"].Names[0] != "db1" || got["zabbix-nodes-down"].Count != 1 || got["zabbix-unwatched"].Red {
+		t.Errorf("regels: %+v", got)
+	}
+	if _, ok := got["zabbix-api"]; ok {
+		t.Error("API werkt; geen regel verwacht")
+	}
+	got = map[string]Notice{}
+	for _, n := range notices(nil, "connection refused", now.Add(-10*time.Minute), now) {
+		got[n.ID] = n
+	}
+	if n := got["zabbix-api"]; len(got) != 1 || !n.Red || !strings.Contains(n.Detail, "connection refused") {
+		t.Errorf("API weg: %+v", got)
+	}
+	if n := notices(nil, "even weg", now.Add(-time.Minute), now); len(n) != 0 {
+		t.Errorf("kort weg telt niet: %+v", n)
+	}
+}
+
+func TestSecurityProblem(t *testing.T) {
+	for _, c := range []struct {
+		tags []Tag
+		want bool
+	}{
+		{[]Tag{{"scope", "security"}}, true},
+		{[]Tag{{"Scope", "Security"}}, true},
+		{[]Tag{{"security", ""}}, true},
+		{[]Tag{{"component", "security"}}, true},
+		{[]Tag{{"scope", "availability"}}, false},
+		{nil, false},
+	} {
+		if got := securityProblem(Problem{Tags: c.tags}); got != c.want {
+			t.Errorf("%v: %v", c.tags, got)
+		}
+	}
+}
+
+func TestLogProblems(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	var nodeID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, primary_ip) VALUES ('db1', '192.168.10.191') RETURNING id`).Scan(&nodeID); err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	now := time.Date(2026, 11, 17, 6, 0, 0, 0, time.UTC)
+	node := &NodeLink{NodeID: nodeID, Hostname: "db1"}
+	old := Problem{EventID: "1", Name: "Al lang", Severity: 4, Since: now.Add(-time.Hour), Hosts: []HostRef{{Name: "db1", Node: node}}}
+	fresh := Problem{EventID: "2", Name: "Net begonnen", Severity: 3, Since: now.Add(-30 * time.Second), Hosts: []HostRef{{Name: "db1", Node: node}}}
+	low := Problem{EventID: "3", Name: "Info", Severity: 1, Since: now, Hosts: []HostRef{{Name: "db1", Node: node}}}
+	other := Problem{EventID: "4", Name: "Geen node", Severity: 5, Since: now, Hosts: []HostRef{{Name: "printer"}}}
+	count := func(action string) int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE action = $1 AND subject_id = $2`, action, nodeID.String()).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// Eerste ronde: alleen wat net begon.
+	s.logProblems(ctx, &Snapshot{Problems: []Problem{old, fresh, low, other}}, now)
+	if count("zabbix.problem_started") != 1 {
+		t.Fatalf("na de eerste ronde: %d", count("zabbix.problem_started"))
+	}
+	// Tweede ronde: niets nieuws; derde: het oude is opgelost.
+	s.logProblems(ctx, &Snapshot{Problems: []Problem{old, fresh}}, now.Add(time.Minute))
+	s.logProblems(ctx, &Snapshot{Problems: []Problem{fresh}}, now.Add(2*time.Minute))
+	if count("zabbix.problem_started") != 1 || count("zabbix.problem_resolved") != 1 {
+		t.Fatalf("begonnen %d, opgelost %d", count("zabbix.problem_started"), count("zabbix.problem_resolved"))
+	}
+	var payload []byte
+	if err := pool.QueryRow(ctx, `SELECT payload FROM events WHERE action = 'zabbix.problem_resolved'`).Scan(&payload); err != nil || !strings.Contains(string(payload), `"duration_s": 3720`) && !strings.Contains(string(payload), `"duration_s":3720`) {
+		t.Fatalf("payload %s %v", payload, err)
+	}
+}
+
+func TestAcknowledge(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	var clusterID, nodeID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO clusters (slug, name, type, environment) VALUES ('db', 'db', 'mariadb', 'prod') RETURNING id`).Scan(&clusterID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, primary_ip, cluster_id) VALUES ('db1', '192.168.10.191', $1) RETURNING id`, clusterID).Scan(&nodeID); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	f := &paramFake{fn: func(m string, p map[string]any) string {
+		if m == "event.acknowledge" {
+			got = p
+			if p["eventids"].([]any)[0] == "666" {
+				return `ERR:Cannot close problem: trigger does not allow manual closing.`
+			}
+			return `{"eventids":["801"]}`
+		}
+		return `[]`
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	s.Client = func(context.Context) (API, string, error) {
+		return &zabbixagent.Client{URL: srv.URL, Token: "t"}, srv.URL, nil
+	}
+	node := &NodeLink{NodeID: nodeID, Hostname: "db1", ClusterID: &clusterID}
+	s.configured = true
+	s.snap = &Snapshot{Problems: []Problem{
+		{EventID: "801", Name: "db1: Disk full", Severity: 4, Hosts: []HostRef{{Name: "db1", Node: node}}},
+		{EventID: "802", Name: "printer weg", Severity: 2, Hosts: []HostRef{{Name: "printer"}}},
+	}}
+
+	if _, _, err := s.AckPlan(ctx, "999"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("onbekend probleem: %v", err)
+	}
+	p, prod, err := s.AckPlan(ctx, "801")
+	if err != nil || !prod {
+		t.Fatalf("prod-probleem: %v %v", prod, err)
+	}
+	if _, prod, _ := s.AckPlan(ctx, "802"); prod {
+		t.Error("probleem zonder node is geen prod")
+	}
+	sev := 3
+	if err := s.Acknowledge(ctx, events.System(), "jonas", p, AckInput{Message: " schijf vergroot ", Close: true, Severity: &sev}); err != nil {
+		t.Fatal(err)
+	}
+	if got["action"].(float64) != ackAcknowledge|ackMessage|ackChangeSeverity|ackClose || got["severity"].(float64) != 3 ||
+		got["message"] != "schijf vergroot (via ClusterForge, jonas)" {
+		t.Errorf("parameters: %v", got)
+	}
+	if !s.snap.Problems[0].Acknowledged {
+		t.Error("de stand moet meteen bevestigd tonen")
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE action = 'zabbix.problem_acknowledged' AND subject_id = $1`, nodeID.String()).Scan(&n); err != nil || n != 1 {
+		t.Errorf("logboek: %d %v", n, err)
+	}
+	// Dezelfde ernst: geen wijziging van de ernst.
+	same := 4
+	if err := s.Acknowledge(ctx, events.System(), "jonas", p, AckInput{Severity: &same}); err != nil || got["action"].(float64) != ackAcknowledge|ackMessage {
+		t.Errorf("zelfde ernst: %v %v", got, err)
+	}
+	var fe *FieldError
+	if err := s.Acknowledge(ctx, events.System(), "jonas", Problem{EventID: "666"}, AckInput{Close: true}); !errors.As(err, &fe) || !strings.Contains(fe.Msg, "handmatig sluiten") {
+		t.Errorf("niet te sluiten: %v", err)
 	}
 }

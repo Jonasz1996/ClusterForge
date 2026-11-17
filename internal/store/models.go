@@ -1987,6 +1987,17 @@ type ZabbixAgentSetting struct {
 	UpdatedBy      *uuid.UUID
 }
 
+type ZabbixDashboard struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	Refresh     int32
+	Panels      []byte
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+}
+
 type ZabbixHostLink struct {
 	Hostid    string
 	NodeID    *uuid.UUID

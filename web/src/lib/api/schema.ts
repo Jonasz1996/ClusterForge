@@ -4122,6 +4122,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
+         * @description Uit het template Linux by Zabbix agent, in één aanvraag; 30 s gecachet. Voor de dashboards.
+         */
+        get: operations["getZabbixMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
+         * @description Uit event.get, hoogstens 10 000 problemen; 60 s gecachet.
+         */
+        get: operations["getZabbixEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/zabbix/hosts/{hostid}/items": {
         parameters: {
             query?: never;
@@ -4157,6 +4197,88 @@ export interface paths {
         get: operations["getZabbixItemSeries"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/items/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Laatste waarde van losse Zabbix-items
+         * @description Voor de getal- en meterpanelen van eigen dashboards. Items van hosts die ClusterForge niet kent, of die weg
+         *     zijn, ontbreken in het antwoord. Hoogstens 200 items; 30 s gecachet.
+         */
+        get: operations["getZabbixLatest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eigen Zabbix-dashboards */
+        get: operations["listZabbixDashboards"];
+        put?: never;
+        /** Een eigen dashboard bewaren (admin); ook voor een import */
+        post: operations["createZabbixDashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/dashboards/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Eén eigen dashboard */
+        get: operations["getZabbixDashboard"];
+        /** Een eigen dashboard vervangen (admin) */
+        put: operations["updateZabbixDashboard"];
+        post?: never;
+        /** Een eigen dashboard weggooien (admin) */
+        delete: operations["deleteZabbixDashboard"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/problems/{eventid}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een probleem in Zabbix bevestigen (admin)
+         * @description Bevestigt met een bericht, en zet eventueel een andere ernst of sluit het probleem (alleen als de trigger
+         *     handmatig sluiten toelaat). Raakt het probleem een node van een prod-cluster, dan is de code van
+         *     tweestapsverificatie (of het wachtwoord) nodig; zonder antwoordt de server 409 needs_confirmation.
+         */
+        post: operations["acknowledgeZabbixProblem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14360,6 +14482,82 @@ export interface components {
             jobs: string[];
             skipped: string[];
         };
+        ZabbixLatestItem: {
+            itemid: string;
+            name: string;
+            key: string;
+            numeric: boolean;
+            units: string;
+            last_value: string;
+            prev_value: string;
+            /** Format: date-time */
+            last_clock: string | null;
+            component: string;
+            error: string;
+            hostid: string;
+            host_name: string;
+        };
+        ZabbixBoardItem: {
+            itemid: string;
+            /** @description Eigen naam in de legende; leeg is de naam uit Zabbix */
+            label: string;
+        };
+        ZabbixPanel: {
+            /** @description Leeg bij een nieuw paneel; de server geeft er een */
+            id: string;
+            /** @description Een van: graph, stat, gauge, problems, text */
+            type: string;
+            title: string;
+            /** @description Breedte in kolommen */
+            w: number;
+            /** @description Hoogte */
+            h: number;
+            /** @description graph: 1-6; stat en gauge: 1 */
+            items: components["schemas"]["ZabbixBoardItem"][];
+            /** @description graph: 1h, 6h, 24h, 7d of 30d */
+            range: string;
+            /** @description stat en gauge: vanaf hier oranje */
+            warn: number | null;
+            /** @description stat en gauge: vanaf hier rood */
+            crit: number | null;
+            /** @description gauge: de volle meter (leeg: 100) */
+            max: number | null;
+            /** @description problems: vanaf deze ernst (0-5) */
+            min_severity: number;
+            /** @description problems: alleen deze host; leeg is alle */
+            hostid: string;
+            /** @description text: de tekst */
+            text: string;
+        };
+        ZabbixDashboardInput: {
+            name: string;
+            description: string;
+            /** @description Verversen in seconden: 0, 30, 60, 300 of 900 */
+            refresh: number;
+            panels: components["schemas"]["ZabbixPanel"][];
+        };
+        ZabbixDashboard: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description: string;
+            refresh: number;
+            panels: components["schemas"]["ZabbixPanel"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string | null;
+        };
+        ZabbixAckInput: {
+            /** @description Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter */
+            message: string;
+            close: boolean;
+            /** @description Nieuwe ernst 0-5; leeg laat hem staan */
+            severity?: number | null;
+            totp_code?: string;
+            password?: string;
+        };
         ZabbixItem: {
             itemid: string;
             name: string;
@@ -14395,6 +14593,52 @@ export interface components {
             avg: (number | null)[];
             min: (number | null)[];
             max: (number | null)[];
+        };
+        ZabbixHostMetrics: {
+            hostid: string;
+            /** @description % CPU */
+            cpu: number | null;
+            /** @description % geheugen */
+            memory: number | null;
+            /** @description % gebruikt op / */
+            disk: number | null;
+            load: number | null;
+            /** @description Seconden */
+            uptime: number | null;
+            /** @description itemid per cijfer (cpu, memory, disk, load, uptime) */
+            items: {
+                [key: string]: string;
+            };
+        };
+        ZabbixMetrics: {
+            /** Format: date-time */
+            at: string;
+            hosts: components["schemas"]["ZabbixHostMetrics"][];
+        };
+        ZabbixTopCount: {
+            id: string;
+            name: string;
+            count: number;
+            severity: number;
+            node: components["schemas"]["ZabbixNodeLink"] | null;
+        };
+        ZabbixEvents: {
+            window: string;
+            buckets: {
+                /** Format: date-time */
+                at: string;
+                /** @description Aantal nieuwe problemen per ernst 0-5 */
+                severity: number[];
+            }[];
+            total: number;
+            resolved: number;
+            /** @description Gemiddelde hersteltijd in seconden */
+            mttr: number | null;
+            /** @description Per weekdag (0 = maandag) per uur het aantal nieuwe problemen */
+            heatmap: number[][];
+            top_triggers: components["schemas"]["ZabbixTopCount"][];
+            top_hosts: components["schemas"]["ZabbixTopCount"][];
+            truncated: boolean;
         };
         ZabbixHostLinkInput: {
             /** Format: uuid */
@@ -14509,6 +14753,10 @@ export interface components {
             }[];
             /** Format: date-time */
             updated: string | null;
+            /** @description itemid per waarde (nvps, queue, queue_10m, …) */
+            items: {
+                [key: string]: string;
+            };
         };
         ZabbixUnwatched: {
             /** Format: uuid */
@@ -15316,6 +15564,8 @@ export interface components {
             /** @description Leeg als CrowdSec er niet (beheerd) staat; anders een SocState. */
             bouncer: string;
             security_updates: number;
+            /** @description Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score. */
+            zabbix: string;
             gaps: string[];
         };
         /** @enum {string} */
@@ -21806,6 +22056,54 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    getZabbixMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMetrics"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getZabbixEvents: {
+        parameters: {
+            query?: {
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixEvents"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     getZabbixHostItems: {
         parameters: {
             query?: never;
@@ -21856,6 +22154,189 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getZabbixLatest: {
+        parameters: {
+            query: {
+                /** @description Item-id's, met komma's gescheiden */
+                itemids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixLatestItem"][];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    listZabbixDashboards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixDashboardInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixDashboardInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixDashboard"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteZabbixDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    acknowledgeZabbixProblem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAckInput"];
+            };
+        };
+        responses: {
+            /** @description Bevestigd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             502: components["responses"]["Error"];
         };
     };

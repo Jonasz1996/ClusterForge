@@ -40,6 +40,10 @@ type Service struct {
 	lastRun    time.Time
 	lastSaved  time.Time
 	cache      itemCache
+	dash       dashCache
+	// logged: de problemen die al als event in het logboek staan (alleen
+	// onder run).
+	logged map[string]loggedProblem
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, agents *zabbixagent.Service, log *slog.Logger) *Service {
@@ -124,6 +128,7 @@ func (s *Service) Tick(ctx context.Context) error {
 					s.configured, s.apiURL, s.snap, s.lastErr, s.lastOK, s.lastRun = true, url, &snap, "", now, now
 					s.mu.Unlock()
 					s.save(ctx, &snap, now)
+					s.logProblems(ctx, &snap, now)
 					if s.Changed != nil {
 						s.Changed()
 					}
@@ -228,7 +233,7 @@ func (s *Service) SetLink(ctx context.Context, actor events.Actor, userID *uuid.
 	if nodeID != nil {
 		payload["node_id"], payload["hostname"] = nodeID.String(), hostname
 	}
-	s.event(ctx, actor, "zabbix.host_linked", hostID, payload)
+	s.event(ctx, actor, "zabbix.host_linked", "zabbix_host", hostID, payload)
 	return nil
 }
 
@@ -242,15 +247,15 @@ func (s *Service) DeleteLink(ctx context.Context, actor events.Actor, hostID str
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	s.event(ctx, actor, "zabbix.host_unlinked", hostID, map[string]any{"hostid": hostID})
+	s.event(ctx, actor, "zabbix.host_unlinked", "zabbix_host", hostID, map[string]any{"hostid": hostID})
 	return nil
 }
 
-func (s *Service) event(ctx context.Context, actor events.Actor, action, hostID string, payload map[string]any) {
+func (s *Service) event(ctx context.Context, actor events.Actor, action, subjectType, subjectID string, payload map[string]any) {
 	if s.ev == nil {
 		return
 	}
-	if err := s.ev.Write(ctx, nil, events.Event{Actor: actor, SubjectType: "zabbix_host", SubjectID: hostID, Action: action, Payload: payload}); err != nil {
+	if err := s.ev.Write(ctx, nil, events.Event{Actor: actor, SubjectType: subjectType, SubjectID: subjectID, Action: action, Payload: payload}); err != nil {
 		s.log.Warn("event schrijven mislukt", "action", action, "err", err)
 	}
 }

@@ -259,6 +259,8 @@ func serve() error {
 	}
 	// Het SOC telt de kwetsbaarheden en de verharding mee.
 	socs.Vulns = secs.SOCVulns
+	// Fase 33: wat Zabbix ziet, in de dekking en "Nu belangrijk".
+	socs.Zabbix = zbm.SOC
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
 	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))

@@ -78,6 +78,27 @@ export function homepageYaml(
       `            - field: protected`,
       `              label: Beschermd`,
     );
+    // Zabbix (fase 33): problemen en bereikbaarheid uit Zabbix.
+    lines.push(
+      `    - Zabbix:`,
+      `        icon: mdi-chart-line`,
+      `        href: ${origin}/zabbix/overzicht`,
+      `        description: Zabbix via ClusterForge`,
+      `        widget:`,
+      `          type: customapi`,
+      `          url: ${origin}${base}/zabbix`,
+      `          token: ${token}`,
+      `          refreshInterval: 60000`,
+      `          mappings:`,
+      `            - field: level_label`,
+      `              label: Toestand`,
+      `            - field: problems`,
+      `              label: Problemen`,
+      `            - field: high`,
+      `              label: Hoog`,
+      `            - field: available`,
+      `              label: Bereikbaar`,
+    );
   }
   for (const c of clusters) {
     lines.push(
