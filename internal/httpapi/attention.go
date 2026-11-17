@@ -238,6 +238,12 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		return gen.Attention{}, err
 	}
 
+	// Proxmox Backup Server (fase 32): de waarschuwingen van elke PBS en de
+	// back-ups van de clusternodes, uit de laatste achtergrondronde.
+	if s.pbs != nil {
+		s.pbsAttention(add)
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}

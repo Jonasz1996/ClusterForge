@@ -404,3 +404,9 @@ func (s *Service) openSealed(p *params) error {
 	}
 	return nil
 }
+
+// AddStorage zet een storage in een Proxmox-cluster (fase 32: een PBS
+// koppelen). Het wachtwoord gaat versleuteld in de taak.
+func (s *Service) AddStorage(ctx context.Context, actor events.Actor, datacenter string, params map[string]string) (store.Job, error) {
+	return s.StartCall(ctx, actor, Call{Datacenter: datacenter, Method: "create", Path: "/storage", Params: params})
+}
