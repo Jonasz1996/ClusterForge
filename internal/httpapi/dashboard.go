@@ -220,6 +220,7 @@ func (s *Server) dashboardRoutes(r chi.Router) {
 	r.Get("/", s.dashboardOverview)
 	r.Get("/clusters", s.dashboardClusters)
 	r.Get("/clusters/{cluster}", s.dashboardCluster)
+	r.Get("/nodes", s.dashboardNodes)
 	r.Get("/soc", s.dashboardSocHandler)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "onbekend endpoint")
@@ -359,6 +360,7 @@ type dashboardCache struct {
 type dashboardSet struct {
 	at       time.Time
 	clusters []gen.DashboardCluster
+	nodes    []dashboardNode
 }
 
 // filter geeft het overzicht voor een token: alleen ids, of alles als ids leeg is.
@@ -616,5 +618,9 @@ func (s *Server) buildDashboard(ctx context.Context) (dashboardSet, error) {
 		}
 		c.Problems = append(p, c.Problems...)
 	}
-	return dashboardSet{at: now, clusters: out}, nil
+	nodeList, err := s.buildDashboardNodes(ctx, now, upd)
+	if err != nil {
+		return dashboardSet{}, err
+	}
+	return dashboardSet{at: now, clusters: out, nodes: nodeList}, nil
 }

@@ -76,3 +76,17 @@ FROM firewall_nodes f
 JOIN nodes n ON n.id = f.node_id
 WHERE n.cluster_id IS NOT NULL
 GROUP BY n.cluster_id;
+
+-- name: DashboardNodeList :many
+-- Elke node behalve de afgebouwde, met cluster en Proxmox-gast, voor
+-- /api/dashboard/v1/nodes (fase 31).
+SELECT n.id, n.hostname, n.cluster_id, c.slug AS cluster_slug, c.name AS cluster_name,
+       n.role, n.description, n.lifecycle::text AS lifecycle, n.primary_ip, n.tags,
+       n.status, n.status_reason, s.heartbeat_at,
+       n.proxmox_id, n.pve_vmid, r.pve_node, r.type AS pve_type, r.name AS pve_name
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN node_status s ON s.node_id = n.id
+LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
+WHERE n.lifecycle <> 'decommissioned'
+ORDER BY n.cluster_id NULLS LAST, lower(n.hostname);
