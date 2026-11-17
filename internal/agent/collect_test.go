@@ -130,3 +130,20 @@ func TestFactsFromRoot(t *testing.T) {
 		t.Errorf("heartbeat: %+v", hb)
 	}
 }
+
+func TestHeartbeatStateAutoRestart(t *testing.T) {
+	for _, tc := range []struct {
+		u    UnitInfo
+		want string
+	}{
+		{UnitInfo{Active: "activating", Result: "exit-code"}, "auto-restart"},
+		{UnitInfo{Active: "activating", Result: "success"}, "activating"},
+		{UnitInfo{Active: "activating"}, "activating"},
+		{UnitInfo{Active: "active", Result: "exit-code"}, "active"},
+		{UnitInfo{Active: "failed", Result: "exit-code"}, "failed"},
+	} {
+		if got := heartbeatState(tc.u); got != tc.want {
+			t.Errorf("%+v: %s, wil %s", tc.u, got, tc.want)
+		}
+	}
+}

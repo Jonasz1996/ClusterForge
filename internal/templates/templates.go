@@ -6,6 +6,8 @@ package templates
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -401,6 +403,9 @@ var funcs = template.FuncMap{
 	// pgsize schrijft een grootte zoals 256M als 256MB, de eenheid van
 	// PostgreSQL.
 	"pgsize": pgSize,
+	// sha256 geeft de sha256 van tekst in hex, zoals een PSK die van een
+	// geheim afgeleid is.
+	"sha256": func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) },
 }
 
 func pgSize(v any) string {

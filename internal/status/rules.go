@@ -41,6 +41,12 @@ const (
 // staan, omdat een socket ze start.
 var ignoredInactive = []string{"ssh"}
 
+// serviceProblems zijn controles die als unit draaien: faalt de unit, dan
+// is dit de reden.
+var serviceProblems = map[string]string{
+	"cf-zabbix-proxy-check": "Zabbix-proxy bereikt geen Zabbix server (zie journalctl -u cf-zabbix-proxy-check)",
+}
+
 type Result struct {
 	Status Status
 	Reason string
@@ -93,8 +99,12 @@ func Node(in NodeInput) Result {
 	for _, name := range names {
 		state := in.Services[name]
 		switch {
+		case state == "failed" && serviceProblems[name] != "":
+			problems = append(problems, serviceProblems[name])
 		case state == "failed":
 			problems = append(problems, "service "+name+" is gefaald")
+		case state == "auto-restart":
+			problems = append(problems, "service "+name+" crasht en start steeds opnieuw")
 		case state == "inactive" && slices.Contains(in.EnabledServices, name) && !slices.Contains(ignoredInactive, name):
 			problems = append(problems, "service "+name+" draait niet")
 		}

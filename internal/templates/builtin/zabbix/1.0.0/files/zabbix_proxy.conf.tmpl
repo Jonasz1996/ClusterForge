@@ -14,6 +14,14 @@ ProxyMode=0
 Hostname={{ .node.hostname }}
 Server={{ $first := true }}{{ range .nodes }}{{ if eq .role "server" }}{{ if not $first }};{{ end }}{{ .address }}{{ $first = false }}{{ end }}{{ end }}
 
+{{ if eq .params.proxy_encryption "psk" }}
+# Versleuteld met een PSK; ClusterForge zet dezelfde sleutel in Zabbix bij
+# deze proxy.
+TLSConnect=psk
+TLSAccept=psk
+TLSPSKIdentity={{ .params.proxy_psk_identity }}
+TLSPSKFile=/run/credentials/cf-zabbix-proxy.service/psk
+{{ end }}
 # SQLite: de proxy maakt het bestand zelf als het er niet is.
 DBName=/var/lib/cf-zabbix-proxy/zabbix_proxy.db
 
