@@ -317,3 +317,22 @@ func (s *Server) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
 }
+
+func (s *Server) GetOpnsenseFlows(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID, params gen.GetOpnsenseFlowsParams) {
+	q := opnsense.FlowQuery{}
+	if params.Window != nil {
+		q.Window = string(*params.Window)
+	}
+	if params.Action != nil {
+		q.Action = string(*params.Action)
+	}
+	if params.Q != nil {
+		q.Q = *params.Q
+	}
+	v, err := s.opnsense.Flows(r.Context(), nodeId, q)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}

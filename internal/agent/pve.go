@@ -552,7 +552,7 @@ func (a *Agent) handlePVE(data []byte) protocol.PVEResponse {
 			return protocol.PVEResponse{Error: err.Error()}
 		}
 		return protocol.PVEResponse{Data: data}
-	case protocol.OPNOpGet, protocol.OPNOpPost, protocol.OPNOpConfigctl, protocol.OPNOpRevisions, protocol.OPNOpRevision, protocol.OPNOpFacts, protocol.OPNOpBackup:
+	case protocol.OPNOpGet, protocol.OPNOpPost, protocol.OPNOpConfigctl, protocol.OPNOpRevisions, protocol.OPNOpRevision, protocol.OPNOpFacts, protocol.OPNOpBackup, protocol.OPNOpFilterLog:
 		return a.handleOPN(ctx, req)
 	case protocol.PVEOpHardware:
 		hw, err := h.hardware(ctx)

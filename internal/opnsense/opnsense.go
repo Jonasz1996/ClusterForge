@@ -50,6 +50,7 @@ func (e ValidationError) Error() string { return e.Msg }
 var ErrNotFound = errors.New("geen OPNsense-firewall met een agent")
 
 type Service struct {
+	pool *pgxpool.Pool
 	q    *store.Queries
 	ev   *events.Writer
 	log  *slog.Logger
@@ -78,7 +79,7 @@ type Service struct {
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus) *Service {
-	s := &Service{q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, Run: &noderun.Runner{Bus: bus}, Now: time.Now, Wait: 8 * time.Second}
+	s := &Service{pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, Run: &noderun.Runner{Bus: bus}, Now: time.Now, Wait: 8 * time.Second}
 	if runner != nil {
 		runner.Register(KindChange, s.runChange)
 		runner.Register(KindSync, s.runSync)

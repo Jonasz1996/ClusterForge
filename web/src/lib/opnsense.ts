@@ -471,3 +471,46 @@ export async function downloadOpnBackup(id: string, code: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5_000);
 }
+
+// --- Verkeer uit het filterlog (fase 40) ----------------------------------------
+
+export type OpnFlowRow = {
+  action: string;
+  interface: string;
+  iface_name?: string;
+  dir: string;
+  proto: string;
+  src: string;
+  src_name?: string;
+  dst: string;
+  dst_name?: string;
+  port?: number;
+  rule?: string;
+  rule_name?: string;
+  count: number;
+  first: string;
+  last: string;
+};
+
+export type OpnFlows = {
+  window: string;
+  rows: OpnFlowRow[];
+  rules: { rule: string; rule_name?: string; action: string; count: number; last: string }[];
+  reads: { node_id: string; hostname: string; read_at?: string; error?: string; why?: string }[];
+  blocked: number;
+  passed: number;
+};
+
+export function useOpnFlows(id: string | undefined, window: "1h" | "24h" | "7d" | "30d", action: "" | "block" | "pass", q: string) {
+  return useQuery({
+    queryKey: ["opnsense", "flows", id, window, action, q],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/opnsense/firewalls/{nodeId}/flows", {
+          params: { path: { nodeId: id! }, query: { window, action: action || undefined, q: q || undefined } },
+        }),
+      ) as unknown as OpnFlows,
+    enabled: !!id,
+    refetchInterval: 60_000,
+  });
+}

@@ -5395,6 +5395,24 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/flows:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseFlows
+      summary: Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40)
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ["1h", "24h", "7d", "30d"] } }
+        - { name: action, in: query, required: false, schema: { type: string, enum: ["block", "pass"] } }
+        - { name: q, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Stromen, regels met hun treffers en de stand van het lezen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /opnsense/firewalls/{nodeId}/drift:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }

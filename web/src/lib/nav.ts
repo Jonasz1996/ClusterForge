@@ -276,6 +276,11 @@ export const navGroups: NavGroup[] = [
             keywords: "opnsense dienst service herstarten plugin installeren",
           },
           {
+            href: "/opnsense/verkeer",
+            label: "Verkeer",
+            keywords: "opnsense filterlog verkeer geblokkeerd toegelaten stromen regels treffers",
+          },
+          {
             href: "/opnsense/diagnose",
             label: "Diagnose",
             keywords: "opnsense firewalllog log staten states verbinding arp",

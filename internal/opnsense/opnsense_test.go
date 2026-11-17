@@ -261,7 +261,17 @@ func (f *fakeFW) PVE(_ context.Context, id uuid.UUID, req protocol.PVERequest) (
 	case protocol.OPNOpConfigctl:
 		b, _ := json.Marshal([]map[string]string{{"name": "WAN", "status": f.down}})
 		return protocol.PVEResponse{Data: b}, nil
+	case protocol.OPNOpFilterLog:
+		h := time.Now().UTC().Truncate(time.Hour)
+		b, _ := json.Marshal(protocol.FilterLogResult{Lines: 7, Flows: []protocol.FilterFlow{
+			{Hour: h, Action: "block", Interface: "vtnet1", Dir: "in", Proto: "tcp", Src: "192.168.90.20", Dst: "192.168.10.50", Port: 445, Rule: "r1", Count: 5},
+			{Hour: h, Action: "pass", Interface: "vtnet1", Dir: "in", Proto: "tcp", Src: "192.168.10.2", Dst: "192.168.10.1", Port: 443, Rule: "r2", Count: 2},
+		}})
+		return protocol.PVEResponse{Data: b}, nil
 	case protocol.OPNOpGet:
+		if req.Path == "diagnostics/firewall/list_rule_ids" {
+			return protocol.PVEResponse{Data: json.RawMessage(`{"r1":"Standaard blokkeren","r2":"LAN naar alles"}`)}, nil
+		}
 		switch req.Path {
 		case "core/firmware/upgradestatus":
 			return protocol.PVEResponse{Data: json.RawMessage(`{"status":"done"}`)}, nil
@@ -505,6 +515,20 @@ func TestChangeFlow(t *testing.T) {
 		if strings.HasPrefix(n.ID, "opnsense-backup-") {
 			t.Fatalf("back-up gemeld als oud: %+v", n)
 		}
+	}
+
+	// Fase 40: het filterlog, twee keer gelezen, telt op en krijgt namen.
+	for range 2 {
+		if err := s.CollectFlows(ctx, ida); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fv, err := s.Flows(ctx, idb, FlowQuery{Action: "block"})
+	if err != nil || len(fv.Rows) != 1 || fv.Rows[0].Count != 10 || fv.Rows[0].RuleName != "Standaard blokkeren" || fv.Rows[0].DstName != "lan-net" || fv.Blocked != 10 || fv.Passed != 0 {
+		t.Fatalf("stromen: %v %+v", err, fv)
+	}
+	if fv, _ = s.Flows(ctx, ida, FlowQuery{Q: "fw1"}); len(fv.Rows) != 1 || fv.Rows[0].Port != 443 || fv.Rows[0].SrcName == "" || len(fv.Rules) != 2 {
+		t.Fatalf("zoeken: %+v", fv)
 	}
 
 	// Drift: de backup heeft een NAT-regel meer; hostnaam, skew en Hasync

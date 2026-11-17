@@ -4296,6 +4296,48 @@ func (e GetMapParamsLayer) Valid() bool {
 	}
 }
 
+// Defines values for GetOpnsenseFlowsParamsWindow.
+const (
+	GetOpnsenseFlowsParamsWindowN1h  GetOpnsenseFlowsParamsWindow = "1h"
+	GetOpnsenseFlowsParamsWindowN24h GetOpnsenseFlowsParamsWindow = "24h"
+	GetOpnsenseFlowsParamsWindowN30d GetOpnsenseFlowsParamsWindow = "30d"
+	GetOpnsenseFlowsParamsWindowN7d  GetOpnsenseFlowsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetOpnsenseFlowsParamsWindow enum.
+func (e GetOpnsenseFlowsParamsWindow) Valid() bool {
+	switch e {
+	case GetOpnsenseFlowsParamsWindowN1h:
+		return true
+	case GetOpnsenseFlowsParamsWindowN24h:
+		return true
+	case GetOpnsenseFlowsParamsWindowN30d:
+		return true
+	case GetOpnsenseFlowsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOpnsenseFlowsParamsAction.
+const (
+	GetOpnsenseFlowsParamsActionBlock GetOpnsenseFlowsParamsAction = "block"
+	GetOpnsenseFlowsParamsActionPass  GetOpnsenseFlowsParamsAction = "pass"
+)
+
+// Valid indicates whether the value is a known member of the GetOpnsenseFlowsParamsAction enum.
+func (e GetOpnsenseFlowsParamsAction) Valid() bool {
+	switch e {
+	case GetOpnsenseFlowsParamsActionBlock:
+		return true
+	case GetOpnsenseFlowsParamsActionPass:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPublishLoginsParamsWindow.
 const (
 	GetPublishLoginsParamsWindowN1h  GetPublishLoginsParamsWindow = "1h"
@@ -15262,6 +15304,19 @@ type GetOpnsenseDiffParams struct {
 	Other *openapi_types.UUID `form:"other,omitempty" json:"other,omitempty"`
 }
 
+// GetOpnsenseFlowsParams defines parameters for GetOpnsenseFlows.
+type GetOpnsenseFlowsParams struct {
+	Window *GetOpnsenseFlowsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+	Action *GetOpnsenseFlowsParamsAction `form:"action,omitempty" json:"action,omitempty"`
+	Q      *string                       `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// GetOpnsenseFlowsParamsWindow defines parameters for GetOpnsenseFlows.
+type GetOpnsenseFlowsParamsWindow string
+
+// GetOpnsenseFlowsParamsAction defines parameters for GetOpnsenseFlows.
+type GetOpnsenseFlowsParamsAction string
+
 // GetPbsCoverageParams defines parameters for GetPbsCoverage.
 type GetPbsCoverageParams struct {
 	// Fresh 1 leest alle PBS'en opnieuw in plaats van de laatste ronde
@@ -16777,6 +16832,9 @@ type ServerInterface interface {
 	// StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
 	// (POST /opnsense/firewalls/{nodeId}/firmware)
 	StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetOpnsenseFlows Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40)
+	// (GET /opnsense/firewalls/{nodeId}/flows)
+	GetOpnsenseFlows(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseFlowsParams)
 	// SetOpnsenseKey Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
 	// (POST /opnsense/firewalls/{nodeId}/key)
 	SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -18961,6 +19019,12 @@ func (_ Unimplemented) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, 
 // StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
 // (POST /opnsense/firewalls/{nodeId}/firmware)
 func (_ Unimplemented) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseFlows Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40)
+// (GET /opnsense/firewalls/{nodeId}/flows)
+func (_ Unimplemented) GetOpnsenseFlows(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseFlowsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -28606,6 +28670,74 @@ func (siw *ServerInterfaceWrapper) StartOpnsenseFirmware(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpnsenseFlows operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseFlows(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseFlowsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseFlows(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetOpnsenseKey operation middleware
 func (siw *ServerInterfaceWrapper) SetOpnsenseKey(w http.ResponseWriter, r *http.Request) {
 
@@ -32750,6 +32882,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/firmware", wrapper.StartOpnsenseFirmware)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/flows", wrapper.GetOpnsenseFlows)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)

@@ -5081,6 +5081,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/opnsense/firewalls/{nodeId}/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40) */
+        get: operations["getOpnsenseFlows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/opnsense/firewalls/{nodeId}/drift": {
         parameters: {
             query?: never;
@@ -23907,6 +23926,34 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseFlows: {
+        parameters: {
+            query?: {
+                window?: "1h" | "24h" | "7d" | "30d";
+                action?: "block" | "pass";
+                q?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stromen, regels met hun treffers en de stand van het lezen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getOpnsenseDrift: {
