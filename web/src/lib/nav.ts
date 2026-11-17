@@ -126,6 +126,7 @@ export const navGroups: NavGroup[] = [
           { href: "/opnsense/vpn", label: "VPN", keywords: "opnsense wireguard openvpn ipsec peer tunnel" },
           { href: "/opnsense/diensten", label: "Diensten en plugins", keywords: "opnsense dienst service herstarten plugin installeren" },
           { href: "/opnsense/diagnose", label: "Diagnose", keywords: "opnsense firewalllog log staten states verbinding arp" },
+          { href: "/opnsense/ha", label: "HA en firmware", keywords: "opnsense carp onderhoudsmodus failover test firmware update upgrade drift back-up backup config.xml" },
           { href: "/opnsense/revisies", label: "Revisies", keywords: "opnsense config.xml revisie geschiedenis diff vergelijken master backup" },
         ],
       },

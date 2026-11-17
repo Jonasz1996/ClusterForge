@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
-import { api, unwrap } from "./api/client";
+import { api, getCsrfToken, unwrap } from "./api/client";
 import type { Job } from "./proxmox";
 
 // Fase 34: OPNsense-firewalls via de agent op elke firewall. Lezen gaat
@@ -264,11 +264,11 @@ export async function opnDiff(id: string, from: string, to: string, other?: stri
   ) as unknown as OpnDiff;
 }
 
-export async function opnPlan(id: string, calls: OpnCall[]): Promise<OpnPlan> {
+export async function opnPlan(id: string, calls: OpnCall[], restore?: string): Promise<OpnPlan> {
   return unwrap(
     await api.POST("/opnsense/firewalls/{nodeId}/plan", {
       params: { path: { nodeId: id } },
-      body: { calls },
+      body: { calls, restore },
     }),
   ) as unknown as OpnPlan;
 }
@@ -285,6 +285,8 @@ function useAfterJob() {
 
 export type OpnChangeInput = {
   calls: OpnCall[];
+  // restore zet een revisie uit /conf/backup terug in plaats van calls.
+  restore?: string;
   confirm_within?: number;
   confirm?: string;
   password?: string;
@@ -344,4 +346,128 @@ export function revisionTime(t: number) {
     dateStyle: "short",
     timeStyle: "medium",
   }).format(new Date(t * 1000));
+}
+
+// --- HA en firmware (M5) -----------------------------------------------------
+
+export type OpnConfirm = { confirm?: string; password?: string; totp_code?: string };
+
+// authBody maakt van wat je intikte een code (6 cijfers) of een wachtwoord.
+export function authBody(code: string): { password?: string; totp_code?: string } {
+  if (!code) return {};
+  return /^\d{6}$/.test(code) ? { totp_code: code, password: code } : { password: code };
+}
+
+// useOpnCarp: id is de firewall voor de onderhoudsmodus; bij de
+// failovertest een node van het cluster (de server kiest de master).
+export function useOpnCarp() {
+  const after = useAfterJob();
+  return useMutation({
+    mutationFn: async ({ id, ...b }: { id: string; action: "maintenance_on" | "maintenance_off" | "failover_test" } & OpnConfirm) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/carp", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ) as unknown as Job,
+    onSuccess: after,
+  });
+}
+
+export function useOpnFirmware(id: string) {
+  const after = useAfterJob();
+  return useMutation({
+    mutationFn: async (b: { mode: "check" | "update" | "upgrade" } & OpnConfirm) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/firmware", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ) as unknown as Job,
+    onSuccess: after,
+  });
+}
+
+export type OpnDrift = {
+  master: string;
+  rows: { node_id: string; hostname: string; sections: string[]; error?: string }[];
+  sync_items: string[];
+  own: string[];
+};
+
+export function useOpnDrift(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "drift", id],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/opnsense/firewalls/{nodeId}/drift", {
+          params: { path: { nodeId: id! } },
+        }),
+      ) as unknown as OpnDrift,
+    enabled: !!id,
+    refetchInterval: 120_000,
+    retry: false,
+  });
+}
+
+export type OpnBackup = {
+  id: string;
+  node_id: string;
+  taken_at: string;
+  reason: string;
+  sha256: string;
+  size: number;
+  version?: string;
+};
+
+export function useOpnBackups(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "backups", id],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/opnsense/firewalls/{nodeId}/backups", {
+          params: { path: { nodeId: id! } },
+        }),
+      ) as unknown as { items: OpnBackup[]; keep: number },
+    enabled: !!id,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useOpnBackupNow(id: string) {
+  const after = useAfterJob();
+  return useMutation({
+    mutationFn: async () =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/backups", {
+          params: { path: { nodeId: id } },
+        }),
+      ) as unknown as Job,
+    onSuccess: after,
+  });
+}
+
+// downloadOpnBackup haalt de config.xml (met geheimen) en laat de browser
+// hem bewaren; altijd met code of wachtwoord.
+export async function downloadOpnBackup(id: string, code: string) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  const res = await fetch(`/api/v1/opnsense/backups/${id}/download`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify(authBody(code)),
+  });
+  if (!res.ok) {
+    const e = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(e?.message ?? `Downloaden mislukt (${res.status})`);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "config.xml";
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5_000);
 }

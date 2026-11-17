@@ -6,6 +6,7 @@ import { QueryState } from "@/components/inventory/bits";
 import { Modal } from "@/components/Modal";
 import { Alert, Badge, Button, Field, Input, Select } from "@/components/ui";
 import {
+  authBody,
   OPNSENSE_PROTOCOL,
   opnPlan,
   roleLabel,
@@ -105,12 +106,15 @@ export function JobBanner({ result }: { result: { kind: "success"; job: Job } | 
 export function ChangeDialog({
   nodeId,
   calls,
+  restore,
   before,
   onClose,
   onDone,
 }: {
   nodeId: string;
   calls: OpnCall[];
+  // restore zet een revisie terug in plaats van calls.
+  restore?: string;
   // before toont oud → nieuw per veld.
   before?: ReactNode;
   onClose: () => void;
@@ -124,19 +128,20 @@ export function ChangeDialog({
   const change = useOpnChange(nodeId);
   useEffect(() => {
     let live = true;
-    opnPlan(nodeId, calls)
+    opnPlan(nodeId, calls, restore)
       .then((p) => live && setPlan(p))
       .catch((e) => live && setError(e instanceof Error ? e.message : "Voorcontrole mislukt"));
     return () => {
       live = false;
     };
-  }, [nodeId, calls]);
+  }, [nodeId, calls, restore]);
   const start = async () => {
     setError(null);
     try {
-      const auth = plan?.prod ? (/^\d{6}$/.test(code) ? { totp_code: code, password: code } : { password: code }) : {};
+      const auth = plan?.prod ? authBody(code) : {};
       const job = await change.mutateAsync({
         calls,
+        restore,
         confirm_within: Number(within),
         confirm: typed || undefined,
         ...auth,
@@ -148,7 +153,7 @@ export function ChangeDialog({
   };
   const ready = plan?.ok && (!plan.confirm || typed.trim() === plan.confirm) && (!plan.prod || code !== "");
   return (
-    <Modal title="Wijziging op de firewall" onClose={onClose} wide>
+    <Modal title={restore ? "Revisie terugzetten" : "Wijziging op de firewall"} onClose={onClose} wide>
       <div className="space-y-4 text-sm">
         {error && <Alert>{error}</Alert>}
         {!plan && !error && <p className="text-slate-500">Voorcontrole…</p>}
@@ -248,4 +253,73 @@ export function ago(t: number) {
   if (s < 5400) return `${Math.round(s / 60)} min geleden`;
   if (s < 129600) return `${Math.round(s / 3600)} u geleden`;
   return `${Math.round(s / 86400)} d geleden`;
+}
+
+// ActionDialog bevestigt een taak die geen configuratie wijzigt maar wel het
+// verkeer raakt (onderhoudsmodus, failovertest, firmware): eventueel de
+// naam van het cluster overtikken, en op prod een code of wachtwoord.
+export function ActionDialog({
+  title,
+  children,
+  confirm,
+  prod,
+  start,
+  label,
+  onClose,
+  onDone,
+}: {
+  title: string;
+  children: ReactNode;
+  // confirm is wat je overtikt; leeg als het niet hoeft.
+  confirm?: string;
+  prod: boolean;
+  start: (a: { confirm?: string; password?: string; totp_code?: string }) => Promise<Job>;
+  label: string;
+  onClose: () => void;
+  onDone: (job: Job) => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ready = (!confirm || typed.trim() === confirm) && (!prod || code !== "") && !busy;
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="space-y-4 text-sm">
+        {error && <Alert>{error}</Alert>}
+        <div className="space-y-2 text-slate-600 dark:text-slate-300">{children}</div>
+        {confirm && (
+          <Field label={`Tik ${confirm} over`} htmlFor="opn-act-typed">
+            <Input id="opn-act-typed" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+          </Field>
+        )}
+        {prod && (
+          <Field label="Code van je tweestapsverificatie (of wachtwoord)" htmlFor="opn-act-code">
+            <Input id="opn-act-code" type="password" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" />
+          </Field>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Annuleren
+          </Button>
+          <Button
+            disabled={!ready}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                onDone(await start({ confirm: typed || undefined, ...(prod ? authBody(code) : {}) }));
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Starten mislukt");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {label}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
 }

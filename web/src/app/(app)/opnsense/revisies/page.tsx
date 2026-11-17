@@ -2,10 +2,13 @@
 
 import { Suspense, useState } from "react";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
-import { ClusterStrip, OpnGate } from "@/components/opnsense/bits";
+import { ChangeDialog, ClusterStrip, JobBanner, OpnGate } from "@/components/opnsense/bits";
 import { Alert, Button, Card, PageHeader, Select } from "@/components/ui";
 import { useMe } from "@/lib/auth";
-import { opnDiff, readNode, revisionTime, useOpnRevisions, type OpnCluster, type OpnDiff } from "@/lib/opnsense";
+import { opnDiff, readNode, revisionTime, useOpnRevisions, type OpnCall, type OpnCluster, type OpnDiff } from "@/lib/opnsense";
+import type { Job } from "@/lib/proxmox";
+
+const noCalls: OpnCall[] = [];
 
 export default function OpnRevisionsPage() {
   return (
@@ -33,6 +36,11 @@ function Revisions({ c }: { c: OpnCluster }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const others = c.nodes.filter((n) => n.node_id !== nodeId && !n.why);
+  // Terugzetten gaat altijd op de master (en daarna de sync), dus alleen
+  // met de revisies van de master.
+  const canRestore = admin && (c.nodes.length === 1 || c.master === nodeId);
+  const [restore, setRestore] = useState<string | null>(null);
+  const [result, setResult] = useState<{ kind: "success"; job: Job } | null>(null);
 
   const run = async (from: string, to: string, other?: string) => {
     setBusy(true);
@@ -51,6 +59,25 @@ function Revisions({ c }: { c: OpnCluster }) {
   return (
     <div className="space-y-6">
       <ClusterStrip c={c} />
+      <JobBanner result={result} />
+      {restore && (
+        <ChangeDialog
+          nodeId={nodeId}
+          calls={noCalls}
+          restore={restore}
+          before={
+            <p className="mt-2 text-slate-600 dark:text-slate-300">
+              De hele configuratie gaat terug naar die revisie, daarna herlaadt de firewall alle diensten.
+              {c.ha ? " De backup krijgt ze via de sync." : ""}
+            </p>
+          }
+          onClose={() => setRestore(null)}
+          onDone={(job) => {
+            setRestore(null);
+            setResult({ kind: "success", job });
+          }}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {c.nodes.length > 1 && (
           <>
@@ -129,6 +156,7 @@ function Revisions({ c }: { c: OpnCluster }) {
                   <th className={thClass}>Tijd</th>
                   <th className={thClass}>Door</th>
                   <th className={thClass}>Omschrijving</th>
+                  {canRestore && <th className={thClass} />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -149,6 +177,15 @@ function Revisions({ c }: { c: OpnCluster }) {
                     </td>
                     <td className={tdClass}>{r.user || "–"}</td>
                     <td className={tdClass}>{r.description || "–"}</td>
+                    {canRestore && (
+                      <td className={`${tdClass} text-xs whitespace-nowrap`}>
+                        {r.file !== "current" && (
+                          <button type="button" className="text-slate-500 underline" onClick={() => setRestore(r.file)}>
+                            terugzetten
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

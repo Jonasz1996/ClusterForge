@@ -270,3 +270,17 @@ GUI niet kan aanbieden.
   firewalllog live, pf-staten zoeken en wissen (`query_*` als
   leesverzoek), ARP-tabel. De koppeling met Logs (fase 23) en SOC (fase
   25) komt in M6.
+- **M5 (HA en firmware)**: tab HA en firmware. CARP-onderhoudsmodus per
+  firewall (`opn_carp`: blijvende vlag + demotion; aanzetten wacht tot de
+  andere firewall MASTER is en de VIP's antwoorden, anders meteen weer
+  uit); failovertest (overnemen, teruggeven, tijden meten). Firmware
+  (`opn_firmware` check/update/upgrade, taak `opnsense.firmware`): eerst
+  elke backup, dan de master in onderhoudsmodus, dan onderhoudsmodus uit;
+  stopt bij de eerste fout zonder de master aan te raken. Drift per
+  onderdeel van config.xml (interfaces, system, HA en CARP-skew tellen niet
+  mee). Back-ups in ClusterForge (migratie 00105, tabel opnsense_backups):
+  volledige config.xml versleuteld met de masterkey, elke dag en na elke
+  wijziging, ongewijzigd geeft geen nieuwe rij, 30 per firewall; downloaden
+  altijd met code of wachtwoord en in het logboek. Een revisie terugzetten
+  (`OPNChange.Restore`) gaat als gewone veilige wijziging op de master
+  (overtikken, terugdraaitimer, proeven, sync).
