@@ -210,7 +210,8 @@ export const navGroups: NavGroup[] = [
       {
         href: "/truenas",
         label: "TrueNAS",
-        keywords: "truenas nas opslag zfs pool scrub schijf smart temperatuur melding alert",
+        keywords:
+          "truenas nas opslag zfs pool scrub schijf smart temperatuur melding alert",
         tabs: [
           { href: "/truenas", label: "Overzicht" },
           {
@@ -221,12 +222,14 @@ export const navGroups: NavGroup[] = [
           {
             href: "/truenas/bescherming",
             label: "Bescherming",
-            keywords: "truenas snapshot-taak cloud sync rsync replicatie back-up",
+            keywords:
+              "truenas snapshot-taak cloud sync rsync replicatie back-up",
           },
           {
             href: "/truenas/shares",
             label: "Shares",
-            keywords: "truenas smb nfs share dienst service ssh starten stoppen",
+            keywords:
+              "truenas smb nfs share dienst service ssh starten stoppen",
           },
         ],
       },
@@ -412,6 +415,12 @@ export const navGroups: NavGroup[] = [
         href: "/soc",
         label: "SOC",
         keywords: "beveiliging dreiging aanvallers security dashboard score",
+      },
+      {
+        href: "/aiverslag",
+        label: "AI-verslag",
+        keywords:
+          "aiverslag ai verslag opnsense dreigingsniveau incident alarm analyse ollama bevinding fix lokaleai",
       },
       { href: "/firewall", label: "Firewall", keywords: "ufw poorten" },
       { href: "/crowdsec", label: "CrowdSec", keywords: "bans bouncer alerts" },
