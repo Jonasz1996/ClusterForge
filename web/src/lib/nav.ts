@@ -365,6 +365,16 @@ export const navGroups: NavGroup[] = [
             label: "Authentik",
             keywords: "authentik sso applicatie provider outpost forward auth",
           },
+          {
+            href: "/publicatie/verkeer",
+            label: "Verkeer",
+            keywords: "npm logs verkeer aanvragen bezoekers ip crowdsec ban verbindingen 5xx",
+          },
+          {
+            href: "/publicatie/logins",
+            label: "Logins",
+            keywords: "authentik logins mislukte aanmeldingen brute force gebruikers",
+          },
         ],
       },
       {

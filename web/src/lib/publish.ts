@@ -331,3 +331,90 @@ export function fullName(label: string, domain: string) {
   const l = label.trim().toLowerCase().replace(/\.$/, "");
   return l.includes(".") ? l : `${l}.${domain}`;
 }
+
+// --- Fase 39: verkeer van NPM en logins van Authentik ---
+
+export type TrafficWindow = "1h" | "24h" | "7d";
+
+export type PublishBan = {
+  scenario: string;
+  origin: string;
+  since: string;
+  until: string;
+  country?: string;
+  as?: string;
+  nodes: string[];
+};
+
+export type PublishFeed = { source: string; detail?: string; at: string; ok_at?: string; error?: string; lines: number };
+
+export type TrafficView = {
+  window: TrafficWindow;
+  from: string;
+  totals: {
+    requests: number;
+    visitors: number;
+    s4xx: number;
+    s5xx: number;
+    denied: number;
+    bytes: number;
+    connections: number;
+    connections_at?: string;
+  };
+  series: { t: string; requests: number; s4xx: number; s5xx: number }[];
+  hosts: { host_id: number; domain: string; requests: number; visitors: number; s4xx: number; s5xx: number; denied: number; bytes: number; last?: string }[];
+  ips: {
+    ip: string;
+    requests: number;
+    s4xx: number;
+    s5xx: number;
+    denied: number;
+    bytes: number;
+    hosts: string[];
+    first: string;
+    last: string;
+    ban?: PublishBan;
+    after_ban: number;
+    failed_logins: number;
+    suspicious: boolean;
+    why?: string;
+  }[];
+  connections: { t: string; count: number }[];
+  compare: { banned_seen: number; banned_passing: number; suspicious: number; active_bans: number };
+  feeds: PublishFeed[];
+};
+
+export type LoginsView = {
+  window: TrafficWindow;
+  from: string;
+  totals: { logins: number; failed: number; users: number; failed_ips: number; failed_ips_not_banned: number; app_authorizations: number };
+  series: { t: string; logins: number; failed: number }[];
+  users: { username: string; logins: number; failed: number; last?: string; last_ip?: string }[];
+  failed_ips: { ip: string; failed: number; usernames: string[]; last: string; country?: string; ban?: PublishBan; requests: number }[];
+  apps: { app: string; count: number; users: number }[];
+  recent: { created: string; action: string; username: string; ip: string; app?: string; country?: string; city?: string; reason?: string; banned: boolean }[];
+  feed?: PublishFeed;
+};
+
+export function usePublishTraffic(window: TrafficWindow) {
+  return useQuery({
+    queryKey: ["publish", "traffic", window],
+    queryFn: async () => unwrap(await api.GET("/publish/traffic", { params: { query: { window } } })) as unknown as TrafficView,
+    refetchInterval: 60_000,
+  });
+}
+
+export function usePublishLogins(window: TrafficWindow) {
+  return useQuery({
+    queryKey: ["publish", "logins", window],
+    queryFn: async () => unwrap(await api.GET("/publish/logins", { params: { query: { window } } })) as unknown as LoginsView,
+    refetchInterval: 60_000,
+  });
+}
+
+export const actionLabel: Record<string, string> = {
+  login: "aangemeld",
+  login_failed: "mislukt",
+  logout: "afgemeld",
+  authorize_application: "app geopend",
+};
