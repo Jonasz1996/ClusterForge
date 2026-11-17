@@ -88,6 +88,38 @@ provider + outpost + forward auth in NPM), met controle achteraf en terugdraaien
   lokale HTTP-aanroep naar 127.0.0.1 met poort uit een vaste lijst) en
   `svc.probe` (zie M1). Oude agents: knop grijs met "agent bijwerken".
 
+## NPM: database én config samen (aandachtspunt van Jonas)
+
+Jonas (17/11): bij NPM volstaat het niet om de config-bestanden aan te passen,
+de SQLite-database moet mee, en dat is lastig. Daarom:
+
+- **ClusterForge schrijft nooit zelf** in `database.sqlite` of in
+  `/data/nginx/proxy_host/*.conf`. Alle wijzigingen gaan via de **NPM-API**: die
+  schrijft de rij in de database, genereert de nginx-config, doet `nginx -t`
+  en herlaadt. Zo blijven DB en config altijd bij elkaar horen (een losse
+  config wordt bij de volgende bewerking in de NPM-GUI of bij herstart toch
+  weer overschreven vanuit de DB).
+- **Vooraf**: `npm-ctl.sh snapshot` (sqlite3 `.backup` + `integrity_check`
+  + `data/` met de configs + `letsencrypt/`, met SHA256SUMS). Dat is ook het
+  terugzetpunt.
+- **Achteraf, per wijziging** (agent op de VIP-node):
+  1. host teruglezen via de API en velden vergelijken met wat gevraagd was,
+  2. `data/nginx/proxy_host/<id>.conf` bestaat en bevat de domeinnaam en het
+     doel, en er is geen `<id>.conf.err` (zo meldt NPM een mislukte config),
+  3. `nginx -t` in de container,
+  4. `PRAGMA integrity_check` op een kopie van de DB,
+  5. de HTTPS-controle op het subdomein.
+  Eén van die stappen faalt → terugzetten (eerst via de API; lukt dat niet,
+  dan de snapshot met `npm-ctl.sh` en NPM herstarten), taak rood.
+- **Daarna meteen de sync** naar de andere node(s), zodat een failover nooit
+  een oude DB met nieuwe configs (of omgekeerd) oplevert; de sync kopieert
+  DB, `data/` en `letsencrypt/` als één geheel (fase 11).
+- **Testen**: in CI een echte NPM-container (`jc21/nginx-proxy-manager`,
+  zelfde versie als bij Jonas) met een kopie-achtige DB van ~100 hosts:
+  aanmaken, wijzigen, Authentik-snippet zetten en weghalen, terugdraaien na
+  een opzettelijk foute wijziging, en na elke stap de vijf controles. Pas als
+  dat groen is, komt M3 bij Jonas.
+
 ## Mijlpalen
 
 ### M0 – Instellingen → Domeinen en koppelingen
@@ -217,7 +249,7 @@ provider + outpost + forward auth in NPM), met controle achteraf en terugdraaien
 - Alles wat schrijft komt in het auditlog met voor- en na-waarde (geheimen
   gemaskeerd).
 
-## Vragen aan Jonas (anders ga ik uit van het voorstel)
+## Vragen aan Jonas (beantwoord 17/11: alle drie volgens voorstel)
 
 1. **"Zoals bij dashboard"**: bedoel je dat subdomeinen gaan als
    `<naam>.jbogaert.be`, met de naam van de dienst als voorstel en
