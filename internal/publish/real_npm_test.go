@@ -228,8 +228,9 @@ func TestRealNPM(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewService(pool, ev, log, runner, agentBus{a}, box)
-	zero := time.Duration(0)
-	s.SettleTime = &zero
+	// NPM herlaadt nginx pas na zijn antwoord; zonder wachttijd antwoordt
+	// soms nog de oude config (update naar een dichte poort gaf dan HTTP 200).
+	// Dezelfde wachttijd als in productie.
 
 	npmNode := seedNode(t, pool, "npm1", "127.0.0.1")
 	akNode := seedNode(t, pool, "ak1", "127.0.0.1")
