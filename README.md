@@ -2086,6 +2086,7 @@ Het token gaat mee als `Authorization: Bearer cfa_…` (of `X-API-Key: cfa_…`)
 | `GET /api/dashboard/v1/clusters/<cluster>` | één cluster, op slug, id of naam; met `?strict=1` HTTP 503 zolang het cluster niet in orde is, zodat de check van een tegel vanzelf rood wordt |
 | `GET /api/dashboard/v1/clusters` | een lijst met alle clusters die het token mag zien |
 | `GET /api/dashboard/v1/` | de samenvatting (clusters gezond/verminderd/down, nodes, incidenten, updates, bans) plus de clusters |
+| `GET /api/dashboard/v1/nodes` | een lijst met alle nodes die het token mag zien, met `?cluster=<cluster>` (slug, id of naam) alleen die van één cluster; zie [Nodes](#nodes-voor-het-dashboard) |
 
 De velden zijn plat en vast, zodat de customapi-widget ze met één naam toont en niets hoeft op te tellen:
 
@@ -2105,6 +2106,28 @@ De velden zijn plat en vast, zodat de customapi-widget ze met één naam toont e
 
 De cijfers worden hoogstens elke 15 seconden opnieuw berekend; een dashboard dat elke paar seconden vraagt, belast de
 database niet. **Voorbeeld van het antwoord** op dezelfde kaart toont het antwoord per cluster, ook voor een viewer.
+
+### Nodes voor het dashboard
+
+`GET /api/dashboard/v1/nodes` geeft elke node als een vlak object, zodat een dashboard per cluster een groep en per
+node een tegel kan maken en die zelf bijhoudt. Afgebouwde nodes (lifecycle `decommissioned`) staan er niet in. Een
+token voor gekozen clusters ziet alleen de nodes van die clusters; nodes zonder cluster ziet alleen een token voor
+alle clusters. De lijst is gesorteerd op `cluster_id` (nodes zonder cluster achteraan) en dan op hostname, en komt
+uit dezelfde cache van 15 seconden. Een onbekend of onzichtbaar cluster in `?cluster=` geeft HTTP 404; een cluster
+zonder nodes een lege lijst.
+
+| Veld | Voorbeeld |
+| --- | --- |
+| `id`, `hostname` | id van de node en zijn hostname |
+| `cluster_id`, `cluster_slug`, `cluster_name` | het cluster; alle drie `null` voor een node zonder cluster |
+| `role`, `description`, `tags` | zoals ingevuld bij de node; `tags` is altijd een lijst |
+| `lifecycle`, `maintenance` | `active`, `maintenance`, `provisioning` of `draining`; `maintenance` is `true` bij onderhoud |
+| `primary_ip` | `192.168.10.181`, of `null` |
+| `status`, `status_label`, `status_reason` | `degraded`, `Verminderd`, `schijf / 92% vol` |
+| `online` | `true` als de agent binnen 90 seconden een heartbeat stuurde |
+| `updates`, `updates_security`, `reboot_required` | pakketupdates van de node, en of hij een herstart wil |
+| `proxmox` | `{"host": "pve1", "vmid": 101, "type": "lxc", "name": "db1"}` voor een VM (`qemu`) of container (`lxc`) in Proxmox, anders `null`; host, type en naam zijn leeg zolang de Proxmox-sync de gast niet kent |
+| `url` | de pagina van de node in ClusterForge |
 
 Voorbeeld voor `services.yaml` (de eigen homepage zet `token` versleuteld bij de geheimen; homepage.dev zelf
 gebruikt de header):
