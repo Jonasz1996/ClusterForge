@@ -15,12 +15,14 @@ export default function PublishServicesPage() {
   const ov = q.data;
   const [filter, setFilter] = useState("");
   const [all, setAll] = useState(false);
+  const [internal, setInternal] = useState(false);
   const [open, setOpen] = useState<PublishService | null>(null);
 
   const rows = useMemo(() => {
     const f = filter.trim().toLowerCase();
     return (ov?.services ?? [])
       .filter((s) => all || s.web)
+      .filter((s) => internal || !s.internal || s.published.length > 0)
       .filter(
         (s) =>
           !f ||
@@ -28,7 +30,7 @@ export default function PublishServicesPage() {
             .toLowerCase()
             .includes(f),
       );
-  }, [ov, filter, all]);
+  }, [ov, filter, all, internal]);
 
   return (
     <div className="space-y-6">
@@ -46,6 +48,13 @@ export default function PublishServicesPage() {
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
                 Ook poorten zonder webpagina
+              </label>
+              <label
+                className="flex items-center gap-2"
+                title="HAProxy-frontends en -statistieken, Patroni, SPICE-proxy, Tailscale, CrowdSec, NPM zelf, ... ClusterForge beheert ze gewoon verder."
+              >
+                <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} />
+                Ook interne tonen{ov.counts.internal ? ` (${ov.counts.internal})` : ""}
               </label>
             </div>
             {rows.length === 0 ? (
@@ -70,9 +79,18 @@ export default function PublishServicesPage() {
                     {rows.map((s) => (
                       <tr key={s.key}>
                         <td className={tdClass}>
-                          <div className="font-medium">{s.title || s.name}</div>
+                          <div className="font-medium">
+                            {s.title || s.name}
+                            {s.internal && (
+                              <span className="ml-2" title={s.internal_why}>
+                                <Badge tone="slate">intern</Badge>
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-500">
-                            {[s.container && s.container !== s.name ? s.container : "", s.image, s.unit].filter(Boolean).join(" · ")}
+                            {[s.container && s.container !== s.name ? s.container : "", s.image, s.unit, s.internal ? s.internal_why : ""]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </div>
                         </td>
                         <td className={tdClass}>
@@ -106,7 +124,7 @@ export default function PublishServicesPage() {
                         </td>
                         {admin && (
                           <td className={`${tdClass} text-xs whitespace-nowrap`}>
-                            {s.web && ov.npm.linked && (
+                            {s.web && ov.npm.linked && (!s.internal || internal) && (
                               <button type="button" className="text-brand-700 underline dark:text-sky-300" onClick={() => setOpen(s)}>
                                 publiceren
                               </button>

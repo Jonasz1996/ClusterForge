@@ -123,10 +123,12 @@ type Counts struct {
 	Services    int `json:"services"`
 	Web         int `json:"web"`
 	Unpublished int `json:"unpublished"`
-	Hosts       int `json:"hosts"`
-	Managed     int `json:"managed"`
-	Protected   int `json:"protected"`
-	Problems    int `json:"problems"`
+	// Internal: interne diensten die niet gepubliceerd zijn (standaard verborgen).
+	Internal  int `json:"internal"`
+	Hosts     int `json:"hosts"`
+	Managed   int `json:"managed"`
+	Protected int `json:"protected"`
+	Problems  int `json:"problems"`
 }
 
 // Notice is een melding voor Aandacht nodig.
@@ -261,6 +263,10 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 	}
 	ov.Counts = Counts{Services: len(ov.Services), Hosts: len(ov.Hosts)}
 	for _, r := range ov.Services {
+		if r.Internal && len(r.Published) == 0 {
+			ov.Counts.Internal++
+			continue
+		}
 		if r.Web {
 			ov.Counts.Web++
 			if len(r.Published) == 0 {
@@ -385,7 +391,15 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 			}
 		}
 		if !inDom && len(h.DomainNames) > 0 {
-			add("buiten_domein", "info", "niet onder %s", st.Domain)
+			if tail, fixed, ok := domainTypo(h.DomainNames[0], st.Domain); ok {
+				msg := fmt.Sprintf("%s staat onder %s, dat lijkt op %s: tikfout? Bedoeld is waarschijnlijk %s", h.DomainNames[0], tail, st.Domain, fixed)
+				if _, ok := provByHost[fixed]; ok {
+					msg += " (in Authentik staat die naam al)"
+				}
+				add("domein_tikfout", "warn", "%s", msg)
+			} else {
+				add("buiten_domein", "info", "niet onder %s", st.Domain)
+			}
 		}
 		fh := strings.ToLower(h.ForwardHost)
 		if i, ok := idx[fh+":"+strconv.Itoa(h.ForwardPort)]; ok {
@@ -519,6 +533,7 @@ func notices(ov *Overview) []Notice {
 		{"cert_verlopen", "Certificaat verlopen", true},
 		{"cert_verloopt", "Certificaat verloopt binnenkort", false},
 		{"naar_node", "Proxy host wijst naar één node in plaats van het VIP", false},
+		{"domein_tikfout", "Proxy host onder een domein dat op het hoofddomein lijkt (tikfout?)", false},
 		{"authentik_half", "Authentik half ingesteld", false},
 	} {
 		if names := group(g.code); len(names) > 0 {

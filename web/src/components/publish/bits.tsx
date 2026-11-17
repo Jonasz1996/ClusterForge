@@ -54,7 +54,8 @@ export function StatusBar({ ov, admin }: { ov: PublishOverview; admin: boolean }
           Hoofddomein <span className="font-medium">{ov.settings.domain}</span>
         </span>
         <span className="text-slate-600 dark:text-slate-300">
-          {c.web} webdiensten, {c.unpublished} niet gepubliceerd · {c.hosts} proxy hosts, {c.managed} beheerd, {c.protected} achter Authentik
+          {c.web} webdiensten, {c.unpublished} niet gepubliceerd{c.internal ? ` (${c.internal} intern verborgen)` : ""} · {c.hosts} proxy hosts,{" "}
+          {c.managed} beheerd, {c.protected} achter Authentik
         </span>
         {admin && (
           <Button variant="secondary" className="ml-auto" disabled={refresh.isPending} onClick={() => refresh.mutate()}>

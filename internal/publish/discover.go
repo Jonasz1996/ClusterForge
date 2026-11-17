@@ -93,6 +93,10 @@ type ServiceRow struct {
 	Published []PublishedRef `json:"published"`
 	// AuthentikDefault: nieuwe publicatie standaard achter Authentik.
 	AuthentikDefault bool `json:"authentik_default"`
+	// Internal: beheerpoort of intern onderdeel (HAProxy, Patroni, ...):
+	// standaard niet te publiceren en geen tegel op de homepage.
+	Internal    bool   `json:"internal,omitempty"`
+	InternalWhy string `json:"internal_why,omitempty"`
 }
 
 // NodeShort is een node bij een dienst.
@@ -262,6 +266,9 @@ func buildServices(nodes []nodeRow, clusters []clusterRow, found map[uuid.UUID]n
 		r.Label = SuggestLabel(r.Container, r.Unit, r.ClusterName, r.Name)
 		r.AuthentikDefault = d.Authentik && !skipAuthentik(d, r.Container, r.Image, r.Unit, r.ClusterName, r.Title, r.Label)
 		r.Published = []PublishedRef{}
+		if why := internalReason(r); why != "" {
+			r.Internal, r.InternalWhy = true, why
+		}
 		out = append(out, r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {

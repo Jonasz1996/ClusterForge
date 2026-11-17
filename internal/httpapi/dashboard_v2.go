@@ -802,7 +802,7 @@ func (s *Server) dashV2Publish(w http.ResponseWriter, r *http.Request) {
 	}
 	good := ov.Counts.Problems == 0 && ov.NPM.Error == "" && ov.Authentik.Error == ""
 	writeJSON(w, strictCode(r, good), map[string]any{
-		"ok": good, "services": ov.Counts.Services, "web": ov.Counts.Web, "unpublished": ov.Counts.Unpublished,
+		"ok": good, "services": ov.Counts.Services, "web": ov.Counts.Web, "unpublished": ov.Counts.Unpublished, "internal": ov.Counts.Internal,
 		"hosts": ov.Counts.Hosts, "managed": ov.Counts.Managed, "protected": ov.Counts.Protected, "problems": ov.Counts.Problems,
 		"certificates_expiring": certSoon, "npm_linked": ov.NPM.Linked, "npm_version": ov.NPM.Version, "npm_error": ov.NPM.Error,
 		"authentik_linked": ov.Authentik.Linked, "authentik_version": ov.Authentik.Version, "authentik_error": ov.Authentik.Error,
