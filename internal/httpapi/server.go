@@ -135,6 +135,8 @@ type Server struct {
 	throttle *events.Throttle
 	// dashCache houdt de cijfers van de dashboard-API even bij.
 	dashCache dashboardCache
+	// homeCache houdt de apps van de homepage-API v2 even bij (fase 36).
+	homeCache homeAppsCache
 }
 
 var _ gen.ServerInterface = (*Server)(nil)
@@ -310,6 +312,10 @@ func (s *Server) Handler() http.Handler {
 		api.Use(middleware.NoCache)
 		// De console (fase 26 M7) is een websocket, buiten de OpenAPI.
 		api.With(s.requireSession).Get("/pve/console/{session}", s.pveConsoleSocket)
+		// Homepage-apps (fase 36), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/home-apps", s.listHomeApps)
+		api.With(s.requireSession).Post("/home-apps/override", s.saveHomeAppOverride)
+		api.With(s.requireSession).Post("/home-apps/doubt", s.decideHomeAppDoubt)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},
@@ -327,6 +333,12 @@ func (s *Server) Handler() http.Handler {
 	r.Route(dashboardBase, func(api chi.Router) {
 		api.Use(middleware.NoCache)
 		s.dashboardRoutes(api)
+	})
+	// Zonder middleware.NoCache: die wist If-None-Match, en de homepage
+	// vraagt de indeling met een ETag. Cache-Control: no-store zet
+	// requireAPIToken zelf.
+	r.Route(dashboardV2Base, func(api chi.Router) {
+		s.dashboardV2Routes(api)
 	})
 	r.Get("/install/agent.sh", agentdist.InstallScript)
 	r.Get("/install/golden-image.sh", agentdist.GoldenImageScript)
