@@ -22,6 +22,8 @@ import (
 // StorageAdder zet een storage in een Proxmox-cluster (internal/pvehost).
 type StorageAdder interface {
 	AddStorage(ctx context.Context, actor events.Actor, datacenter string, params map[string]string) (store.Job, error)
+	// StorageExists zegt of het cluster al een storage met die naam heeft.
+	StorageExists(ctx context.Context, datacenter, name string) (bool, error)
 }
 
 // LinkInput is wat de GUI vraagt.
@@ -83,7 +85,17 @@ func (s *Service) Link(ctx context.Context, actor events.Actor, id uuid.UUID, in
 		slug = "pve"
 	}
 	user := "pve-" + slug + "@pbs"
-	token := "clusterforge"
+	// Eén token per storage: een tweede koppeling (andere datastore) laat
+	// het token van de eerste storage met rust.
+	token := in.Storage
+
+	// 0. De naam mag in Proxmox nog niet bestaan, anders vernieuwen we een
+	// token dat een bestaande storage gebruikt en mislukt het aanmaken.
+	if exists, err := s.Hosts.StorageExists(ctx, in.Datacenter, in.Storage); err != nil {
+		return store.Job{}, fmt.Errorf("de storages van het cluster lezen mislukte: %w", err)
+	} else if exists {
+		return store.Job{}, ValidationError{fmt.Sprintf("het cluster heeft al een storage %q; kies een andere naam", in.Storage)}
+	}
 
 	// 1. De fingerprint van de PBS.
 	var st NodeStatus
@@ -123,13 +135,17 @@ func (s *Service) Link(ctx context.Context, actor events.Actor, id uuid.UUID, in
 	if err != nil {
 		return store.Job{}, fmt.Errorf("token maken mislukte: %w", err)
 	}
-	// 3. Rechten, alleen op de datastore (of de namespace).
+	// 3. Rechten, alleen op de datastore (of de namespace). Op PBS heeft
+	// een token hoogstens de rechten van zijn gebruiker, dus beide krijgen
+	// ze.
 	aclPath := "/datastore/" + in.Datastore
 	if in.Namespace != "" {
 		aclPath += "/" + in.Namespace
 	}
-	if _, err := s.quietCall(ctx, id, "set", "/access/acl", map[string]string{"path": aclPath, "role": role, "auth-id": created.FullTokenID, "propagate": "1"}); err != nil && !strings.Contains(err.Error(), "PBS gaf geen antwoord") {
-		return store.Job{}, fmt.Errorf("rechten geven mislukte: %w", err)
+	for _, who := range []string{user, created.FullTokenID} {
+		if _, err := s.quietCall(ctx, id, "set", "/access/acl", map[string]string{"path": aclPath, "role": role, "auth-id": who, "propagate": "1"}); err != nil && !strings.Contains(err.Error(), "PBS gaf geen antwoord") {
+			return store.Job{}, fmt.Errorf("rechten geven aan %s mislukte: %w", who, err)
+		}
 	}
 	// 4. De storage in Proxmox.
 	params := map[string]string{

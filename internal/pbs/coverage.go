@@ -211,7 +211,13 @@ func (s *Service) Coverage(ctx context.Context) (Coverage, error) {
 	}
 	wg.Wait()
 	for i := range cov.Nodes {
-		judge(&cov.Nodes[i], now)
+		n := &cov.Nodes[i]
+		judge(n, now)
+		// Niets gevonden terwijl een PBS of datastore niet te lezen was:
+		// misschien staat de back-up net daar. Oranje, niet rood.
+		if n.LastBackup == 0 && len(cov.Errors) > 0 {
+			n.State, n.Why = "warn", "geen back-up gevonden, maar niet elke PBS of datastore was te lezen"
+		}
 	}
 	sort.SliceStable(cov.Nodes, func(i, j int) bool {
 		a, b := cov.Nodes[i], cov.Nodes[j]

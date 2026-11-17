@@ -410,3 +410,19 @@ func (s *Service) openSealed(p *params) error {
 func (s *Service) AddStorage(ctx context.Context, actor events.Actor, datacenter string, params map[string]string) (store.Job, error) {
 	return s.StartCall(ctx, actor, Call{Datacenter: datacenter, Method: "create", Path: "/storage", Params: params})
 }
+
+// StorageExists zegt of het cluster al een storage met die naam heeft.
+func (s *Service) StorageExists(ctx context.Context, datacenter, name string) (bool, error) {
+	var list []struct {
+		Storage string `json:"storage"`
+	}
+	if err := s.GetInto(ctx, datacenter, "/storage", nil, &list); err != nil {
+		return false, err
+	}
+	for _, st := range list {
+		if st.Storage == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}

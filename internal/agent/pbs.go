@@ -126,6 +126,13 @@ func (h pveHost) pbsGet(ctx context.Context, path string, params map[string]stri
 // Een UPID van PBS: UPID:node:pid:pstart:taskid:starttime:type:id:user:
 var pbsUPIDRe = regexp.MustCompile(`UPID:[A-Za-z0-9-]+:[0-9A-F]{8}:[0-9A-F]{8,16}:[0-9A-F]{8,16}:[0-9A-F]{8}:[a-z0-9_-]+:[^:\s"]*:[^:\s"]+:`)
 
+// pbsFindUPID haalt de UPID uit de uitvoer. In JSON staat een backslash
+// dubbel (een datastore "backup-1" wordt "backup\\x2d1" in de UPID); die
+// maken we weer enkel, anders bestaat het takenpad niet.
+func pbsFindUPID(text string) string {
+	return strings.ReplaceAll(pbsUPIDRe.FindString(text), `\\`, `\`)
+}
+
 // pbsAPI voert een aanroep uit en wacht op de taak die PBS startte.
 func (r *RunExecutor) pbsAPI(ctx context.Context, dir string, c *protocol.PVEAPICall, out io.Writer, st *protocol.RunStatus) (int, error) {
 	defer r.forgetSecrets(dir, c)
@@ -167,7 +174,7 @@ func (r *RunExecutor) pbsAPI(ctx context.Context, dir string, c *protocol.PVEAPI
 	if last := []byte(strings.TrimSpace(lines[len(lines)-1])); len(last) > 0 && len(last) <= 256<<10 && json.Valid(last) {
 		res.Data = last
 	}
-	upid := pbsUPIDRe.FindString(text)
+	upid := pbsFindUPID(text)
 	if upid == "" {
 		return 0, nil
 	}

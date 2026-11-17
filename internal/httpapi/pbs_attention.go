@@ -32,7 +32,8 @@ func (s *Server) pbsAttention(add func(id string, tone gen.AttentionItemTone, ti
 			add("pbs-amber-"+id, gen.AttentionItemToneAmber, "Backup Server "+sum.Server.Hostname+": "+plural(len(warn), "waarschuwing", "waarschuwingen"), strings.Join(warn, " · "), href, len(warn))
 		}
 	}
-	if cov == nil {
+	// Zonder PBS is "geen back-up op PBS" geen nieuws: niets melden.
+	if cov == nil || len(sums) == 0 {
 		return
 	}
 	// Alleen nodes in een cluster: prod rood, de rest oranje.

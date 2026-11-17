@@ -49,3 +49,11 @@ func TestPBSUPID(t *testing.T) {
 		t.Fatalf("upid %q", got)
 	}
 }
+
+func TestPBSFindUPIDEscaped(t *testing.T) {
+	out := `"UPID:pbs1:000012AB:0001A2B3:00000003:65F0A1B2:garbage_collection:backup\\x2d1:root@pam:"`
+	want := `UPID:pbs1:000012AB:0001A2B3:00000003:65F0A1B2:garbage_collection:backup\x2d1:root@pam:`
+	if got := pbsFindUPID(out); got != want {
+		t.Fatalf("upid %q, verwacht %q", got, want)
+	}
+}
