@@ -248,3 +248,10 @@ GUI niet kan aanbieden.
   Sync nu, sleutel plakken), Regels en aliassen (omschrijving van een alias
   veilig wijzigen), NAT, Revisies (twee revisies of master tegenover
   backup vergelijken).
+- **M2 (regels en NAT)**: allowlist uitgebreid met firewallregels
+  (`firewall/filter`, ook verplaatsen), port forwards (`d_nat`), uitgaande
+  NAT, 1:1 en NPT (toevoegen, wijzigen, aan/uit, verwijderen, daarna
+  `apply`), en aliassen volledig. Alles in filter en NAT is niveau
+  "toegang": clusternaam overtikken. Het formulier stuurt alleen de velden
+  die veranderden en toont oud → nieuw. Schema's hebben in OPNsense nog
+  geen MVC-API; die volgen als ze er zijn.

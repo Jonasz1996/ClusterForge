@@ -58,7 +58,60 @@ func field(body map[string]any, root, key string) string {
 	return fmt.Sprint(m[key])
 }
 
-var rules = []*rule{
+// Velden van firewall- en NAT-regels verschillen per versie; de wortel
+// ("rule") en het pad houden ze binnen dat onderdeel.
+const ruleKey = `[a-z][a-z0-9_-]{0,40}`
+
+func ruleTitle(what, verb string) func(map[string]string, map[string]any) string {
+	return func(_ map[string]string, b map[string]any) string {
+		d := field(b, "rule", "description")
+		if d == "" || d == "<nil>" {
+			d = field(b, "rule", "descr")
+		}
+		if d != "" && d != "<nil>" {
+			return what + " \u201c" + d + "\u201d " + verb
+		}
+		return what + " " + verb
+	}
+}
+
+func toggleTitle(what string) func(map[string]string, map[string]any) string {
+	return func(m map[string]string, _ map[string]any) string {
+		switch m["on"] {
+		case "1":
+			return what + " aanzetten"
+		case "0":
+			return what + " uitzetten"
+		}
+		return what + " aan/uit"
+	}
+}
+
+// natRules zijn de regels voor één soort regels (filter, d_nat ...): elk
+// raakt mogelijk de toegang.
+func natRules(ctrl, what string) []*rule {
+	apply := "firewall/" + ctrl + "/apply"
+	return []*rule{
+		rl(`firewall/`+ctrl+`/addRule`, "rule", ruleKey, apply, LevelAccess, ruleTitle(what, "toevoegen")),
+		rl(`firewall/`+ctrl+`/setRule/`+segUUID, "rule", ruleKey, apply, LevelAccess, ruleTitle(what, "wijzigen")),
+		rl(`firewall/`+ctrl+`/delRule/`+segUUID, "", "", apply, LevelAccess,
+			func(map[string]string, map[string]any) string { return what + " verwijderen" }),
+		rl(`firewall/`+ctrl+`/toggleRule/`+segUUID+`(/(?P<on>[01]))?`, "", "", apply, LevelAccess, toggleTitle(what)),
+	}
+}
+
+var rules = append(append(append(append(append(append([]*rule{
+	rl(`firewall/filter/moveRuleBefore/`+segUUID+`/(?P<before>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`, "", "",
+		"firewall/filter/apply", LevelAccess, func(map[string]string, map[string]any) string { return "firewallregel verplaatsen" }),
+},
+	natRules("filter", "firewallregel")...),
+	natRules("d_nat", "port forward")...),
+	natRules("source_nat", "uitgaande NAT-regel")...),
+	natRules("one_to_one", "1:1-regel")...),
+	natRules("npt", "NPT-regel")...),
+	baseRules...)
+
+var baseRules = []*rule{
 	// --- Aliassen -------------------------------------------------------
 	rl(`firewall/alias/addItem`, "alias", aliasKey, "firewall/alias/reconfigure", LevelNormal,
 		func(_ map[string]string, b map[string]any) string {
@@ -73,16 +126,7 @@ var rules = []*rule{
 		}),
 	rl(`firewall/alias/delItem/`+segUUID, "", "", "firewall/alias/reconfigure", LevelNormal,
 		func(map[string]string, map[string]any) string { return "alias verwijderen" }),
-	rl(`firewall/alias/toggleItem/`+segUUID+`(/(?P<on>[01]))?`, "", "", "firewall/alias/reconfigure", LevelNormal,
-		func(m map[string]string, _ map[string]any) string {
-			switch m["on"] {
-			case "1":
-				return "alias aanzetten"
-			case "0":
-				return "alias uitzetten"
-			}
-			return "alias aan/uit"
-		}),
+	rl(`firewall/alias/toggleItem/`+segUUID+`(/(?P<on>[01]))?`, "", "", "firewall/alias/reconfigure", LevelNormal, toggleTitle("alias")),
 }
 
 // Plan is wat de server van een reeks aanroepen maakt.
@@ -178,18 +222,41 @@ func (x *rule) checkBody(c protocol.OPNCall) error {
 		if x.keys == nil || !x.keys.MatchString(k) {
 			return fmt.Errorf("veld %s mag niet bij %s", k, c.Path)
 		}
-		switch t := v.(type) {
-		case string:
-			if len(t) > 65536 {
-				return fmt.Errorf("veld %s is te lang", k)
-			}
-		case bool, float64, nil:
-		default:
-			return fmt.Errorf("veld %s moet tekst zijn", k)
+		if err := scalar(k, v, true); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+// scalar keurt een veldwaarde: tekst, getal of waar/onwaar, en bij nested
+// één niveau dieper (zoals source.network bij port forwards).
+func scalar(k string, v any, nested bool) error {
+	switch t := v.(type) {
+	case string:
+		if len(t) > 65536 {
+			return fmt.Errorf("veld %s is te lang", k)
+		}
+	case bool, float64, nil:
+	case map[string]any:
+		if !nested {
+			return fmt.Errorf("veld %s is te diep genest", k)
+		}
+		for kk, vv := range t {
+			if !subKey.MatchString(kk) {
+				return fmt.Errorf("veld %s.%s mag niet", k, kk)
+			}
+			if err := scalar(k+"."+kk, vv, false); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("veld %s moet tekst zijn", k)
+	}
+	return nil
+}
+
+var subKey = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,40}$`)
 
 // readDenied zijn API-onderdelen die een kijker niet leest: gebruikers,
 // sleutels, certificaten, back-ups en VPN-sleutels.

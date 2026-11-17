@@ -46,6 +46,20 @@ func TestCheck(t *testing.T) {
 			t.Errorf("toegelaten: %+v", bad)
 		}
 	}
+	p, err = check([]protocol.OPNCall{
+		{Path: "firewall/alias/setItem/" + aliasUUID, Body: map[string]any{"alias": map[string]any{"name": "nas", "content": "192.168.10.50"}}},
+		{Path: "firewall/filter/setRule/" + aliasUUID, Body: map[string]any{"rule": map[string]any{"action": "pass", "description": "NAS"}}},
+		{Path: "firewall/d_nat/addRule", Body: map[string]any{"rule": map[string]any{"destination": map[string]any{"port": "443"}, "descr": "web"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Level != LevelAccess || len(p.Apply) != 3 || p.Apply[0].Path != "firewall/alias/reconfigure" || p.Titles[1] != "firewallregel “NAS” wijzigen" {
+		t.Fatalf("plan M2: %+v", p)
+	}
+	if _, err := check([]protocol.OPNCall{{Path: "firewall/d_nat/addRule", Body: map[string]any{"rule": map[string]any{"a": map[string]any{"b": map[string]any{"c": "1"}}}}}}); err == nil {
+		t.Error("te diep genest toegelaten")
+	}
 	if readAllowed("auth/user/searchApiKey", true) || readAllowed("system/user/get", false) || !readAllowed("firewall/alias/searchItem", false) {
 		t.Error("readAllowed")
 	}
