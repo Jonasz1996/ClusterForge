@@ -259,7 +259,9 @@ func planAdvice(in adviceInput) []AutoItem {
 
 // --- Lezen ------------------------------------------------------------------
 
-func listenKey(proto string, port int) string { return strings.ToLower(proto) + "/" + strconv.Itoa(port) }
+func listenKey(proto string, port int) string {
+	return strings.ToLower(proto) + "/" + strconv.Itoa(port)
+}
 
 func wildcard(addr string) bool {
 	return addr == "" || addr == "*" || addr == "0.0.0.0" || addr == "::" || addr == "[::]"
