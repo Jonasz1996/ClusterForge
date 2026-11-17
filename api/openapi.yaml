@@ -4998,6 +4998,177 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /opnsense/clusters:
+    get:
+      operationId: listOpnsenseClusters
+      summary: De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/api:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseApi
+      summary: Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
+      description: Een kijker leest geen gebruikers, sleutels, certificaten, back-ups of VPN-sleutels; niemand leest API-sleutels.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: params, in: query, required: false, description: "JSON-object met velden voor een zoekopdracht", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van OPNsense onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/configctl:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseConfigctl
+      summary: Een configctl-actie die alleen leest (vaste lijst), zoals interface gateways status
+      parameters:
+        - { name: action, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: De uitvoer onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/revisions:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listOpnsenseRevisions
+      summary: De revisies van config.xml, nieuwste eerst
+      responses:
+        "200":
+          description: De revisies onder items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/diff:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseDiff
+      summary: Verschil tussen twee revisies, of tussen de huidige config van deze firewall en die van other (zonder geheimen)
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string } }
+        - { name: to, in: query, required: true, schema: { type: string } }
+        - { name: other, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/plan:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planOpnsenseChange
+      summary: Voorcontrole en plan van een wijziging (admin), zonder iets te veranderen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Plan, voorcontrole en of er een bevestiging nodig is
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/changes:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startOpnsenseChange
+      summary: Een wijziging veilig uitvoeren op de master, als taak opnsense.change (admin)
+      description: |
+        Alleen de aanroepen in internal/opnsense/policy.go. Herstelpunt en terugdraaitimer op de firewall,
+        proeven, bevestigen of terugdraaien, daarna sync naar de backup. Op prod met tweestapsverificatie
+        (totp_code) of anders het wachtwoord (password).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/sync:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: syncOpnsense
+      summary: De configuratie van de master naar de backup synchroniseren (admin)
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/key:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: setOpnsenseKey
+      summary: Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters

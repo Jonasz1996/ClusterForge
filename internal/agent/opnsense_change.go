@@ -490,6 +490,8 @@ func (a *Agent) handleOPN(ctx context.Context, req protocol.PVERequest) protocol
 		data, err = json.Marshal(c.opnRevisions())
 	case protocol.OPNOpRevision:
 		data, err = c.opnRevision(req.Path)
+	case protocol.OPNOpFacts:
+		data, err = json.Marshal(c.opnsense(ctx))
 	default:
 		return protocol.PVEResponse{Error: "onbekend OPNsense-verzoek " + req.Op}
 	}

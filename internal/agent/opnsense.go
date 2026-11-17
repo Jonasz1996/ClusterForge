@@ -170,6 +170,11 @@ func (c *Collector) opnsense(ctx context.Context) *protocol.OPNsenseFacts {
 		f.CARP = protocol.OPNsenseCARP{Demotion: atoiAny(carp.Demotion), Allow: atoiAny(carp.Allow) == 1, Maintenance: carp.Maintenance}
 	}
 	fillOPNConfig(f, cfg, ifc)
+	if base := c.opnAPI().base(); base != "" {
+		proto, rest, _ := strings.Cut(base, "://")
+		_, port, _ := net.SplitHostPort(rest)
+		f.GUI = proto + ":" + port
+	}
 	f.Config.Backups = c.opnBackupCount()
 	f.API = c.opnAPIState(ctx)
 	return f

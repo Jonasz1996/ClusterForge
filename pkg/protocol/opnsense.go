@@ -55,6 +55,9 @@ type OPNsenseFacts struct {
 	Config OPNsenseConfig `json:"config"`
 	// API zegt of de agent de lokale API kan gebruiken.
 	API OPNsenseAPIState `json:"api"`
+	// GUI is protocol en poort van de webinterface, zoals https:443; de
+	// server test na een wijziging of hij die nog bereikt.
+	GUI string `json:"gui,omitempty"`
 }
 
 // OPNsenseCARP is de algemene CARP-toestand.
@@ -190,6 +193,10 @@ const (
 	// OPNOpRevision geeft één revisie (Path is de bestandsnaam of
 	// "current"), zonder geheimen.
 	OPNOpRevision = "opn_revision"
+	// OPNOpFacts geeft de facts van nu (OPNsenseFacts), zonder op de
+	// volgende heartbeat te wachten; de proeven na een wijziging gebruiken
+	// het.
+	OPNOpFacts = "opn_facts"
 )
 
 // OPNReadActions zijn de configctl-acties die alleen lezen.

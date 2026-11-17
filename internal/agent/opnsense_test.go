@@ -330,7 +330,9 @@ func TestOPNApplyConfirmAndRollback(t *testing.T) {
 	if strings.Contains(out.String(), "1.2.3.4") || !strings.Contains(out.String(), "[geheim]") {
 		t.Fatalf("geheim in de uitvoer:\n%s", out.String())
 	}
-	if !slices.ContainsFunc(*calls, func(s string) bool { return strings.HasPrefix(s, bsdDaemon+" -f -p /var/run/cf-opn-rollback-abcd1234-0001.pid") }) {
+	if !slices.ContainsFunc(*calls, func(s string) bool {
+		return strings.HasPrefix(s, bsdDaemon+" -f -p /var/run/cf-opn-rollback-abcd1234-0001.pid")
+	}) {
 		t.Fatalf("geen terugdraaitimer: %v", *calls)
 	}
 	if p := opnPending(c.Root); p == nil || p.ID != ch.ID {
