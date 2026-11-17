@@ -108,7 +108,7 @@ function LinkDialog({ srv, dc, onClose }: { srv: PbsServer; dc: Datacenter; onCl
         ) : (
           <>
             <p className="text-slate-600 dark:text-slate-300">
-              ClusterForge maakt op de PBS een gebruiker en API-token voor dit cluster, geeft dat token alleen rechten op de gekozen datastore, en zet de storage in Proxmox
+              ClusterForge maakt op de PBS een gebruiker voor dit cluster met een API-token per storage, geeft die alleen rechten op de gekozen datastore, en zet de storage in Proxmox
               met de fingerprint van de PBS. Het geheim gaat versleuteld mee en komt nergens in een log. Daarna kies je de storage bij een back-upjob onder Proxmox → Back-ups.
             </p>
             <Field label="Datastore" htmlFor="l-store">

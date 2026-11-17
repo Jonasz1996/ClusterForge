@@ -52,8 +52,8 @@ func (p *pbsSim) cmd(_ context.Context, _ string, argv, _ []string, out io.Write
 		_, _ = io.WriteString(out, `"`+pbsUPID+`"`+"\n")
 	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users/pve@pbs/token/pve "):
 		_, _ = io.WriteString(out, `{"tokenid":"pve@pbs!pve","value":"7f1c2d3e-geheim"}`+"\n")
-	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users/pve-thuislab@pbs/token/clusterforge "):
-		_, _ = io.WriteString(out, `{"tokenid":"pve-thuislab@pbs!clusterforge","value":"aaaa-bbbb-link"}`+"\n")
+	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users/pve-thuislab@pbs/token/pbs-store1 "):
+		_, _ = io.WriteString(out, `{"tokenid":"pve-thuislab@pbs!pbs-store1","value":"aaaa-bbbb-link"}`+"\n")
 	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users "), strings.HasPrefix(c, "proxmox-backup-debug api set /access/acl "):
 		_, _ = io.WriteString(out, "null\n")
 	case strings.HasPrefix(c, "proxmox-backup-debug api create /config/remote "):
@@ -222,6 +222,8 @@ func TestPBSLink(t *testing.T) {
 			storageCmd = cmd
 			mu.Unlock()
 			_, _ = io.WriteString(out, "null\n")
+		case strings.HasPrefix(cmd, "pvesh get /storage "):
+			_, _ = io.WriteString(out, `[{"storage":"local","type":"dir"}]`)
 		case strings.HasPrefix(cmd, "pvesh get /cluster/status "):
 			_, _ = io.WriteString(out, `[{"type":"cluster","name":"thuislab","quorate":1}]`)
 		case strings.HasPrefix(cmd, "pvesh get "):
@@ -253,6 +255,10 @@ func TestPBSLink(t *testing.T) {
 	if s := c.do("POST", "/api/v1/pbs/servers/"+host.ID+"/link", map[string]any{"datacenter": "thuislab", "datastore": "bestaat-niet", "storage": "x1", "server": "10.0.0.9"}, nil); s != 400 {
 		t.Fatalf("onbekende datastore: %d", s)
 	}
+	// Een storage die al bestaat: geweigerd voor er iets op de PBS verandert.
+	if s := c.do("POST", "/api/v1/pbs/servers/"+host.ID+"/link", map[string]any{"datacenter": "thuislab", "datastore": "store1", "storage": "local", "server": "10.0.0.9"}, nil); s != 400 {
+		t.Fatalf("bestaande storage: %d", s)
+	}
 	var j job
 	if s := c.do("POST", "/api/v1/pbs/servers/"+host.ID+"/link", in, &j); s != 202 {
 		t.Fatalf("koppelen: %d", s)
@@ -263,21 +269,22 @@ func TestPBSLink(t *testing.T) {
 	mu.Lock()
 	cmd := storageCmd
 	mu.Unlock()
-	for _, want := range []string{"--type=pbs", "--datastore=store1", "--server=10.0.0.9", "--username=pve-thuislab@pbs!clusterforge", "--password=aaaa-bbbb-link", "--fingerprint=aa:bb", "--storage=pbs-store1"} {
+	for _, want := range []string{"--type=pbs", "--datastore=store1", "--server=10.0.0.9", "--username=pve-thuislab@pbs!pbs-store1", "--password=aaaa-bbbb-link", "--fingerprint=aa:bb", "--storage=pbs-store1"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("storage zonder %s: %s", want, cmd)
 		}
 	}
 	sim.mu.Lock()
-	acl := false
+	aclUser, aclToken := false, false
 	for _, call := range sim.calls {
-		if strings.HasPrefix(call, "proxmox-backup-debug api set /access/acl ") && strings.Contains(call, "--path=/datastore/store1") && strings.Contains(call, "--role=DatastoreBackup") && strings.Contains(call, "--auth-id=pve-thuislab@pbs!clusterforge") {
-			acl = true
+		if strings.HasPrefix(call, "proxmox-backup-debug api set /access/acl ") && strings.Contains(call, "--path=/datastore/store1") && strings.Contains(call, "--role=DatastoreBackup") {
+			aclToken = aclToken || strings.Contains(call, "--auth-id=pve-thuislab@pbs!pbs-store1")
+			aclUser = aclUser || strings.Contains(call, "--auth-id=pve-thuislab@pbs ")
 		}
 	}
 	sim.mu.Unlock()
-	if !acl {
-		t.Error("geen rechten op de datastore gegeven")
+	if !aclUser || !aclToken {
+		t.Errorf("rechten op de datastore: gebruiker %v, token %v", aclUser, aclToken)
 	}
 	var raw map[string]any
 	c.do("GET", "/api/v1/jobs/"+j.ID, nil, &raw)
