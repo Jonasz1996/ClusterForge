@@ -543,5 +543,5 @@ func (s *Service) Notices(ctx context.Context) ([]Notice, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ov.Notices, nil
+	return append(ov.Notices, s.feedNotices(ctx)...), nil
 }

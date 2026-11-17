@@ -89,6 +89,12 @@ func (a *Agent) web(ctx context.Context, req protocol.WebRequest) protocol.WebRe
 			return protocol.WebResponse{Error: err.Error()}
 		}
 		return protocol.WebResponse{App: res}
+	case protocol.WebOpNPMTraffic:
+		res, err := a.npmTraffic(ctx)
+		if err != nil {
+			return protocol.WebResponse{Error: err.Error()}
+		}
+		return protocol.WebResponse{Traffic: res}
 	case protocol.WebOpNPMSnapshot:
 		res, err := a.npmSnapshot(ctx)
 		if err != nil {
@@ -560,6 +566,8 @@ type npmInstance struct {
 	dataDir   string
 	// adminPort is de poort van de beheer-API op de host.
 	adminPort int
+	// pid is het hoofdproces van de container (voor zijn netwerktabel).
+	pid int
 }
 
 // findNPM zoekt de draaiende container van NPM en zijn map /data.
@@ -599,6 +607,9 @@ func (a *Agent) findNPM(ctx context.Context) (npmInstance, error) {
 		HostConfig struct {
 			NetworkMode string `json:"NetworkMode"`
 		} `json:"HostConfig"`
+		State struct {
+			Pid int `json:"Pid"`
+		} `json:"State"`
 		NetworkSettings struct {
 			Ports map[string][]struct {
 				HostIP   string `json:"HostIp"`
@@ -609,7 +620,7 @@ func (a *Agent) findNPM(ctx context.Context) (npmInstance, error) {
 	if err := json.Unmarshal(body, &in); err != nil {
 		return npmInstance{}, fmt.Errorf("inspect van %s: %w", ct.name(), err)
 	}
-	n := npmInstance{container: ct.name(), adminPort: 81}
+	n := npmInstance{container: ct.name(), adminPort: 81, pid: in.State.Pid}
 	for _, m := range in.Mounts {
 		if m.Destination == "/data" {
 			n.dataDir = m.Source

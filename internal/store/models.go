@@ -1632,6 +1632,33 @@ type ProxmoxTask struct {
 	EndedAt      *time.Time
 }
 
+type PublishAuthEvent struct {
+	Pk       string
+	Created  time.Time
+	Action   string
+	Username string
+	ClientIp string
+	App      string
+	Country  string
+	City     string
+	Reason   string
+}
+
+type PublishConnection struct {
+	NodeID      uuid.UUID
+	At          time.Time
+	Connections int32
+}
+
+type PublishFeedState struct {
+	Source string
+	At     time.Time
+	OkAt   *time.Time
+	Cursor string
+	Error  string
+	Lines  int64
+}
+
 type PublishHost struct {
 	ID           uuid.UUID
 	NpmHostID    int32
@@ -1681,6 +1708,31 @@ type PublishSetting struct {
 	AuthentikOutpost   string
 	UpdatedAt          time.Time
 	UpdatedBy          *uuid.UUID
+}
+
+type PublishTraffic struct {
+	NodeID   uuid.UUID
+	HostID   int32
+	Bucket   time.Time
+	Requests int32
+	S2xx     int32
+	S3xx     int32
+	S4xx     int32
+	S5xx     int32
+	Bytes    int64
+}
+
+type PublishTrafficIp struct {
+	HostID   int32
+	Hour     time.Time
+	Ip       string
+	Requests int32
+	S4xx     int32
+	S5xx     int32
+	Denied   int32
+	Bytes    int64
+	FirstAt  time.Time
+	LastAt   time.Time
 }
 
 type RecipeVersion struct {

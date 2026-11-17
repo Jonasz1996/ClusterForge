@@ -186,7 +186,7 @@ func npmFixture(t *testing.T) (*Agent, string, *[]string) {
 		case "/containers/json":
 			_, _ = io.WriteString(w, `[{"Id":"npmid","Names":["/cf-npm"],"Image":"jc21/nginx-proxy-manager:2.12.6","State":"running","Labels":{}}]`)
 		case "/containers/npmid/json":
-			_, _ = io.WriteString(w, `{"Mounts":[{"Source":"/opt/cf-npm/data","Destination":"/data"}],"NetworkSettings":{"Ports":{"81/tcp":[{"HostIp":"0.0.0.0","HostPort":"81"}]}}}`)
+			_, _ = io.WriteString(w, `{"State":{"Pid":4242},"Mounts":[{"Source":"/opt/cf-npm/data","Destination":"/data"}],"NetworkSettings":{"Ports":{"81/tcp":[{"HostIp":"0.0.0.0","HostPort":"81"}]}}}`)
 		default:
 			http.NotFound(w, r)
 		}

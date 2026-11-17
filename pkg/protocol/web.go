@@ -55,7 +55,69 @@ const (
 	// node (Plex: Preferences.xml, *arr: config.xml); die verlaat de node
 	// nooit, alleen de cijfers gaan naar de server.
 	WebOpAppStats = "app_stats"
+	// WebOpNPMTraffic leest de nieuwe regels uit de toegangslogs van NPM
+	// (data/logs/proxy-host-<id>_access.log) en geeft ze samengevat terug:
+	// per host en minuut, per host en client-IP, plus de open verbindingen
+	// van de container (fase 39). De agent onthoudt waar hij was.
+	WebOpNPMTraffic = "npm_traffic"
 )
+
+// TrafficSince is de eerste protocolversie met WebOpNPMTraffic.
+const TrafficSince = 55
+
+// Grenzen van één WebOpNPMTraffic-antwoord.
+const (
+	// MaxTrafficRead is hoeveel bytes log de agent per keer leest; de rest
+	// komt bij de volgende vraag (More).
+	MaxTrafficRead = 48 << 20
+	// MaxTrafficIPs is het meeste aantal (host, IP)-rijen per antwoord; de
+	// rest telt mee in de minuten maar niet per IP.
+	MaxTrafficIPs = 1500
+	// TrafficFirstRead: een log die de agent nog niet kende, leest hij
+	// vanaf zoveel bytes voor het einde, niet vanaf het begin.
+	TrafficFirstRead = 4 << 20
+)
+
+// TrafficMinute is het verkeer van één proxy host in één minuut.
+type TrafficMinute struct {
+	HostID   int       `json:"h"`
+	Minute   time.Time `json:"t"`
+	Requests int       `json:"n"`
+	S2xx     int       `json:"s2"`
+	S3xx     int       `json:"s3"`
+	S4xx     int       `json:"s4"`
+	S5xx     int       `json:"s5"`
+	Bytes    int64     `json:"b"`
+}
+
+// TrafficIP is het verkeer van één client-IP naar één host.
+type TrafficIP struct {
+	HostID   int    `json:"h"`
+	IP       string `json:"ip"`
+	Requests int    `json:"n"`
+	S4xx     int    `json:"s4"`
+	S5xx     int    `json:"s5"`
+	// Denied zijn 401 en 403: aanmelden mislukt of geweigerd.
+	Denied int       `json:"d"`
+	Bytes  int64     `json:"b"`
+	First  time.Time `json:"f"`
+	Last   time.Time `json:"l"`
+}
+
+// TrafficResult is wat de agent sinds de vorige keer in de logs zag.
+type TrafficResult struct {
+	Container string          `json:"container"`
+	Minutes   []TrafficMinute `json:"minutes"`
+	IPs       []TrafficIP     `json:"ips"`
+	// Lines zijn de gelezen regels, Skipped die de agent niet begreep.
+	Lines   int `json:"lines"`
+	Skipped int `json:"skipped"`
+	// More: er staat nog meer te lezen.
+	More bool `json:"more,omitempty"`
+	// Connections zijn de open TCP-verbindingen op 80 en 443 van de
+	// container; -1 als de agent ze niet kon tellen.
+	Connections int `json:"connections"`
+}
 
 // AppStatsSince is de eerste protocolversie met WebOpAppStats.
 const AppStatsSince = 52
@@ -152,6 +214,7 @@ type WebResponse struct {
 	Check    *WebCheckResult `json:"check,omitempty"`
 	NPM      *WebNPMResult   `json:"npm,omitempty"`
 	App      *AppStatsResult `json:"app,omitempty"`
+	Traffic  *TrafficResult  `json:"traffic,omitempty"`
 }
 
 // Soorten dienst.
@@ -291,6 +354,8 @@ func (r *WebRequest) Validate() error {
 		}
 		return nil
 	case WebOpNPMSnapshot:
+		return nil
+	case WebOpNPMTraffic:
 		return nil
 	case WebOpAppStats:
 		a := r.App

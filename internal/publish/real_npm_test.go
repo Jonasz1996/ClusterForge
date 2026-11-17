@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -310,6 +311,80 @@ func TestRealNPM(t *testing.T) {
 	}
 	if _, err := s.Plan(ctx, Action{Action: ActPublish, Label: "app", ForwardHost: gateway, ForwardPort: backend}); err == nil {
 		t.Fatal("dubbele naam hoort geweigerd te worden")
+	}
+
+	// 1b. Verkeer en logins (fase 39): aanvragen via NPM, events in
+	// Authentik, en een ban van CrowdSec voor het IP dat NPM ziet.
+	for range 5 {
+		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+p80+"/", nil)
+		req.Host = "app.example.test"
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}
+	}
+	now := time.Now()
+	for i := range 12 {
+		fake.addEvent("login_failed", "AnonymousUser", "203.0.113.9", now.Add(-time.Duration(30-i)*time.Minute), map[string]any{"username": "admin", "geo": map[string]any{"country": "NL"}})
+	}
+	fake.addEvent("login", "jonas", "198.51.100.7", now.Add(-5*time.Minute), nil)
+	fake.addEvent("authorize_application", "jonas", "198.51.100.7", now.Add(-4*time.Minute), map[string]any{"authorized_application": map[string]any{"name": "App"}})
+	var tv *TrafficView
+	deadline = time.Now().Add(30 * time.Second)
+	for {
+		// NPM schrijft zijn log met een kleine buffer.
+		s.PullFeeds(ctx)
+		tv, err = s.Traffic(ctx, "1h")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tv.Totals.Requests >= 5 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if tv.Totals.Requests < 5 || len(tv.Hosts) != 1 || tv.Hosts[0].Domain != "app.example.test" || tv.Totals.Visitors < 1 || len(tv.IPs) == 0 {
+		t.Fatalf("verkeer: %+v feeds %+v", tv.Totals, tv.Feeds)
+	}
+	if tv.Totals.Connections < 0 || tv.Totals.ConnAt == nil {
+		t.Errorf("verbindingen: %+v", tv.Totals)
+	}
+	seenIP := tv.IPs[0].IP
+	if _, err := pool.Exec(ctx, `INSERT INTO crowdsec_decisions (node_id, decision_id, origin, type, scope, value, scenario, until, first_seen)
+		VALUES ($1, 1, 'crowdsec', 'ban', 'Ip', $2, 'crowdsecurity/http-probing', now() + interval '4 hours', now() - interval '3 hours'),
+		       ($1, 2, 'crowdsec', 'ban', 'Range', '203.0.113.0/24', 'crowdsecurity/ssh-bf', now() + interval '4 hours', now())`, npmNode, seenIP); err != nil {
+		t.Fatal(err)
+	}
+	// De ban begon drie uur geleden; het verkeer van nu kwam er dus nog door.
+	if tv, err = s.Traffic(ctx, "24h"); err != nil || tv.Compare.BannedSeen != 1 || tv.Compare.BannedPassing != 1 || tv.IPs[0].Ban == nil || tv.IPs[0].AfterBan < 5 {
+		t.Fatalf("vergelijking met CrowdSec: %v %+v %+v", err, tv.Compare, tv.IPs)
+	}
+	lv, err := s.Logins(ctx, "24h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lv.Totals.Failed != 12 || lv.Totals.Logins != 1 || len(lv.FailedIPs) != 1 || lv.FailedIPs[0].IP != "203.0.113.9" ||
+		lv.FailedIPs[0].Ban == nil || lv.FailedIPs[0].Usernames[0] != "admin" || len(lv.Apps) != 1 || lv.Apps[0].App != "App" {
+		t.Fatalf("logins: %+v %+v %+v", lv.Totals, lv.FailedIPs, lv.Apps)
+	}
+	// Nog eens ophalen: niets dubbel.
+	s.PullFeeds(ctx)
+	if lv2, _ := s.Logins(ctx, "24h"); lv2.Totals.Failed != 12 {
+		t.Fatalf("dubbel geteld: %+v", lv2.Totals)
+	}
+	notices, _ := s.Notices(ctx)
+	var ids []string
+	for _, n := range notices {
+		ids = append(ids, n.ID)
+	}
+	if !slices.Contains(ids, "publish-ban-passing") || slices.Contains(ids, "publish-failed-logins") {
+		t.Fatalf("meldingen: %v", ids)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM crowdsec_decisions`); err != nil {
+		t.Fatal(err)
+	}
+	if notices, _ = s.Notices(ctx); !slices.ContainsFunc(notices, func(n Notice) bool { return n.ID == "publish-failed-logins" }) {
+		t.Fatalf("geen melding voor mislukte logins zonder ban: %+v", notices)
 	}
 
 	// 2. Een doel waar niets draait: de controle faalt en de host gaat terug.

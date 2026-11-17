@@ -2,11 +2,13 @@ package publish
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // fakeAuthentik is een Authentik met de API v3 die de publicatie gebruikt,
@@ -20,6 +22,8 @@ type fakeAuthentik struct {
 	outpost   map[string]any
 	calls     []string
 	authHits  int
+	// events, nieuwste eerst.
+	events []map[string]any
 }
 
 func newFakeAuthentik() *fakeAuthentik {
@@ -63,6 +67,26 @@ func (f *fakeAuthentik) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(v)
 	}
 	switch {
+	case p == "/api/v3/events/events/":
+		action := r.URL.Query().Get("action")
+		size, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+		pg, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		var list []map[string]any
+		for _, e := range f.events {
+			if action == "" || e["action"] == action {
+				list = append(list, e)
+			}
+		}
+		start := (pg - 1) * size
+		if start > len(list) {
+			start = len(list)
+		}
+		end := min(start+size, len(list))
+		next := 0
+		if end < len(list) {
+			next = pg + 1
+		}
+		write(200, map[string]any{"pagination": map[string]any{"next": next}, "results": list[start:end]})
 	case p == "/api/v3/admin/version/":
 		write(200, map[string]any{"version_current": "2025.6.2"})
 	case p == "/api/v3/flows/instances/":
@@ -152,4 +176,17 @@ func (f *fakeAuthentik) counts() (apps, providers, inOutpost int) {
 	defer f.mu.Unlock()
 	ps, _ := f.outpost["providers"].([]any)
 	return len(f.apps), len(f.providers), len(ps)
+}
+
+// addEvent zet een event van Authentik vooraan (nieuwste eerst).
+func (f *fakeAuthentik) addEvent(action, user, ip string, at time.Time, ctx map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ctx == nil {
+		ctx = map[string]any{}
+	}
+	f.nextPK++
+	e := map[string]any{"pk": fmt.Sprintf("ev-%d", f.nextPK), "action": action, "client_ip": ip, "created": at.UTC().Format(time.RFC3339Nano),
+		"user": map[string]any{"username": user}, "context": ctx}
+	f.events = append([]map[string]any{e}, f.events...)
 }
