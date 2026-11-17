@@ -98,6 +98,21 @@ export const navGroups: NavGroup[] = [
         ],
       },
       { href: "/proxmox/host-updates", label: "Host-updates", keywords: "pve apt upgrade bijwerken kernel herstart onderhoudsmodus rolling" },
+      {
+        href: "/pbs",
+        label: "Backup Server",
+        keywords: "pbs proxmox backup server datastore back-up",
+        tabs: [
+          { href: "/pbs", label: "Overzicht" },
+          { href: "/pbs/datastores", label: "Datastores", keywords: "pbs datastore gc garbage collection prune verify onderhoud" },
+          { href: "/pbs/inhoud", label: "Inhoud", keywords: "pbs snapshot groep namespace back-up beschermen notitie verifieer" },
+          { href: "/pbs/jobs", label: "Jobs", keywords: "pbs prune verify sync remote gc schema bandbreedte traffic" },
+          { href: "/pbs/dekking", label: "Dekking", keywords: "pbs back-up dekking clusternode laatste back-up geverifieerd ontbreekt" },
+          { href: "/pbs/taken", label: "Taken", keywords: "pbs task log upid back-up verify gc" },
+          { href: "/pbs/toegang", label: "Toegang", adminOnly: true, keywords: "pbs gebruiker token rechten acl rol" },
+          { href: "/pbs/systeem", label: "Systeem", keywords: "pbs schijf smart zfs netwerk dns dienst update certificaat syslog herstarten" },
+        ],
+      },
     ],
   },
   {
@@ -161,7 +176,18 @@ export const navGroups: NavGroup[] = [
     label: "Bewaking en herstel",
     items: [
       { href: "/monitoring", label: "Monitoring", keywords: "cpu ram grafiek metrics" },
-      { href: "/zabbix", label: "Zabbix-agents", keywords: "zabbix agent2 psk sleutel monitoring proxy" },
+      {
+        href: "/zabbix/overzicht",
+        label: "Zabbix",
+        keywords: "zabbix problemen triggers beschikbaarheid hosts proxy ha dashboard",
+        tabs: [
+          { href: "/zabbix/overzicht", label: "Overzicht" },
+          { href: "/zabbix/dashboards", label: "Dashboards", keywords: "grafana grafieken kiosk tv top cpu geheugen mttr heatmap" },
+          { href: "/zabbix/problemen", label: "Problemen", keywords: "triggers alerts ernst" },
+          { href: "/zabbix/hosts", label: "Hosts", keywords: "beschikbaarheid koppelen" },
+          { href: "/zabbix", label: "Agents", keywords: "zabbix-agents agent2 psk sleutel" },
+        ],
+      },
       { href: "/logs", label: "Logs", adminOnly: true, keywords: "journald syslog docker logs" },
       {
         href: "/incidenten",

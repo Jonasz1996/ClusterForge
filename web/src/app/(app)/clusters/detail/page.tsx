@@ -2,6 +2,7 @@
 
 import { SectionNav } from "@/components/shell/SectionNav";
 import { Tile, TileGrid } from "@/components/Tiles";
+import { ClusterZabbixTile } from "@/components/zabbix/NodeZabbix";
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -228,6 +229,7 @@ function ClusterDetailInner() {
             <Tile wide>
               <HistoryCard filter={{ cluster: id }} isAdmin={isAdmin} />
             </Tile>
+            <ClusterZabbixTile clusterId={id} />
             {cluster.data.nodes.some((n) => n.agent) && (
               <Tile wide tall>
                 <MetricsPanels

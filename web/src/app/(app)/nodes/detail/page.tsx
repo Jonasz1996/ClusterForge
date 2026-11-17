@@ -2,6 +2,7 @@
 
 import { SectionNav } from "@/components/shell/SectionNav";
 import { Tile, TileGrid } from "@/components/Tiles";
+import { NodeZabbixTile } from "@/components/zabbix/NodeZabbix";
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -239,6 +240,7 @@ function NodeDetailInner() {
             <Tile wide>
               <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
             </Tile>
+            <NodeZabbixTile nodeId={id} />
             {node.data.agent && (
               <Tile wide tall>
                 <MetricsPanels

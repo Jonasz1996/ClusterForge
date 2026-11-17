@@ -597,6 +597,8 @@ function State({ s }: { s: string }) {
 
 function CoverageCard({ rows }: { rows: SocCoverage[] }) {
   const [gapsOnly, setGapsOnly] = useState(false);
+  // Zabbix (fase 33) staat er alleen bij als ClusterForge Zabbix leest.
+  const zabbix = rows.some((r) => r.zabbix !== "");
   const list = gapsOnly ? rows.filter((r) => r.gaps.length > 0) : rows;
   const withGaps = rows.filter((r) => r.gaps.length > 0).length;
   return (
@@ -625,6 +627,11 @@ function CoverageCard({ rows }: { rows: SocCoverage[] }) {
                   <th className={thClass}>CrowdSec</th>
                   <th className={thClass}>Bouncer</th>
                   <th className={thClass}>Updates</th>
+                  {zabbix && (
+                    <th className={thClass} title="Bewaakt door Zabbix; telt niet mee in de score">
+                      Zabbix
+                    </th>
+                  )}
                   <th className={cx(thClass, "pr-5")}>Gaten</th>
                 </tr>
               </thead>
@@ -660,6 +667,19 @@ function CoverageCard({ rows }: { rows: SocCoverage[] }) {
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
+                    {zabbix && (
+                      <td className={tdClass}>
+                        <Link href={r.zabbix === "missing" ? "/zabbix" : "/zabbix/hosts"}>
+                          {r.zabbix === "on" ? (
+                            <Badge tone="green">✓ bewaakt</Badge>
+                          ) : r.zabbix === "down" ? (
+                            <Badge tone="red">✕ onbereikbaar</Badge>
+                          ) : (
+                            <Badge tone="slate">niet bewaakt</Badge>
+                          )}
+                        </Link>
+                      </td>
+                    )}
                     <td className={cx(tdClass, "pr-5 text-xs text-slate-600 dark:text-slate-400")}>{r.gaps.join(", ") || "—"}</td>
                   </tr>
                 ))}

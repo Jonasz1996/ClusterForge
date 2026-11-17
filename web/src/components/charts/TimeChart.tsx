@@ -71,16 +71,26 @@ export function TimeChart({
   unit,
   height = 180,
   marker,
+  format,
+  formatKey = "",
 }: {
   timestamps: number[];
   series: Series[];
   unit: Unit;
   height?: number;
   marker?: number;
+  // format vervangt de opmaak van unit (bv. de eenheden van Zabbix);
+  // formatKey verandert als format iets anders doet.
+  format?: (v: number) => string;
+  formatKey?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
-  const shape = `${unit}|${series.map((s) => s.label).join("|")}`;
+  const fmtRef = useRef(format);
+  useEffect(() => {
+    fmtRef.current = format;
+  }, [format]);
+  const shape = `${unit}|${formatKey}|${series.map((s) => s.label).join("|")}`;
   const data = useMemo<uPlot.AlignedData>(() => [timestamps, ...series.map((s) => s.values)], [timestamps, series]);
 
   useEffect(() => {
@@ -92,7 +102,8 @@ export function TimeChart({
       grid: { stroke: dark ? "#1e293b" : "#e2e8f0", width: 1 },
       ticks: { stroke: dark ? "#1e293b" : "#e2e8f0", width: 1 },
     };
-    const labels = shape.split("|").slice(1);
+    const labels = shape.split("|").slice(2);
+    const fv = (v: number) => (fmtRef.current ? fmtRef.current(v) : formatValue(v, unit));
     const opts: uPlot.Options = {
       width: el.clientWidth,
       height,
@@ -107,12 +118,12 @@ export function TimeChart({
           label,
           stroke: palette[i % palette.length],
           width: 1.5,
-          value: (_u: uPlot, v: number | null) => (v == null ? "–" : formatValue(v, unit)),
+          value: (_u: uPlot, v: number | null) => (v == null ? "–" : fv(v)),
         })),
       ],
       axes: [
         { ...axis, values: timeTicks },
-        { ...axis, size: 70, values: (_u, vals) => vals.map((v) => formatValue(v, unit)) },
+        { ...axis, size: 70, values: (_u, vals) => vals.map((v) => fv(v)) },
       ],
       hooks:
         marker === undefined

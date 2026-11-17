@@ -1986,3 +1986,50 @@ type ZabbixAgentSetting struct {
 	UpdatedAt      time.Time
 	UpdatedBy      *uuid.UUID
 }
+
+type ZabbixDashboard struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	Refresh     int32
+	Panels      []byte
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+}
+
+type ZabbixHostLink struct {
+	Hostid    string
+	NodeID    *uuid.UUID
+	UpdatedAt time.Time
+	UpdatedBy *uuid.UUID
+}
+
+type ZabbixMaintenance struct {
+	NodeID        uuid.UUID
+	Hostid        string
+	Maintenanceid string
+	ActiveTill    time.Time
+	CreatedAt     time.Time
+}
+
+type ZabbixMonitorSetting struct {
+	ID              bool
+	MaintenanceSync bool
+	UpdatedAt       time.Time
+	UpdatedBy       *uuid.UUID
+}
+
+type ZabbixSnapshot struct {
+	At           time.Time
+	Disaster     int32
+	High         int32
+	Average      int32
+	Warning      int32
+	Info         int32
+	Hosts        int32
+	HostsDown    int32
+	HostsUnknown int32
+	Nvps         pgtype.Float8
+	Queue        *int32
+}

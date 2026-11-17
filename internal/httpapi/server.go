@@ -47,6 +47,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
@@ -61,6 +62,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
+	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
 )
 
 type Server struct {
@@ -105,12 +107,14 @@ type Server struct {
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	zabbixAgents *zabbixagent.Service
+	zabbixMon    *zabbixmon.Service
 	soc          *soc.Service
 	security     *security.Service
 	stacks       *stacks.Service
 	logs         *logs.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
+	pbs          *pbs.Service
 	docker       *dockerhost.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
@@ -195,6 +199,8 @@ type Deps struct {
 	CrowdSec *crowdsec.Service
 	// ZabbixAgents zet zabbix-agent2 met een eigen PSK op de nodes.
 	ZabbixAgents *zabbixagent.Service
+	// ZabbixMon leest de Zabbix-API voor de dashboards (fase 33).
+	ZabbixMon *zabbixmon.Service
 	// SOC is het beveiligingsoverzicht (fase 25).
 	SOC *soc.Service
 	// Security is de kwetsbaarheids- en verhardingsmodule (fase 27).
@@ -206,6 +212,8 @@ type Deps struct {
 	// Firewall beheert ufw op de nodes (fase 16).
 	Firewall *firewall.Service
 	PVEHosts *pvehost.Service
+	// PBS beheert de Proxmox Backup Servers (fase 32).
+	PBS *pbs.Service
 	// Docker is Docker zoals Portainer (fase 28).
 	Docker  *dockerhost.Service
 	Version string
@@ -246,12 +254,14 @@ func New(d Deps) *Server {
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
 		zabbixAgents: d.ZabbixAgents,
+		zabbixMon:    d.ZabbixMon,
 		soc:          d.SOC,
 		stacks:       d.Stacks,
 		logs:         d.Logs,
 		firewall:     d.Firewall,
 		security:     d.Security,
 		pvehosts:     d.PVEHosts,
+		pbs:          d.PBS,
 		docker:       d.Docker,
 		recipes:      recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.

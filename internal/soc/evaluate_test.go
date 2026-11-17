@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -190,5 +191,26 @@ func TestEvaluateVulns(t *testing.T) {
 	}
 	if r := evaluate(Inputs{}); len(r.Score.Parts) != 4 {
 		t.Errorf("zonder module: %d delen", len(r.Score.Parts))
+	}
+}
+
+func TestEvaluateZabbix(t *testing.T) {
+	since := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)
+	in := Inputs{Coverage: []CoverageRow{protected("a")}, Zabbix: []ZabbixProblem{
+		{EventID: "1", Name: "Too many SSH logins", Host: "db1", Severity: 5, Since: since},
+		{EventID: "2", Name: "Auditd stopped", Host: "db2", Severity: 4, Since: since, Acknowledged: true},
+		{EventID: "3", Name: "Info", Severity: 1, Since: since},
+	}}
+	r := evaluate(in)
+	if r.Level.Level != LevelElevated || !strings.Contains(r.Level.Reasons[0], "Too many SSH logins") {
+		t.Fatalf("niveau = %+v", r.Level)
+	}
+	if len(r.Now) != 3 || r.Now[0].Key != "zabbix-1" || r.Now[0].Tone != ToneRed || !strings.Contains(r.Now[0].Detail, "06:00") ||
+		r.Now[1].Tone != ToneAmber || !strings.Contains(r.Now[1].Detail, "Bevestigd") || r.Now[2].Tone != ToneInfo {
+		t.Fatalf("nu belangrijk = %+v", r.Now)
+	}
+	// De score verandert niet door Zabbix.
+	if base := evaluate(Inputs{Coverage: in.Coverage}); r.Score.Score != base.Score.Score {
+		t.Fatalf("score %d, zonder Zabbix %d", r.Score.Score, base.Score.Score)
 	}
 }

@@ -218,6 +218,23 @@ func (s *Service) client(set Settings) (*Client, error) {
 	return s.API(set.APIURL, tok), nil
 }
 
+// APIClient geeft de client met het bewaarde token, en het adres van de
+// API; ErrNotConfigured als adres of token ontbreekt.
+func (s *Service) APIClient(ctx context.Context) (*Client, string, error) {
+	set, err := s.Settings(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if set.APIURL == "" || !set.TokenSet {
+		return nil, set.APIURL, ErrNotConfigured
+	}
+	c, err := s.client(set)
+	return c, set.APIURL, err
+}
+
+// ErrNotConfigured: geen adres of token voor de Zabbix API.
+var ErrNotConfigured = errors.New("de Zabbix API is nog niet ingesteld (Monitoring → Zabbix → Agents)")
+
 // Test probeert de Zabbix API met de bewaarde instellingen; geeft de versie.
 func (s *Service) Test(ctx context.Context) (string, error) {
 	set, err := s.Settings(ctx)
