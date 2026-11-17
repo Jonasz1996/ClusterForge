@@ -5,10 +5,42 @@ de Zabbix-monitoringintegratie: de Zabbix-API uitlezen, specifiek voor
 ClusterForge/agents en algemene info, en in mooie dashboards zetten zoals
 Grafana. Maak daar al een onderzoek en stappenplan voor."
 
-Dit document is het onderzoek en het stappenplan. Er wordt nog niets gebouwd:
-bouwen begint pas als de Zabbix-fix (PR #138, image `:53fb6e8`) en fase 32
-(PBS) klaar zijn. Daarna bouwen we de mijlpalen na elkaar, zonder tussentijdse
-goedkeuringsrondes, en melden we elke mijlpaal apart zodra hij klaar is.
+Dit document was eerst het onderzoek en het stappenplan. Het bouwen begon op
+2026-11-17, op de stam met de Zabbix-fix (#138) en fase 32 (PBS) erin. De
+paragraaf "Zoals gebouwd" hieronder zegt waar het echte ontwerp afwijkt van het
+plan; de rest van het document is het oorspronkelijke plan.
+
+## Zoals gebouwd
+
+- **Pakket `internal/zabbixmon`**, niet `internal/zabbix`. De API-client bleef
+  in `internal/zabbixagent` (met `Client.Call` en `Service.APIClient` erbij),
+  zodat agentbeheer en monitoring hetzelfde token gebruiken zonder een
+  verhuizing in de Zabbix-fix.
+- **Verzamelen**: elke minuut een ronde (`Collect`, alle aanvragen tegelijk),
+  de stand in het geheugen; elk kwartier een momentopname in
+  `zabbix_snapshots` voor de trend (30 dagen bewaard).
+- **Geen `POST /panels/query`.** Elke soort gegevens heeft zijn eigen
+  endpoint met vaste parameters: `/zabbix/overview`, `/zabbix/refresh`,
+  `/zabbix/metrics`, `/zabbix/events`, `/zabbix/hosts/{id}/items`,
+  `/zabbix/items/{id}/series`, `/zabbix/items/latest`,
+  `/zabbix/hosts/{id}/link`, `/zabbix/dashboards[/{id}]`. De browser kiest
+  alleen ids en vensters; alles is 30 s (events 60 s) gecachet.
+- **Grafieken**: tot 24 u uit `history.get`, langer uit `trend.get`, uitgedund
+  tot ~240 stukjes die op vaste tijdstippen beginnen, zodat lijnen van
+  verschillende items in één grafiek samenvallen.
+- **Eigen dashboards (M4)**: panelen grafiek (1-6 items), getal, meter,
+  problemen en tekst in een raster van 4 kolommen; als JSON in
+  `zabbix_dashboards` en zo ook te exporteren en importeren. De server
+  controleert elk paneel (`BoardInput.Normalize`).
+- **Aandacht nodig, SOC en tijdlijn (M5)**: zie M5 hieronder. Problemen op
+  ClusterForge-nodes vanaf ernst gemiddeld komen als `zabbix.problem_started`
+  en `zabbix.problem_resolved` in het logboek, en daarmee in de tijdlijn, What
+  Broke en de assistent. Een incident openen vanuit een Zabbix-probleem is nog
+  niet gebouwd.
+- **Migraties**: 00100 (`zabbix_snapshots`, `zabbix_host_links`) en 00101
+  (`zabbix_dashboards`). Fase 32 (PBS) gebruikt geen migraties. Goose draait
+  sinds fase 33 met `WithAllowOutofOrder`, zodat parallelle fases elkaar niet
+  blokkeren.
 
 ## Uitgangspunten
 

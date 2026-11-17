@@ -5,9 +5,25 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+// brussels is de tijdzone voor tijdstippen in de teksten.
+var brussels = func() *time.Location {
+	if l, err := time.LoadLocation("Europe/Brussels"); err == nil {
+		return l
+	}
+	return time.Local
+}()
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
 
 // Drempels van de regels. Ze staan in docs/design/fase25-soc.md.
 const (
@@ -55,7 +71,24 @@ type Inputs struct {
 	SSHFromAny            bool
 	// Vulns: de beveiligingsmodule (fase 27); nil als die er niet is.
 	Vulns *Vulns
+	// Zabbix: open beveiligingsproblemen uit Zabbix (fase 33). Ze komen in
+	// "Nu belangrijk" en tellen mee voor het niveau, niet voor de score.
+	Zabbix []ZabbixProblem
 }
+
+// ZabbixProblem is een open beveiligingsprobleem uit Zabbix: een probleem
+// met de tag scope: security (zo taggen de Zabbix-templates het), of een tag
+// security.
+type ZabbixProblem struct {
+	EventID      string
+	Name         string
+	Host         string
+	Severity     int
+	Since        time.Time
+	Acknowledged bool
+}
+
+var zabbixSeverity = []string{"niet ingedeeld", "informatie", "waarschuwing", "gemiddeld", "hoog", "ramp"}
 
 // Vulns zijn de open bevindingen van Kwetsbaarheden.
 type Vulns struct {
@@ -306,6 +339,30 @@ func evaluate(in Inputs) result {
 				Detail: "Deze nodes halen minder dan 70% op de verhardingscontroles.",
 				Href:   "/kwetsbaarheden/verharding", Action: "Verharding openen"})
 		}
+	}
+
+	// Beveiligingsproblemen uit Zabbix: een ramp maakt het niveau verhoogd,
+	// hoog waakzaam; een bevestigd probleem staat er nog, maar telt niet
+	// meer voor het niveau.
+	for _, z := range in.Zabbix {
+		sev := min(max(z.Severity, 0), 5)
+		it := Item{Key: "zabbix-" + z.EventID, Tone: ToneAmber, Prio: 3,
+			Title:  "Zabbix: " + z.Name,
+			Detail: fmt.Sprintf("Ernst %s op %s, sinds %s.", zabbixSeverity[sev], cmpOr(z.Host, "een host"), z.Since.In(brussels).Format("02/01 15:04")),
+			Href:   "/zabbix/problemen", Action: "Zabbix-problemen openen"}
+		lvl := ""
+		switch {
+		case z.Acknowledged:
+			it.Detail += " Bevestigd in Zabbix."
+		case sev == 5:
+			it.Tone, it.Prio, lvl = ToneRed, 7.5, LevelElevated
+		case sev == 4:
+			it.Tone, it.Prio, lvl = ToneRed, 6, LevelWatch
+		}
+		if sev < 2 {
+			it.Tone = ToneInfo
+		}
+		item(lvl, it)
 	}
 
 	slices.SortStableFunc(items, func(a, b Item) int {

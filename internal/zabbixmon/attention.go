@@ -1,7 +1,12 @@
 package zabbixmon
 
 import (
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/Jonasz1996/clusterforge/internal/soc"
 )
 
 // --- Aandacht nodig (M5) -------------------------------------------------------------
@@ -104,4 +109,57 @@ func notices(snap *Snapshot, lastErr string, lastOK, now time.Time) []Notice {
 		}
 	}
 	return keep
+}
+
+// --- SOC (M5) ------------------------------------------------------------------------
+
+// securityProblem: Zabbix-templates taggen beveiligingsproblemen met
+// scope: security; eigen triggers hebben soms een tag security of
+// component: security.
+func securityProblem(p Problem) bool {
+	for _, t := range p.Tags {
+		tag, val := strings.ToLower(t.Tag), strings.ToLower(t.Value)
+		if (tag == "scope" || tag == "component" || tag == "class") && val == "security" || tag == "security" {
+			return true
+		}
+	}
+	return false
+}
+
+// SOC geeft het SOC de bewaking per node en de open beveiligingsproblemen.
+// ok is false zonder instellingen of gegevens, of als de laatste stand oud is.
+func (s *Service) SOC() (soc.Zabbix, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.configured || s.snap == nil || s.Now().Sub(s.snap.At) > 2*Stale {
+		return soc.Zabbix{}, false
+	}
+	z := soc.Zabbix{Nodes: map[uuid.UUID]string{}, Problems: []soc.ZabbixProblem{}}
+	for _, h := range s.snap.Hosts {
+		if h.Node == nil || !h.Enabled {
+			continue
+		}
+		st := soc.StateOn
+		if h.Available == AvailDown && !h.Maintenance {
+			st = soc.StateDown
+		}
+		// Een node met meer hosts: down wint niet van een bereikbare host.
+		if z.Nodes[h.Node.NodeID] != soc.StateOn {
+			z.Nodes[h.Node.NodeID] = st
+		}
+	}
+	for _, p := range s.snap.Problems {
+		if p.Suppressed || !securityProblem(p) {
+			continue
+		}
+		zp := soc.ZabbixProblem{EventID: p.EventID, Name: p.Name, Severity: p.Severity, Since: p.Since, Acknowledged: p.Acknowledged}
+		if len(p.Hosts) > 0 {
+			zp.Host = p.Hosts[0].Name
+			if p.Hosts[0].Node != nil {
+				zp.Host = p.Hosts[0].Node.Hostname
+			}
+		}
+		z.Problems = append(z.Problems, zp)
+	}
+	return z, true
 }

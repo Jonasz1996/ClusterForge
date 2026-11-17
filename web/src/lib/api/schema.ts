@@ -15356,6 +15356,8 @@ export interface components {
             /** @description Leeg als CrowdSec er niet (beheerd) staat; anders een SocState. */
             bouncer: string;
             security_updates: number;
+            /** @description Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score. */
+            zabbix: string;
             gaps: string[];
         };
         /** @enum {string} */

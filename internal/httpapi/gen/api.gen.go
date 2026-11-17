@@ -13080,6 +13080,9 @@ type SocCoverage struct {
 	NodeId          openapi_types.UUID                    `json:"node_id"`
 	Online          bool                                  `json:"online"`
 	SecurityUpdates int                                   `json:"security_updates"`
+
+	// Zabbix Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score.
+	Zabbix string `json:"zabbix"`
 }
 
 // SocItem defines model for SocItem.

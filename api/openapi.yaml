@@ -16029,7 +16029,7 @@ components:
         detail: { type: string }
     SocCoverage:
       type: object
-      required: [node_id, hostname, cluster_id, cluster_name, online, firewall, crowdsec, bouncer, security_updates, gaps]
+      required: [node_id, hostname, cluster_id, cluster_name, online, firewall, crowdsec, bouncer, security_updates, zabbix, gaps]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -16042,6 +16042,9 @@ components:
           type: string
           description: Leeg als CrowdSec er niet (beheerd) staat; anders een SocState.
         security_updates: { type: integer }
+        zabbix:
+          type: string
+          description: "Fase 33: on (bewaakt en bereikbaar), down (Zabbix ziet de node niet), missing (geen Zabbix-host); leeg zonder Zabbix. Telt niet mee in de score."
         gaps: { type: array, items: { type: string } }
     SocState:
       type: string

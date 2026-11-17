@@ -601,3 +601,59 @@ func TestNotices(t *testing.T) {
 		t.Errorf("kort weg telt niet: %+v", n)
 	}
 }
+
+func TestSecurityProblem(t *testing.T) {
+	for _, c := range []struct {
+		tags []Tag
+		want bool
+	}{
+		{[]Tag{{"scope", "security"}}, true},
+		{[]Tag{{"Scope", "Security"}}, true},
+		{[]Tag{{"security", ""}}, true},
+		{[]Tag{{"component", "security"}}, true},
+		{[]Tag{{"scope", "availability"}}, false},
+		{nil, false},
+	} {
+		if got := securityProblem(Problem{Tags: c.tags}); got != c.want {
+			t.Errorf("%v: %v", c.tags, got)
+		}
+	}
+}
+
+func TestLogProblems(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	var nodeID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, primary_ip) VALUES ('db1', '192.168.10.191') RETURNING id`).Scan(&nodeID); err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	now := time.Date(2026, 11, 17, 6, 0, 0, 0, time.UTC)
+	node := &NodeLink{NodeID: nodeID, Hostname: "db1"}
+	old := Problem{EventID: "1", Name: "Al lang", Severity: 4, Since: now.Add(-time.Hour), Hosts: []HostRef{{Name: "db1", Node: node}}}
+	fresh := Problem{EventID: "2", Name: "Net begonnen", Severity: 3, Since: now.Add(-30 * time.Second), Hosts: []HostRef{{Name: "db1", Node: node}}}
+	low := Problem{EventID: "3", Name: "Info", Severity: 1, Since: now, Hosts: []HostRef{{Name: "db1", Node: node}}}
+	other := Problem{EventID: "4", Name: "Geen node", Severity: 5, Since: now, Hosts: []HostRef{{Name: "printer"}}}
+	count := func(action string) int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE action = $1 AND subject_id = $2`, action, nodeID.String()).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// Eerste ronde: alleen wat net begon.
+	s.logProblems(ctx, &Snapshot{Problems: []Problem{old, fresh, low, other}}, now)
+	if count("zabbix.problem_started") != 1 {
+		t.Fatalf("na de eerste ronde: %d", count("zabbix.problem_started"))
+	}
+	// Tweede ronde: niets nieuws; derde: het oude is opgelost.
+	s.logProblems(ctx, &Snapshot{Problems: []Problem{old, fresh}}, now.Add(time.Minute))
+	s.logProblems(ctx, &Snapshot{Problems: []Problem{fresh}}, now.Add(2*time.Minute))
+	if count("zabbix.problem_started") != 1 || count("zabbix.problem_resolved") != 1 {
+		t.Fatalf("begonnen %d, opgelost %d", count("zabbix.problem_started"), count("zabbix.problem_resolved"))
+	}
+	var payload []byte
+	if err := pool.QueryRow(ctx, `SELECT payload FROM events WHERE action = 'zabbix.problem_resolved'`).Scan(&payload); err != nil || !strings.Contains(string(payload), `"duration_s": 3720`) && !strings.Contains(string(payload), `"duration_s":3720`) {
+		t.Fatalf("payload %s %v", payload, err)
+	}
+}

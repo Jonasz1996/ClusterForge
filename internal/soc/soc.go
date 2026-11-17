@@ -214,6 +214,10 @@ type CoverageRow struct {
 	CrowdSec        string     `json:"crowdsec"`
 	Bouncer         string     `json:"bouncer"`
 	SecurityUpdates int        `json:"security_updates"`
+	// Zabbix (fase 33): on (bewaakt en bereikbaar), down (Zabbix ziet de node
+	// niet) of missing (geen Zabbix-host); leeg zonder Zabbix-API. Telt niet
+	// mee als gat of in de score.
+	Zabbix string `json:"zabbix"`
 	// Gaps zijn de korte omschrijvingen van wat ontbreekt.
 	Gaps []string `json:"gaps"`
 }

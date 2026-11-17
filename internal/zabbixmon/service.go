@@ -41,6 +41,9 @@ type Service struct {
 	lastSaved  time.Time
 	cache      itemCache
 	dash       dashCache
+	// logged: de problemen die al als event in het logboek staan (alleen
+	// onder run).
+	logged map[string]loggedProblem
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, agents *zabbixagent.Service, log *slog.Logger) *Service {
@@ -125,6 +128,7 @@ func (s *Service) Tick(ctx context.Context) error {
 					s.configured, s.apiURL, s.snap, s.lastErr, s.lastOK, s.lastRun = true, url, &snap, "", now, now
 					s.mu.Unlock()
 					s.save(ctx, &snap, now)
+					s.logProblems(ctx, &snap, now)
 					if s.Changed != nil {
 						s.Changed()
 					}

@@ -41,6 +41,9 @@ type Service struct {
 	// meetellen.
 	Vulns func(ctx context.Context) (Vulns, error)
 
+	// Zabbix geeft wat Zabbix ziet (fase 33); nil of ok false: niet tonen.
+	Zabbix func() (Zabbix, bool)
+
 	mu    sync.Mutex
 	cache map[Window]cached
 }
@@ -93,6 +96,14 @@ func (s *Service) build(ctx context.Context, w Window, now time.Time) (Overview,
 
 	if o.Coverage, err = s.coverage(ctx, now); err != nil {
 		return Overview{}, fmt.Errorf("dekking: %w", err)
+	}
+	if s.Zabbix != nil {
+		if z, ok := s.Zabbix(); ok {
+			for i := range o.Coverage {
+				o.Coverage[i].Zabbix = cmpOr(z.Nodes[o.Coverage[i].NodeID], StateMissing)
+			}
+			in.Zabbix = z.Problems
+		}
 	}
 	in.Coverage = o.Coverage
 	for _, c := range o.Coverage {
@@ -148,6 +159,13 @@ func (s *Service) build(ctx context.Context, w Window, now time.Time) (Overview,
 		o.Attackers = o.Attackers[:attackersShown]
 	}
 	return o, nil
+}
+
+// Zabbix is wat Zabbix ziet, voor het SOC.
+type Zabbix struct {
+	// Nodes: per node on of down; een node zonder Zabbix-host ontbreekt.
+	Nodes    map[uuid.UUID]string
+	Problems []ZabbixProblem
 }
 
 // --- netwerken -------------------------------------------------------------
