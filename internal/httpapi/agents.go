@@ -193,6 +193,11 @@ func (s *Server) ClaimAgent(w http.ResponseWriter, r *http.Request) {
 // natsURL is het adres waarop de agent NATS bereikt: CF_NATS_ADVERTISE, of
 // anders de hostnaam van deze request met de NATS-poort.
 func (s *Server) natsURL(r *http.Request) string {
+	if s.agentConf != nil {
+		if e, err := s.agentConf.Endpoints(r.Context(), r.Host); err == nil && e.NatsURL != "" {
+			return e.NatsURL
+		}
+	}
 	if a := s.cfg.NATSAdvertise; a != "" {
 		if _, _, err := net.SplitHostPort(a); err != nil {
 			a = net.JoinHostPort(a, strconv.Itoa(s.bus.Port()))

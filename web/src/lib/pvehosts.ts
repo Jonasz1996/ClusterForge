@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap } from "./api/client";
 import type { Job } from "./proxmox";
+import { agentServerURL } from "./agentEndpoints";
 
 // Proxmox-hosts met een agent (fase 17). De types volgen internal/pvehost en
 // pkg/protocol/pve.go.
@@ -196,6 +197,6 @@ export const pveTypeLabel = (t: string) => (t === "lxc" ? "CT" : "VM");
 // pagina zelf, tenzij die via localhost loopt.
 export function defaultServerURL() {
   if (typeof window === "undefined") return "";
-  const o = window.location.origin;
+  const o = agentServerURL();
   return /\/\/(localhost|127\.)/.test(o) ? "" : o;
 }

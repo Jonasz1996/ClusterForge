@@ -29,6 +29,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agentconf"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
@@ -217,6 +218,11 @@ func serve() error {
 	// Agents bijwerken: met de knop, en vanzelf na een serverupdate.
 	upg := agentupgrade.NewService(pool, ev, log, runner, bus, cfg.AgentDir, version)
 	upg.Changed = eval.Kick
+	// Tussenfase: het adres voor agents en agents omzetten (protocol 47).
+	acf := agentconf.NewService(pool, ev, log, runner, bus)
+	acf.Advertise, acf.HTTPPort, acf.NATSPort = cfg.NATSAdvertise, agentconf.PortOf(cfg.Listen, 8080), bus.Port()
+	acf.HTTPLoopback = cfg.HTTPBindLoopback()
+	acf.Changed = eval.Kick
 	// Fase 10: pakketten en Docker bijwerken, en eigen commando's draaien.
 	upd := updates.NewService(pool, ev, runner, bus)
 	cmds := commands.NewService(pool, ev, runner, bus, upd)
@@ -458,7 +464,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

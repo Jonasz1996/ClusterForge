@@ -5780,6 +5780,78 @@ paths:
               schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /agent-endpoints:
+    get:
+      operationId: getAgentEndpoints
+      summary: Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+      description: |
+        server_url is het adres in het installcommando en voor het downloaden van nieuwe agents; nats_url het adres
+        waarmee agents verbinden. Zonder instelling is dat het interne adres uit CF_NATS_ADVERTISE (met de poort van de
+        webserver), niet de naam achter een reverse proxy. Is ook dat er niet, dan is server_url leeg en gebruikt de
+        webinterface zijn eigen adres. Per agent (vanaf protocol 47) de adressen uit zijn agent.json. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEndpointsOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setAgentEndpoints
+      summary: Het adres voor agents instellen (admin); leeg is de standaard
+      description: |
+        Verandert het installcommando en nieuwe aanmeldingen meteen. Bestaande agents blijven op hun adres tot je ze
+        omzet (POST /agent-endpoints/apply).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_url, nats_url]
+              properties:
+                server_url: { type: string, description: "Bijvoorbeeld http://192.168.113.153:8080; leeg is de standaard" }
+                nats_url: { type: string, description: "host:poort, bijvoorbeeld 192.168.113.153:4222; leeg is de standaard" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEndpointsOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /agent-endpoints/apply:
+    post:
+      operationId: applyAgentEndpoints
+      summary: Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+      description: |
+        node_ids zet die nodes om, all elke afwijkende agent buiten prod, met include_prod ook die op prod. De agent test
+        het nieuwe adres eerst (NATS met zijn eigen sleutel, /api/v1/health over http) en zet zijn oude agent.json terug als
+        hij na de herstart de server niet bereikt. Per cluster één node tegelijk; mislukt er een, dan stopt de taak van dat
+        cluster en blijven de andere op hun oude adres. Op prod vraagt het tweestapsverificatie en een code in totp_code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                node_ids: { type: array, items: { type: string, format: uuid } }
+                all: { type: boolean }
+                include_prod: { type: boolean }
+                totp_code: { type: string }
+      responses:
+        "202":
+          description: Taken aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/agent-upgrade-auto:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -13464,6 +13536,49 @@ components:
         include_prod: { type: boolean, description: "Met all: ook de agents op prod, één prodcluster na het andere" }
         totp_code: { type: string, description: "Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik" }
         confirm: { type: string, description: De slug van het prodcluster, ter bevestiging (alleen voor één prodcluster) }
+    AgentEndpointsOverview:
+      type: object
+      required: [server_url, server_source, nats_url, nats_source, server_setting, nats_setting, server_default, nats_default, protocol, agents, running]
+      properties:
+        server_url: { type: string, description: Het adres in het installcommando; leeg is het adres van de webinterface }
+        server_source: { type: string, enum: [setting, advertise, request] }
+        nats_url: { type: string }
+        nats_source: { type: string, enum: [setting, advertise, request] }
+        server_setting: { type: string }
+        nats_setting: { type: string }
+        server_default: { type: string, description: Het adres zonder instelling (uit CF_NATS_ADVERTISE); leeg als er geen is }
+        nats_default: { type: string }
+        protocol: { type: integer, description: Het agentprotocol vanaf waar agents zich laten omzetten }
+        agents: { type: array, items: { $ref: "#/components/schemas/AgentEndpointAgent" } }
+        running:
+          type: array
+          items:
+            type: object
+            required: [cluster_id, job_id]
+            properties:
+              cluster_id: { type: string, format: uuid, nullable: true }
+              job_id: { type: string, format: uuid }
+    AgentEndpointAgent:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, protocol, server_url, nats_url, online, state, why]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment: { type: string }
+        protocol: { type: integer }
+        server_url: { type: string }
+        nats_url: { type: string }
+        online: { type: boolean }
+        state:
+          type: string
+          enum: [current, differs, failed, manual, unknown]
+          description: |
+            current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+            werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+        why: { type: string }
     AgentUpgradeStarted:
       type: object
       required: [jobs, skipped, queued_prod]

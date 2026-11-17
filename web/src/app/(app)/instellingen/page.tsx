@@ -14,6 +14,7 @@ import { api, ApiError, unwrap } from "@/lib/api/client";
 import { meQueryKey, useMe } from "@/lib/auth";
 import { useIsAdmin } from "@/lib/inventory";
 import { useTheme, type Theme } from "@/lib/theme";
+import { AgentEndpointsCard } from "@/components/settings/AgentEndpointsCard";
 
 const sections: { id: string; label: string }[] = [
   { id: "tweestap", label: "Tweestapsverificatie" },
@@ -62,6 +63,9 @@ export default function SettingsPage() {
       </div>
       <div id="agents-bijwerken" className="scroll-mt-20">
         <AgentUpgradeSettingsCard isAdmin={isAdmin} />
+      </div>
+      <div id="adres-voor-agents" className="scroll-mt-20">
+        <AgentEndpointsCard isAdmin={isAdmin} />
       </div>
       <div id="dashboard-api" className="scroll-mt-20">
         <ApiTokensCard isAdmin={isAdmin} />

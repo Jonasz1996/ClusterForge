@@ -36,6 +36,75 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AgentEndpointAgentState.
+const (
+	AgentEndpointAgentStateCurrent AgentEndpointAgentState = "current"
+	AgentEndpointAgentStateDiffers AgentEndpointAgentState = "differs"
+	AgentEndpointAgentStateFailed  AgentEndpointAgentState = "failed"
+	AgentEndpointAgentStateManual  AgentEndpointAgentState = "manual"
+	AgentEndpointAgentStateUnknown AgentEndpointAgentState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AgentEndpointAgentState enum.
+func (e AgentEndpointAgentState) Valid() bool {
+	switch e {
+	case AgentEndpointAgentStateCurrent:
+		return true
+	case AgentEndpointAgentStateDiffers:
+		return true
+	case AgentEndpointAgentStateFailed:
+		return true
+	case AgentEndpointAgentStateManual:
+		return true
+	case AgentEndpointAgentStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentEndpointsOverviewNatsSource.
+const (
+	AgentEndpointsOverviewNatsSourceAdvertise AgentEndpointsOverviewNatsSource = "advertise"
+	AgentEndpointsOverviewNatsSourceRequest   AgentEndpointsOverviewNatsSource = "request"
+	AgentEndpointsOverviewNatsSourceSetting   AgentEndpointsOverviewNatsSource = "setting"
+)
+
+// Valid indicates whether the value is a known member of the AgentEndpointsOverviewNatsSource enum.
+func (e AgentEndpointsOverviewNatsSource) Valid() bool {
+	switch e {
+	case AgentEndpointsOverviewNatsSourceAdvertise:
+		return true
+	case AgentEndpointsOverviewNatsSourceRequest:
+		return true
+	case AgentEndpointsOverviewNatsSourceSetting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentEndpointsOverviewServerSource.
+const (
+	AgentEndpointsOverviewServerSourceAdvertise AgentEndpointsOverviewServerSource = "advertise"
+	AgentEndpointsOverviewServerSourceRequest   AgentEndpointsOverviewServerSource = "request"
+	AgentEndpointsOverviewServerSourceSetting   AgentEndpointsOverviewServerSource = "setting"
+)
+
+// Valid indicates whether the value is a known member of the AgentEndpointsOverviewServerSource enum.
+func (e AgentEndpointsOverviewServerSource) Valid() bool {
+	switch e {
+	case AgentEndpointsOverviewServerSourceAdvertise:
+		return true
+	case AgentEndpointsOverviewServerSourceRequest:
+		return true
+	case AgentEndpointsOverviewServerSourceSetting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentUpgradeAgentState.
 const (
 	AgentUpgradeAgentStateCurrent  AgentUpgradeAgentState = "current"
@@ -4232,6 +4301,59 @@ func (e GetSocParamsWindow) Valid() bool {
 
 // AgentConnection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
 type AgentConnection string
+
+// AgentEndpointAgent defines model for AgentEndpointAgent.
+type AgentEndpointAgent struct {
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Hostname           string                                `json:"hostname"`
+	NatsUrl            string                                `json:"nats_url"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Protocol           int                                   `json:"protocol"`
+	ServerUrl          string                                `json:"server_url"`
+
+	// State current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+	// werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+	State AgentEndpointAgentState `json:"state"`
+	Why   string                  `json:"why"`
+}
+
+// AgentEndpointAgentState current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+// werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+type AgentEndpointAgentState string
+
+// AgentEndpointsOverview defines model for AgentEndpointsOverview.
+type AgentEndpointsOverview struct {
+	Agents      []AgentEndpointAgent             `json:"agents"`
+	NatsDefault string                           `json:"nats_default"`
+	NatsSetting string                           `json:"nats_setting"`
+	NatsSource  AgentEndpointsOverviewNatsSource `json:"nats_source"`
+	NatsUrl     string                           `json:"nats_url"`
+
+	// Protocol Het agentprotocol vanaf waar agents zich laten omzetten
+	Protocol int `json:"protocol"`
+	Running  []struct {
+		ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+		JobId     openapi_types.UUID                    `json:"job_id"`
+	} `json:"running"`
+
+	// ServerDefault Het adres zonder instelling (uit CF_NATS_ADVERTISE); leeg als er geen is
+	ServerDefault string                             `json:"server_default"`
+	ServerSetting string                             `json:"server_setting"`
+	ServerSource  AgentEndpointsOverviewServerSource `json:"server_source"`
+
+	// ServerUrl Het adres in het installcommando; leeg is het adres van de webinterface
+	ServerUrl string `json:"server_url"`
+}
+
+// AgentEndpointsOverviewNatsSource defines model for AgentEndpointsOverview.NatsSource.
+type AgentEndpointsOverviewNatsSource string
+
+// AgentEndpointsOverviewServerSource defines model for AgentEndpointsOverview.ServerSource.
+type AgentEndpointsOverviewServerSource string
 
 // AgentSummary defines model for AgentSummary.
 type AgentSummary struct {
@@ -13752,6 +13874,23 @@ type TimelineLimit = int
 // TimelineTo defines model for TimelineTo.
 type TimelineTo = time.Time
 
+// SetAgentEndpointsJSONBody defines parameters for SetAgentEndpoints.
+type SetAgentEndpointsJSONBody struct {
+	// NatsUrl host:poort, bijvoorbeeld 192.168.113.153:4222; leeg is de standaard
+	NatsUrl string `json:"nats_url"`
+
+	// ServerUrl Bijvoorbeeld http://192.168.113.153:8080; leeg is de standaard
+	ServerUrl string `json:"server_url"`
+}
+
+// ApplyAgentEndpointsJSONBody defines parameters for ApplyAgentEndpoints.
+type ApplyAgentEndpointsJSONBody struct {
+	All         *bool                 `json:"all,omitempty"`
+	IncludeProd *bool                 `json:"include_prod,omitempty"`
+	NodeIds     *[]openapi_types.UUID `json:"node_ids,omitempty"`
+	TotpCode    *string               `json:"totp_code,omitempty"`
+}
+
 // SetAgentUpgradeAutoJSONBody defines parameters for SetAgentUpgradeAuto.
 type SetAgentUpgradeAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
@@ -14364,6 +14503,12 @@ type ListTestRunsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// SetAgentEndpointsJSONRequestBody defines body for SetAgentEndpoints for application/json ContentType.
+type SetAgentEndpointsJSONRequestBody SetAgentEndpointsJSONBody
+
+// ApplyAgentEndpointsJSONRequestBody defines body for ApplyAgentEndpoints for application/json ContentType.
+type ApplyAgentEndpointsJSONRequestBody ApplyAgentEndpointsJSONBody
+
 // StartAgentUpgradesJSONRequestBody defines body for StartAgentUpgrades for application/json ContentType.
 type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 
@@ -14807,6 +14952,15 @@ type UpdateVipJSONRequestBody = VipPatch
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+	// (GET /agent-endpoints)
+	GetAgentEndpoints(w http.ResponseWriter, r *http.Request)
+	// SetAgentEndpoints Het adres voor agents instellen (admin); leeg is de standaard
+	// (PUT /agent-endpoints)
+	SetAgentEndpoints(w http.ResponseWriter, r *http.Request)
+	// ApplyAgentEndpoints Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+	// (POST /agent-endpoints/apply)
+	ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request)
 	// ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
 	// (GET /agent-upgrades)
 	ListAgentUpgrades(w http.ResponseWriter, r *http.Request)
@@ -15928,6 +16082,24 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+// (GET /agent-endpoints)
+func (_ Unimplemented) GetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentEndpoints Het adres voor agents instellen (admin); leeg is de standaard
+// (PUT /agent-endpoints)
+func (_ Unimplemented) SetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyAgentEndpoints Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+// (POST /agent-endpoints/apply)
+func (_ Unimplemented) ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
 // (GET /agent-upgrades)
@@ -18169,6 +18341,48 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetAgentEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyAgentEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyAgentEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListAgentUpgrades operation middleware
 func (siw *ServerInterfaceWrapper) ListAgentUpgrades(w http.ResponseWriter, r *http.Request) {
@@ -29759,6 +29973,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/agent-upgrades/prod-queue", wrapper.ClearAgentUpgradeProdQueue)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/agent-endpoints", wrapper.GetAgentEndpoints)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-endpoints", wrapper.SetAgentEndpoints)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agent-endpoints/apply", wrapper.ApplyAgentEndpoints)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/clusters/{clusterId}/agent-upgrade-auto", wrapper.SetClusterAgentUpgradeAuto)

@@ -19,6 +19,7 @@ import {
   type AgentUpgradeInput,
   type AgentUpgradeOverview,
 } from "@/lib/agentUpgrades";
+import { useAgentEndpoints } from "@/lib/agentEndpoints";
 import { ApiError } from "@/lib/api/client";
 import { useClusters } from "@/lib/inventory";
 
@@ -520,6 +521,7 @@ export function AgentUpgradeRow({
 // AgentUpgradeSettingsCard: vanzelf bijwerken, voor alles en per cluster.
 export function AgentUpgradeSettingsCard({ isAdmin }: { isAdmin: boolean }) {
   const q = useAgentUpgrades();
+  useAgentEndpoints();
   const clusters = useClusters();
   const setAuto = useSetAgentUpgradeAuto();
   const setCluster = useSetClusterAgentUpgradeAuto();

@@ -14,6 +14,7 @@ import { mib, planDeployment, useDeploy, useTemplates, type DeployInput, type De
 import { environments, useIsAdmin, useNodes, type Environment } from "@/lib/inventory";
 import { usePveHosts } from "@/lib/pvehosts";
 import { useProxmoxConnections, useProxmoxResources, useSyncProxmox, type ProxmoxResources, type ProxmoxStorage } from "@/lib/proxmox";
+import { agentServerURL } from "@/lib/agentEndpoints";
 
 export default function DeployPage() {
   return (
@@ -225,7 +226,7 @@ function DeployInner() {
   const sync = useSyncProxmox();
 
   const imageVmid = form.imageVmid || (images[0] ? String(images[0].vmid) : "");
-  const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
+  const origin = agentServerURL();
   const setWhere = (w: Form["where"]) => setForm((f) => ({ ...f, where: w, imageVmid: "", storage: "", placement: {} }));
   const eff: Form = { ...form, template: template?.name ?? "", proxmoxId, imageVmid, serverUrl: form.serverUrl ?? origin, where };
 

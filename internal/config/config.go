@@ -51,6 +51,10 @@ type Config struct {
 	// ScannerServerURL is het adres waarop de scannercontainer (network_mode
 	// host) de server bereikt.
 	ScannerServerURL string
+	// HTTPBind is het host-adres waarop docker compose de webserver
+	// publiceert (CF_HTTP_BIND, uit CF_BIND). Op 127.0.0.1 kunnen agents de
+	// server niet rechtstreeks op het interne adres bereiken.
+	HTTPBind string
 	// VictoriaMetricsURL is het adres van VictoriaMetrics, bijvoorbeeld
 	// http://victoriametrics:8428 (CF_VICTORIAMETRICS_URL). Leeg zet de
 	// grafieken uit.
@@ -106,6 +110,7 @@ func FromEnv() (Config, error) {
 		AgentDir:           envOr("CF_AGENT_DIR", "/usr/share/clusterforge/agents"),
 		ScannerDir:         envOr("CF_SCANNER_DIR", "/var/lib/clusterforge/scanner"),
 		ScannerServerURL:   envOr("CF_SCANNER_SERVER_URL", "http://127.0.0.1:8080"),
+		HTTPBind:           os.Getenv("CF_HTTP_BIND"),
 
 		VictoriaMetricsURL: os.Getenv("CF_VICTORIAMETRICS_URL"),
 		GrafanaNodeURL:     os.Getenv("CF_GRAFANA_NODE_URL"),
@@ -235,4 +240,11 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// HTTPBindLoopback is true als de webserver op de host alleen op loopback
+// gepubliceerd is.
+func (c Config) HTTPBindLoopback() bool {
+	h := strings.Trim(strings.TrimSpace(c.HTTPBind), "[]")
+	return h == "localhost" || strings.HasPrefix(h, "127.") || h == "::1"
 }

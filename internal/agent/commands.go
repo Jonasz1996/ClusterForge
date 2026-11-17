@@ -160,6 +160,8 @@ func (a *Agent) handleCommand(data []byte) protocol.Result {
 		limit = inspectTimeout
 	case protocol.CmdAgentUpgrade:
 		limit = protocol.UpgradeTimeout
+	case protocol.CmdAgentReconfigure:
+		limit = protocol.ReconfigureTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
@@ -209,6 +211,8 @@ func (a *Agent) handleCommand(data []byte) protocol.Result {
 		a.signal(a.factsNow)
 	case protocol.CmdAgentUpgrade:
 		res = a.upgrade(ctx, cmd)
+	case protocol.CmdAgentReconfigure:
+		res = a.reconfigure(ctx, cmd)
 	default:
 		res = failed(nil, "onbekend commando "+cmd.Action)
 	}

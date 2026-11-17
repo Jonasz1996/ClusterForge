@@ -5405,6 +5405,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+         * @description server_url is het adres in het installcommando en voor het downloaden van nieuwe agents; nats_url het adres
+         *     waarmee agents verbinden. Zonder instelling is dat het interne adres uit CF_NATS_ADVERTISE (met de poort van de
+         *     webserver), niet de naam achter een reverse proxy. Is ook dat er niet, dan is server_url leeg en gebruikt de
+         *     webinterface zijn eigen adres. Per agent (vanaf protocol 47) de adressen uit zijn agent.json. Ook voor viewers.
+         */
+        get: operations["getAgentEndpoints"];
+        /**
+         * Het adres voor agents instellen (admin); leeg is de standaard
+         * @description Verandert het installcommando en nieuwe aanmeldingen meteen. Bestaande agents blijven op hun adres tot je ze
+         *     omzet (POST /agent-endpoints/apply).
+         */
+        put: operations["setAgentEndpoints"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-endpoints/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+         * @description node_ids zet die nodes om, all elke afwijkende agent buiten prod, met include_prod ook die op prod. De agent test
+         *     het nieuwe adres eerst (NATS met zijn eigen sleutel, /api/v1/health over http) en zet zijn oude agent.json terug als
+         *     hij na de herstart de server niet bereikt. Per cluster één node tegelijk; mislukt er een, dan stopt de taak van dat
+         *     cluster en blijven de andere op hun oude adres. Op prod vraagt het tweestapsverificatie en een code in totp_code.
+         */
+        post: operations["applyAgentEndpoints"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/agent-upgrade-auto": {
         parameters: {
             query?: never;
@@ -12808,6 +12859,50 @@ export interface components {
             totp_code?: string;
             /** @description De slug van het prodcluster */
             confirm?: string;
+        };
+        AgentEndpointsOverview: {
+            /** @description Het adres in het installcommando; leeg is het adres van de webinterface */
+            server_url: string;
+            /** @enum {string} */
+            server_source: "setting" | "advertise" | "request";
+            nats_url: string;
+            /** @enum {string} */
+            nats_source: "setting" | "advertise" | "request";
+            server_setting: string;
+            nats_setting: string;
+            /** @description Het adres zonder instelling (uit CF_NATS_ADVERTISE); leeg als er geen is */
+            server_default: string;
+            nats_default: string;
+            /** @description Het agentprotocol vanaf waar agents zich laten omzetten */
+            protocol: number;
+            agents: components["schemas"]["AgentEndpointAgent"][];
+            running: {
+                /** Format: uuid */
+                cluster_id: string | null;
+                /** Format: uuid */
+                job_id: string;
+            }[];
+        };
+        AgentEndpointAgent: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: string;
+            protocol: number;
+            server_url: string;
+            nats_url: string;
+            online: boolean;
+            /**
+             * @description current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+             *     werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+             * @enum {string}
+             */
+            state: "current" | "differs" | "failed" | "manual" | "unknown";
+            why: string;
         };
         AgentUpgradeStarted: {
             jobs: components["schemas"]["Job"][];
@@ -22933,6 +23028,93 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    getAgentEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEndpointsOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setAgentEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Bijvoorbeeld http://192.168.113.153:8080; leeg is de standaard */
+                    server_url: string;
+                    /** @description host:poort, bijvoorbeeld 192.168.113.153:4222; leeg is de standaard */
+                    nats_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEndpointsOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    applyAgentEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    node_ids?: string[];
+                    all?: boolean;
+                    include_prod?: boolean;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Taken aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     setClusterAgentUpgradeAuto: {

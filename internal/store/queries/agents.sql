@@ -65,7 +65,8 @@ RETURNING *;
 
 -- name: TouchAgent :exec
 UPDATE agents SET last_seen_at = now(), version = $2, protocol_version = $3,
-    arch = @arch, binary_sha256 = @binary_sha256, upgrade_rolled_back = @upgrade_rolled_back
+    arch = @arch, binary_sha256 = @binary_sha256, upgrade_rolled_back = @upgrade_rolled_back,
+    server_url = @server_url, nats_url = @nats_url, reconfigure_rolled_back = @reconfigure_rolled_back
 WHERE node_id = $1 AND revoked_at IS NULL;
 
 -- name: UpsertNodeStatus :exec
