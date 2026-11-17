@@ -78,11 +78,28 @@ roles:
     steps:
       # rsync en sshd voor de syncs van ClusterForge.
       - package: { names: [rsync, openssh-server, curl, util-linux] }
-      # Docker alleen als het er nog niet is: een bestaande docker-ce blijft.
+      # Docker alleen op een node zonder Docker. Een bestaande Docker CE of
+      # docker.io blijft zoals hij is (docker.io zou Docker CE verdringen).
       - command:
           title: Docker
-          run: DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose && systemctl enable --now docker
-          unless: command -v docker && docker compose version && systemctl is-active --quiet docker
+          run: |-
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ce() { dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'ok installed'; }
+            if command -v dockerd >/dev/null 2>&1 || ce; then
+              # Er staat al Docker (Docker CE of docker.io): nooit herinstalleren.
+              # Alleen Compose als het ontbreekt, uit dezelfde bron.
+              if ! docker compose version >/dev/null 2>&1; then
+                if ce; then apt-get install -y docker-compose-plugin; else apt-get install -y docker-compose; fi
+              fi
+              systemctl is-active --quiet docker || systemctl start docker
+            else
+              apt-get install -y docker.io docker-compose
+              mkdir -p /etc/clusterforge
+              touch /etc/clusterforge/docker-door-clusterforge
+              systemctl enable --now docker
+            fi
+          unless: command -v dockerd >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && systemctl is-active --quiet docker
       - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
       - directory: { path: /usr/local/lib/clusterforge/docker-ha, mode: "0755" }
       - file:
