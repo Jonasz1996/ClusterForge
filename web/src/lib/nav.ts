@@ -111,6 +111,9 @@ export const navGroups: NavGroup[] = [
         tabs: [
           { href: "/docker", label: "Overzicht" },
           { href: "/docker/containers", label: "Containers", keywords: "docker container start stop herstart logs stats" },
+          { href: "/docker/images", label: "Images", keywords: "docker image pull update registry digest" },
+          { href: "/docker/volumes", label: "Volumes", keywords: "docker volume opslag" },
+          { href: "/docker/networks", label: "Netwerken", keywords: "docker network subnet bridge macvlan" },
           { href: "/containers", label: "Stacks", keywords: "docker compose stacks" },
         ],
       },

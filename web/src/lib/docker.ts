@@ -230,3 +230,47 @@ export function portsText(ports: DockerPort[] | undefined) {
 
 // containerPath maakt een pad naar een container (id is altijd veilig).
 export const cpath = (id: string, rest = "") => `/containers/${id}${rest}`;
+
+// Een rij uit /images/json.
+export type ImageSummary = {
+  Id: string;
+  RepoTags: string[] | null;
+  RepoDigests: string[] | null;
+  Size: number;
+  Created: number;
+  Containers: number;
+  Labels?: Record<string, string> | null;
+};
+
+// Een volume uit /volumes en de grootte uit /system/df.
+export type VolumeSummary = {
+  Name: string;
+  Driver: string;
+  Mountpoint: string;
+  CreatedAt?: string;
+  Labels?: Record<string, string> | null;
+  Scope?: string;
+  UsageData?: { Size: number; RefCount: number } | null;
+};
+
+export type NetworkSummary = {
+  Name: string;
+  Id: string;
+  Driver: string;
+  Scope: string;
+  Internal?: boolean;
+  IPAM?: { Config?: { Subnet?: string; Gateway?: string }[] | null };
+  Containers?: Record<string, { Name: string; IPv4Address?: string }> | null;
+  Labels?: Record<string, string> | null;
+};
+
+export type SystemDF = {
+  LayersSize: number;
+  Images: ImageSummary[] | null;
+  Containers: { Id: string; SizeRw?: number; State: string }[] | null;
+  Volumes: VolumeSummary[] | null;
+  BuildCache: { Size: number; InUse: boolean; Shared: boolean }[] | null;
+};
+
+export const shortId = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
+export const builtinNetworks = new Set(["bridge", "host", "none"]);
