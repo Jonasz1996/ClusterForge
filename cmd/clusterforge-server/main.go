@@ -472,6 +472,7 @@ func serve() error {
 	goLoop(ctx, log, "soc", socs.Run)
 	goLoop(ctx, log, "docker", dkr.Loop)
 	goLoop(ctx, log, "pbs", pbsSvc.Watch)
+	goLoop(ctx, log, "truenas", tnSvc.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}

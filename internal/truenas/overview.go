@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -49,6 +50,10 @@ var overviewParts = map[string]part{
 	"failed":  {method: "core.get_jobs", args: `[[["state","=","FAILED"]],{"order_by":["-id"],"limit":15}]`},
 	"smart":   {method: "smart.test.results", args: `[[],{"limit":200}]`, alt: `[]`},
 	"boot":    {method: "boot.get_state"},
+	// Taken met hun laatste uitkomst (M4: wat mislukte, vraagt aandacht).
+	"snaptasks": {method: "pool.snapshottask.query"},
+	"cloudsync": {method: "cloudsync.query"},
+	"repl":      {method: "replication.query"},
 }
 
 // Overview leest alle delen tegelijk.
@@ -151,6 +156,7 @@ func warnings(parts map[string]json.RawMessage) []Warning {
 			out = append(out, Warning{"critical", "TrueNAS: " + a.Formatted})
 		}
 	}
+	out = append(out, taskWarnings(parts)...)
 	var boot struct {
 		Status string `json:"status"`
 	}
@@ -179,6 +185,68 @@ func diskTemps(raw json.RawMessage) map[string]float64 {
 		}
 		if json.Unmarshal(v, &o) == nil && o.Temperature != nil {
 			out[k] = *o.Temperature
+		}
+	}
+	return out
+}
+
+type taskInfo struct {
+	ID          int64  `json:"id"`
+	Dataset     string `json:"dataset"`
+	Description string `json:"description"`
+	Name        string `json:"name"`
+	Enabled     bool   `json:"enabled"`
+	State       *struct {
+		State string `json:"state"`
+		Error string `json:"error"`
+	} `json:"state"`
+	Job *struct {
+		State string `json:"state"`
+		Error string `json:"error"`
+	} `json:"job"`
+}
+
+// taskWarnings meldt aangezette taken waarvan de laatste keer mislukte, en
+// een TrueNAS zonder enige snapshot-taak.
+func taskWarnings(parts map[string]json.RawMessage) []Warning {
+	var out []Warning
+	for _, k := range []struct{ part, what string }{{"snaptasks", "snapshot-taak"}, {"cloudsync", "cloud-sync"}, {"repl", "replicatie"}} {
+		var list []taskInfo
+		if json.Unmarshal(parts[k.part], &list) != nil {
+			continue
+		}
+		if k.part == "snaptasks" && parts[k.part] != nil && len(list) == 0 {
+			out = append(out, Warning{"warning", "geen enkele snapshot-taak: een verwijderd bestand is niet terug te halen"})
+		}
+		for _, t := range list {
+			if !t.Enabled {
+				continue
+			}
+			st, msg := "", ""
+			if t.State != nil {
+				st, msg = t.State.State, t.State.Error
+			}
+			if st == "" && t.Job != nil {
+				st, msg = t.Job.State, t.Job.Error
+			}
+			if st != "ERROR" && st != "FAILED" {
+				continue
+			}
+			name := t.Description
+			if name == "" {
+				name = t.Name
+			}
+			if name == "" {
+				name = t.Dataset
+			}
+			text := fmt.Sprintf("%s %s mislukte", k.what, name)
+			if msg != "" {
+				if i := strings.IndexByte(msg, '\n'); i > 0 {
+					msg = msg[:i]
+				}
+				text += ": " + msg
+			}
+			out = append(out, Warning{"critical", text})
 		}
 	}
 	return out

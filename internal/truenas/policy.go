@@ -83,6 +83,27 @@ var rules = map[string]rule{
 	"service.control":    {job: true, args: serviceControl},
 	"service.update":     {args: serviceAutostart},
 
+	// --- Updates en herstarten (M4) ------------------------------------
+	"update.download": {job: true, args: func(a []json.RawMessage) (string, string, error) {
+		if len(a) > 1 {
+			return "", "", fmt.Errorf("te veel argumenten")
+		}
+		return "TrueNAS-update downloaden", "", nil
+	}},
+	"update.update": {job: true, args: updateApply},
+	"update.run":    {job: true, args: updateApply},
+	"system.reboot": {job: true, args: func(a []json.RawMessage) (string, string, error) {
+		if len(a) > 2 {
+			return "", "", fmt.Errorf("te veel argumenten")
+		}
+		if len(a) >= 1 {
+			if r, err := str(a, 0); err != nil || len(r) > 200 {
+				return "", "", fmt.Errorf("reden is een korte tekst")
+			}
+		}
+		return "TrueNAS herstarten", "herstarten", nil
+	}},
+
 	// --- Meldingen ----------------------------------------------------
 	"alert.dismiss": {args: func(a []json.RawMessage) (string, string, error) {
 		if err := count(a, 1); err != nil {
@@ -401,4 +422,32 @@ func serviceAutostart(a []json.RawMessage) (string, string, error) {
 		return fmt.Sprintf("dienst %v automatisch laten starten", id), "", nil
 	}
 	return fmt.Sprintf("dienst %v niet meer automatisch starten", id), "", nil
+}
+
+// updateApply installeert de update; met reboot herstart TrueNAS meteen
+// in de nieuwe boot-omgeving (de vorige blijft om terug te gaan).
+func updateApply(a []json.RawMessage) (string, string, error) {
+	if len(a) > 1 {
+		return "", "", fmt.Errorf("te veel argumenten")
+	}
+	reboot := false
+	if len(a) == 1 {
+		var o map[string]json.RawMessage
+		if json.Unmarshal(a[0], &o) != nil {
+			return "", "", fmt.Errorf("opties zijn geen object")
+		}
+		for k, v := range o {
+			var b bool
+			if (k != "reboot" && k != "resume") || json.Unmarshal(v, &b) != nil {
+				return "", "", fmt.Errorf("optie %s mag niet", k)
+			}
+			if k == "reboot" {
+				reboot = b
+			}
+		}
+	}
+	if reboot {
+		return "TrueNAS bijwerken en herstarten", "update", nil
+	}
+	return "TrueNAS-update installeren (actief na herstart)", "update", nil
 }

@@ -53,6 +53,7 @@ type Service struct {
 	bus   Bus
 	Run   *noderun.Runner
 	cache getCache
+	watch watchState
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus) *Service {

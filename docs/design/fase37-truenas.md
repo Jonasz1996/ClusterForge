@@ -67,3 +67,14 @@ Dus geen apps en geen replicatie naar een tweede TrueNAS. M3 wordt shares
   allowlist: scrub, melding wegklikken/terugzetten, SMART-test, taak
   afbreken), endpoints `/api/v1/truenas…` buiten de OpenAPI, pagina
   TrueNAS. Geen migraties.
+- **M2 af**: Datasets (pool.dataset.details, snapshots maken/verwijderen,
+  terugrollen met de datasetnaam overtikken) en Bescherming
+  (snapshot-taken, cloud-sync, rsync, replicatie: aan/uit, nu uitvoeren).
+  Geheime velden (wachtwoorden, credentials.attributes) worden op de
+  server weggehaald uit elk leesantwoord.
+- **M3 af**: Shares (SMB/NFS aan/uit) en diensten (service.control,
+  automatisch starten; ssh stoppen vraagt overtikken, middlewared nooit).
+- **M4 af**: kaart Updates (update.check_available of update.status,
+  bijwerken + herstarten met "update" overtikken, herstarten met
+  "herstarten"), achtergrondronde elke 10 min met mislukte taken, geen
+  snapshot-taak en beschikbare update in Aandacht nodig.

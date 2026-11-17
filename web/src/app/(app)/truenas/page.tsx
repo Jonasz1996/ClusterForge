@@ -1,13 +1,13 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { Empty, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Meter, uptime } from "@/components/pve/bits";
 import { Tile as Win, TileGrid } from "@/components/Tiles";
 import { TrueNASGate, tnTime, useTrueNASRunner } from "@/components/truenas-bits";
-import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
+import { Alert, Badge, Button, Card, Input, PageHeader } from "@/components/ui";
 import { useMe } from "@/lib/auth";
-import { tempOf, tnDate, useTrueNASOverview, type TNAlert, type TNPool, type TrueNASOverview, type TrueNASServer } from "@/lib/truenas";
+import { tempOf, tnDate, useTrueNASGet, useTrueNASOverview, type TNAlert, type TNPool, type TrueNASOverview, type TrueNASServer } from "@/lib/truenas";
 
 export default function TrueNASPage() {
   return (
@@ -66,6 +66,9 @@ function OverviewView({ srv }: { srv: TrueNASServer }) {
             </Win>
             <Win wide>
               <JobsCard o={o.data} admin={admin} runner={runner} />
+            </Win>
+            <Win>
+              <UpdatesCard srv={srv} current={o.data.parts.system?.version ?? srv.version} admin={admin} runner={runner} />
             </Win>
           </TileGrid>
           {Object.keys(o.data.errors).length > 0 && (
@@ -344,6 +347,81 @@ function JobsCard({ o, admin, runner }: { o: TrueNASOverview; admin: boolean; ru
             );
           })}
         </ul>
+      )}
+    </Card>
+  );
+}
+
+type UpdateCheck = { status?: string; version?: string; changes?: unknown[]; notes?: Record<string, string> };
+type UpdateStatus = { status?: { current_version?: { version?: string }; new_version?: { version?: string } | null } };
+
+function UpdatesCard({ srv, current, admin, runner }: { srv: TrueNASServer; current?: string; admin: boolean; runner: Runner }) {
+  const old = useTrueNASGet<UpdateCheck>(srv.node_id, "update.check_available", undefined, { refetch: false });
+  const neu = useTrueNASGet<UpdateStatus>(srv.node_id, "update.status", undefined, { refetch: false, enabled: old.isError });
+  const [ask, setAsk] = useState<"" | "update" | "reboot">("");
+  const [typed, setTyped] = useState("");
+  const available = old.data ? (old.data.status === "AVAILABLE" ? old.data.version || "nieuwe versie" : "") : (neu.data?.status?.new_version?.version ?? "");
+  const checking = old.isFetching || neu.isFetching;
+  const failed = old.isError && neu.isError;
+  const method = old.data ? "update.update" : "update.run";
+  const word = ask === "update" ? "update" : "herstarten";
+  return (
+    <Card title="Updates">
+      <p className="text-sm">Nu: {current ?? "–"}</p>
+      <p className="mt-1 text-sm">
+        {checking ? (
+          "Controleren…"
+        ) : failed ? (
+          <span className="text-red-700 dark:text-red-400">Controleren mislukte.</span>
+        ) : available ? (
+          <>
+            <Badge tone="amber">Update</Badge> {available} is beschikbaar.
+          </>
+        ) : (
+          "Geen update beschikbaar."
+        )}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="secondary" disabled={checking} onClick={() => void (old.isError ? neu.refetch() : old.refetch())}>
+          Opnieuw controleren
+        </Button>
+        {admin && available && (
+          <Button onClick={() => (setAsk("update"), setTyped(""))} disabled={runner.pending}>
+            Bijwerken en herstarten
+          </Button>
+        )}
+        {admin && (
+          <Button variant="secondary-danger" onClick={() => (setAsk("reboot"), setTyped(""))} disabled={runner.pending}>
+            Herstarten
+          </Button>
+        )}
+      </div>
+      {ask && (
+        <div className="mt-3 space-y-2">
+          <Alert kind="error">
+            {ask === "update"
+              ? "TrueNAS installeert de update in een nieuwe boot-omgeving en herstart. Shares zijn een paar minuten weg; de vorige versie blijft als boot-omgeving om terug te gaan."
+              : "TrueNAS herstart; shares zijn een paar minuten weg."}{" "}
+            Tik <strong>{word}</strong> over.
+          </Alert>
+          <Input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label={`${word} overtikken`} />
+          <div className="flex gap-2">
+            <Button
+              variant="danger"
+              disabled={typed !== word || runner.pending}
+              onClick={() =>
+                void runner
+                  .run(ask === "update" ? { method, args: [{ reboot: true }], confirm: typed } : { method: "system.reboot", args: ["ClusterForge"], confirm: typed })
+                  .then((ok) => ok && setAsk(""))
+              }
+            >
+              {ask === "update" ? "Bijwerken" : "Herstarten"}
+            </Button>
+            <Button variant="secondary" onClick={() => setAsk("")}>
+              Annuleren
+            </Button>
+          </div>
+        </div>
       )}
     </Card>
   );
