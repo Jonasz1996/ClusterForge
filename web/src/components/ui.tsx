@@ -1,6 +1,7 @@
 "use client";
 
 import { TileButton, TileReset, useTile } from "@/components/Tiles";
+import { explainError } from "@/lib/explainError";
 import { glossary } from "@/lib/help";
 import type {
   ButtonHTMLAttributes,
@@ -100,6 +101,18 @@ export function Card({
 }
 
 export function Alert({ kind = "error", children }: { kind?: "error" | "success" | "info"; children: ReactNode }) {
+  // Een foutmelding in tekst krijgt eronder wat je kunt doen (fase 41).
+  const help = kind === "error" && typeof children === "string" ? explainError(children) : null;
+  if (help) {
+    return (
+      <div role="alert" className="space-y-1 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+        <p>{children}</p>
+        <p className="text-xs text-red-900/80 dark:text-red-100/80">
+          {help.uitleg} <strong>Wat kun je doen?</strong> {help.doen}
+        </p>
+      </div>
+    );
+  }
   return (
     <div
       role={kind === "error" ? "alert" : "status"}

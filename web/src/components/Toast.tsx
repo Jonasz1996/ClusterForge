@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { cx } from "@/components/ui";
+import { explainError } from "@/lib/explainError";
 
 // toast toont kort een melding rechtsonder, zoals "Gekopieerd" of
 // "Opgeslagen". Fouten die de gebruiker moet lezen horen in een Alert bij het
@@ -25,7 +26,7 @@ export function toast(text: string, kind: Toast["kind"] = "success") {
       toasts = toasts.filter((t) => t.id !== id);
       emit();
     },
-    kind === "error" ? 8000 : 3500,
+    kind === "error" ? 12000 : 3500,
   );
 }
 
@@ -55,6 +56,7 @@ export function ToastHost() {
           )}
         >
           {t.text}
+          {t.kind === "error" && explainError(t.text) && <span className="mt-1 block text-xs opacity-90">Wat kun je doen? {explainError(t.text)!.doen}</span>}
         </div>
       ))}
     </div>
