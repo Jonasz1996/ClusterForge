@@ -563,3 +563,41 @@ func TestBoards(t *testing.T) {
 		t.Errorf("bijwerken van een weg dashboard: %v", err)
 	}
 }
+
+func TestNotices(t *testing.T) {
+	now := time.Date(2026, 11, 17, 6, 0, 0, 0, time.UTC)
+	node := &NodeLink{Hostname: "db1"}
+	snap := &Snapshot{
+		HA:      []HANode{{Name: "a", Status: "standby"}, {Name: "b", Status: "unavailable"}},
+		Proxies: []Proxy{{Name: "p1", State: "offline"}, {Name: "p2", State: "online"}},
+		Problems: []Problem{
+			{Name: "oud en hoog", Severity: 4, Since: now.Add(-time.Hour), Hosts: []HostRef{{Name: "db1"}}},
+			{Name: "net nieuw", Severity: 5, Since: now.Add(-time.Minute), Hosts: []HostRef{{Name: "db2"}}},
+			{Name: "bevestigd", Severity: 5, Since: now.Add(-time.Hour), Acknowledged: true},
+			{Name: "gemiddeld", Severity: 3, Since: now.Add(-time.Hour)},
+		},
+		Hosts:     []Host{{Node: node, Enabled: true, Available: AvailDown}, {Node: node, Enabled: true, Maintenance: true, Available: AvailDown}},
+		Unwatched: []NodeRef{{Hostname: "plex1"}},
+	}
+	got := map[string]Notice{}
+	for _, n := range notices(snap, "", now, now) {
+		got[n.ID] = n
+	}
+	if len(got) != 5 || !got["zabbix-ha"].Red || got["zabbix-proxy"].Count != 1 || got["zabbix-unacked"].Count != 1 ||
+		got["zabbix-unacked"].Names[0] != "db1" || got["zabbix-nodes-down"].Count != 1 || got["zabbix-unwatched"].Red {
+		t.Errorf("regels: %+v", got)
+	}
+	if _, ok := got["zabbix-api"]; ok {
+		t.Error("API werkt; geen regel verwacht")
+	}
+	got = map[string]Notice{}
+	for _, n := range notices(nil, "connection refused", now.Add(-10*time.Minute), now) {
+		got[n.ID] = n
+	}
+	if n := got["zabbix-api"]; len(got) != 1 || !n.Red || !strings.Contains(n.Detail, "connection refused") {
+		t.Errorf("API weg: %+v", got)
+	}
+	if n := notices(nil, "even weg", now.Add(-time.Minute), now); len(n) != 0 {
+		t.Errorf("kort weg telt niet: %+v", n)
+	}
+}

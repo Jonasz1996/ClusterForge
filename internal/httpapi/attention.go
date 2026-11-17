@@ -244,6 +244,21 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		s.pbsAttention(add)
 	}
 
+	// Zabbix-monitoring (fase 33): API, proxy, HA, problemen die niemand
+	// bevestigt en nodes die Zabbix niet ziet.
+	if s.zabbixMon != nil {
+		for _, n := range s.zabbixMon.Notices() {
+			tone, detail := amber, n.Detail
+			if n.Red {
+				tone = red
+			}
+			if len(n.Names) > 0 {
+				detail = names(n.Names)
+			}
+			add(n.ID, tone, n.Title, detail, n.Href, n.Count)
+		}
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}
@@ -265,6 +280,10 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		// Kwetsbaarheden is één menu-item met tabbladen.
 		if strings.HasPrefix(href, "/kwetsbaarheden/") {
 			href = "/kwetsbaarheden"
+		}
+		// Zabbix is één menu-item met tabbladen.
+		if href == "/zabbix" || strings.HasPrefix(href, "/zabbix/") {
+			href = "/zabbix/overzicht"
 		}
 		// Een clusterpagina telt bij Clusters.
 		if strings.HasPrefix(href, "/clusters/") {
