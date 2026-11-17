@@ -247,6 +247,8 @@ var Known = map[string]Spec{
 	"publish.requested":             {CategoryInventory, "Publicatie in NPM of Authentik gevraagd"},
 	"publish.adopted":               {CategoryInventory, "Proxy hosts van NPM overgenomen in ClusterForge"},
 	"publish.released":              {CategoryInventory, "Proxy host niet meer beheerd door ClusterForge"},
+	"home_app.override":             {CategoryInventory, "Homepage-app aangepast (naam, groep, velden, verbergen)"},
+	"home_app.doubt":                {CategoryInventory, "Keuze gemaakt voor een dienst die misschien een app is"},
 	"pbs.api_requested":             {CategoryProxmox, "Actie op Proxmox Backup Server gevraagd"},
 	"pbs.token_created":             {CategoryProxmox, "API-token op Proxmox Backup Server gemaakt"},
 	"pbs.linked":                    {CategoryProxmox, "Proxmox Backup Server aan Proxmox gekoppeld"},

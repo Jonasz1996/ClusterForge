@@ -89,6 +89,8 @@ var classes = map[string]Class{
 	"publish.requested":            ClassChange,
 	"publish.adopted":              ClassInfo,
 	"publish.released":             ClassInfo,
+	"home_app.override":            ClassInfo,
+	"home_app.doubt":               ClassInfo,
 	"pbs.api_requested":            ClassChange,
 	"pbs.token_created":            ClassChange,
 	"pbs.linked":                   ClassChange,
