@@ -94,7 +94,11 @@ func TestDashboardNodes(t *testing.T) {
 	for _, n := range nodes {
 		hosts = append(hosts, n.Hostname)
 	}
-	if len(nodes) != 4 || nodes[3].Hostname != "los" || !(nodes[0].Hostname == "db1" && nodes[1].Hostname == "db2" || nodes[0].Hostname == "web1") {
+	// De clusters volgen elkaar op id (willekeurig): db1, db2, web1 of web1, db1, db2.
+	ordered := len(nodes) == 4 && nodes[3].Hostname == "los" &&
+		(nodes[0].Hostname == "db1" && nodes[1].Hostname == "db2" && nodes[2].Hostname == "web1" ||
+			nodes[0].Hostname == "web1" && nodes[1].Hostname == "db1" && nodes[2].Hostname == "db2")
+	if !ordered {
 		t.Fatalf("volgorde: %v", hosts)
 	}
 	byHost := map[string]dashNode{}
