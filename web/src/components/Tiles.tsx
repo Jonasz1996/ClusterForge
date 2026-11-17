@@ -159,6 +159,9 @@ export function Tile({ children, wide = false, tall = false }: { children: React
   const bodyRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflow, setOverflow] = useState(false);
+  // Een kaart die niets toont (null, of een lege omhulling) krijgt geen
+  // leeg venster in het raster.
+  const [empty, setEmpty] = useState(false);
   const [label, setLabel] = useState("");
   const pushed = useRef(false);
 
@@ -248,7 +251,10 @@ export function Tile({ children, wide = false, tall = false }: { children: React
     if (mode !== "vensters") return;
     const body = bodyRef.current;
     if (!body) return;
-    const measure = () => setOverflow(body.scrollHeight > body.clientHeight + 4);
+    const measure = () => {
+      setOverflow(body.scrollHeight > body.clientHeight + 4);
+      setEmpty((body.textContent ?? "").trim() === "" && !body.querySelector("canvas, svg, img, input, button, table"));
+    };
     const ro = new ResizeObserver(measure);
     ro.observe(body);
     let fields = countFields(body);
@@ -286,6 +292,7 @@ export function Tile({ children, wide = false, tall = false }: { children: React
         data-tile-open={open ? "" : undefined}
         className={cx(
           "cf-tile",
+          empty && !open && "hidden",
           open
             ? "fixed inset-0 z-40 overflow-y-auto bg-slate-50 dark:bg-slate-950"
             : cx(
