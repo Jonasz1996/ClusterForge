@@ -14329,6 +14329,29 @@ type ZabbixLatestItem struct {
 	Units     string                       `json:"units"`
 }
 
+// ZabbixMaintenance defines model for ZabbixMaintenance.
+type ZabbixMaintenance struct {
+	Active []struct {
+		ActiveTill    time.Time          `json:"active_till"`
+		CreatedAt     time.Time          `json:"created_at"`
+		Hostid        string             `json:"hostid"`
+		Hostname      string             `json:"hostname"`
+		Maintenanceid string             `json:"maintenanceid"`
+		NodeId        openapi_types.UUID `json:"node_id"`
+	} `json:"active"`
+
+	// Error De laatste fout bij het doorzetten; leeg als het lukte
+	Error     string                    `json:"error"`
+	Sync      bool                      `json:"sync"`
+	UpdatedAt time.Time                 `json:"updated_at"`
+	UpdatedBy nullable.Nullable[string] `json:"updated_by"`
+}
+
+// ZabbixMaintenanceInput defines model for ZabbixMaintenanceInput.
+type ZabbixMaintenanceInput struct {
+	Sync bool `json:"sync"`
+}
+
 // ZabbixMetrics defines model for ZabbixMetrics.
 type ZabbixMetrics struct {
 	At    time.Time           `json:"at"`
@@ -15779,6 +15802,9 @@ type UpdateZabbixDashboardJSONRequestBody = ZabbixDashboardInput
 // SetZabbixHostLinkJSONRequestBody defines body for SetZabbixHostLink for application/json ContentType.
 type SetZabbixHostLinkJSONRequestBody = ZabbixHostLinkInput
 
+// SetZabbixMaintenanceJSONRequestBody defines body for SetZabbixMaintenance for application/json ContentType.
+type SetZabbixMaintenanceJSONRequestBody = ZabbixMaintenanceInput
+
 // AcknowledgeZabbixProblemJSONRequestBody defines body for AcknowledgeZabbixProblem for application/json ContentType.
 type AcknowledgeZabbixProblemJSONRequestBody = ZabbixAckInput
 
@@ -17005,6 +17031,12 @@ type ServerInterface interface {
 	// GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
 	// (GET /zabbix/items/{itemid}/series)
 	GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams)
+	// GetZabbixMaintenance Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette
+	// (GET /zabbix/maintenance)
+	GetZabbixMaintenance(w http.ResponseWriter, r *http.Request)
+	// SetZabbixMaintenance Onderhoud naar Zabbix aan- of uitzetten (admin)
+	// (PUT /zabbix/maintenance)
+	SetZabbixMaintenance(w http.ResponseWriter, r *http.Request)
 	// GetZabbixMetrics Kerncijfers per Zabbix-host (CPU, geheugen, schijf /, load, uptime)
 	// (GET /zabbix/metrics)
 	GetZabbixMetrics(w http.ResponseWriter, r *http.Request)
@@ -19462,6 +19494,18 @@ func (_ Unimplemented) GetZabbixLatest(w http.ResponseWriter, r *http.Request, p
 // GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
 // (GET /zabbix/items/{itemid}/series)
 func (_ Unimplemented) GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixMaintenance Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette
+// (GET /zabbix/maintenance)
+func (_ Unimplemented) GetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetZabbixMaintenance Onderhoud naar Zabbix aan- of uitzetten (admin)
+// (PUT /zabbix/maintenance)
+func (_ Unimplemented) SetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -30958,6 +31002,34 @@ func (siw *ServerInterfaceWrapper) GetZabbixItemSeries(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixMaintenance operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixMaintenance(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZabbixMaintenance operation middleware
+func (siw *ServerInterfaceWrapper) SetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZabbixMaintenance(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetZabbixMetrics operation middleware
 func (siw *ServerInterfaceWrapper) GetZabbixMetrics(w http.ResponseWriter, r *http.Request) {
 
@@ -31904,6 +31976,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/zabbix/problems/{eventid}/acknowledge", wrapper.AcknowledgeZabbixProblem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/maintenance", wrapper.GetZabbixMaintenance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix/maintenance", wrapper.SetZabbixMaintenance)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.DeleteZabbixHostLink)

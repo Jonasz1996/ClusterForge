@@ -583,6 +583,15 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += ", en gesloten"
 		}
 		return s + colon(str(p, "message"))
+	case "zabbix.maintenance_started":
+		return "Onderhoud in Zabbix gezet voor " + name + ", want de node is in onderhoud"
+	case "zabbix.maintenance_ended":
+		return "Onderhoud in Zabbix weggehaald voor " + name
+	case "zabbix.settings_changed":
+		if b, _ := p["maintenance_sync"].(bool); b {
+			return "Onderhoud doorzetten naar Zabbix aangezet"
+		}
+		return "Onderhoud doorzetten naar Zabbix uitgezet"
 	case "zabbix.host_linked":
 		if h := str(p, "hostname"); h != "" {
 			return fmt.Sprintf("Zabbix-host %s gekoppeld aan node %s", str(p, "hostid"), h)

@@ -4564,6 +4564,35 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /zabbix/maintenance:
+    get:
+      operationId: getZabbixMaintenance
+      summary: "Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixMaintenance" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setZabbixMaintenance
+      summary: Onderhoud naar Zabbix aan- of uitzetten (admin)
+      description: Aan zet een onderhoud (met dataverzameling) in Zabbix voor elke node die in ClusterForge in onderhoud staat; uit haalt de onderhouden van ClusterForge weer weg.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixMaintenanceInput" }
+      responses:
+        "200":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixMaintenance" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/link:
     parameters:
       - name: hostid
@@ -15204,6 +15233,31 @@ components:
         severity: { type: integer, nullable: true, description: "Nieuwe ernst 0-5; leeg laat hem staan" }
         totp_code: { type: string }
         password: { type: string }
+    ZabbixMaintenanceInput:
+      type: object
+      required: [sync]
+      properties:
+        sync: { type: boolean }
+    ZabbixMaintenance:
+      type: object
+      required: [sync, updated_at, updated_by, error, active]
+      properties:
+        sync: { type: boolean }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string, nullable: true }
+        error: { type: string, description: De laatste fout bij het doorzetten; leeg als het lukte }
+        active:
+          type: array
+          items:
+            type: object
+            required: [node_id, hostname, hostid, maintenanceid, active_till, created_at]
+            properties:
+              node_id: { type: string, format: uuid }
+              hostname: { type: string }
+              hostid: { type: string }
+              maintenanceid: { type: string }
+              active_till: { type: string, format: date-time }
+              created_at: { type: string, format: date-time }
     ZabbixItem:
       type: object
       required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error]

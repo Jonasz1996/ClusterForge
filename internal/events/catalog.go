@@ -257,6 +257,7 @@ var Known = map[string]Spec{
 	"zabbix.dashboard_created":     {CategoryInventory, "Zabbix-dashboard gemaakt"},
 	"zabbix.dashboard_updated":     {CategoryInventory, "Zabbix-dashboard gewijzigd"},
 	"zabbix.dashboard_deleted":     {CategoryInventory, "Zabbix-dashboard weggegooid"},
+	"zabbix.settings_changed":      {CategoryInventory, "Instellingen van de Zabbix-monitoring gewijzigd"},
 	"vm.status_changed":            {CategoryProxmox, "Status van VM gewijzigd"},
 	"vm.moved":                     {CategoryProxmox, "VM verhuisd"},
 	"vm.missing":                   {CategoryProxmox, "VM verdwenen uit Proxmox"},
@@ -341,6 +342,8 @@ var Known = map[string]Spec{
 	"zabbix.problem_started":      {CategoryStatus, "Probleem in Zabbix"},
 	"zabbix.problem_resolved":     {CategoryStatus, "Probleem in Zabbix opgelost"},
 	"zabbix.problem_acknowledged": {CategoryStatus, "Probleem in Zabbix bevestigd"},
+	"zabbix.maintenance_started":  {CategoryLifecycle, "Onderhoud in Zabbix gezet"},
+	"zabbix.maintenance_ended":    {CategoryLifecycle, "Onderhoud in Zabbix weggehaald"},
 	"cluster.status_changed":      {CategoryStatus, "Status van cluster gewijzigd"},
 	"vip.owner_changed":           {CategoryStatus, "VIP verhuisd"},
 
