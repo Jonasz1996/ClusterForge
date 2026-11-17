@@ -688,7 +688,9 @@ func TestAcknowledge(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
-	s.Client = func(context.Context) (API, string, error) { return &zabbixagent.Client{URL: srv.URL, Token: "t"}, srv.URL, nil }
+	s.Client = func(context.Context) (API, string, error) {
+		return &zabbixagent.Client{URL: srv.URL, Token: "t"}, srv.URL, nil
+	}
 	node := &NodeLink{NodeID: nodeID, Hostname: "db1", ClusterID: &clusterID}
 	s.configured = true
 	s.snap = &Snapshot{Problems: []Problem{
