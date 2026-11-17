@@ -181,8 +181,29 @@ export type AIVCat = {
   model?: string;
 };
 
+// AIVExt is de stand van ext56 (context uit ClusterForge) in AI-verslag.
+export type AIVExt = {
+  installed: boolean;
+  version?: string;
+  bundled: string;
+  update: boolean;
+  rules: number;
+  stand?: {
+    ts?: number;
+    nodes?: number;
+    vips?: number;
+    regels?: number;
+    weg?: number;
+    onderhoud?: string[];
+    wijzigingen?: number;
+  };
+  pushed_at?: string;
+  push_error?: string;
+};
+
 export type AIVOverview = {
   instance: AIVInstance;
+  ext?: AIVExt;
   start?: AIVStart;
   app?: AIVApp;
   runinfo?: {
@@ -276,6 +297,21 @@ export function useAIVCall(id: string) {
       again();
       setTimeout(again, 4_000);
       setTimeout(again, 15_000);
+    },
+  });
+}
+
+// useAIVInstall zet ext56 in AI-verslag (of werkt ze bij), als taak.
+export function useAIVInstall(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => call<Job>("POST", `/aiverslag/${id}/install`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      const again = () => qc.invalidateQueries({ queryKey: ["aiverslag", id] });
+      setTimeout(again, 20_000);
+      setTimeout(again, 60_000);
+      setTimeout(again, 120_000);
     },
   });
 }
