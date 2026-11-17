@@ -42,9 +42,14 @@ db_copy() {
 }
 
 # De bestanden (blobs, media, office) naar SeaweedFS, zonder de SQLite.
+# weed mount zet de tijd van een bestand bij het wegschrijven op "nu", ook als
+# rsync er net de oorspronkelijke tijd op zette. De tweede ronde kopieert niets
+# (--size-only) en zet alleen de tijden terug, zodat een volgende rsync enkel
+# echte wijzigingen meeneemt.
 sync_data() {
-  rsync -aH --delete --info=stats1 --exclude=/platform.db --exclude=/platform.db-wal \
-    --exclude=/platform.db-shm --exclude=/backup/ --exclude=/.cf-platform-active "$1/" "$DATA/"
+  set -- "$1/" "$DATA/" --exclude=/platform.db --exclude=/platform.db-wal \
+    --exclude=/platform.db-shm --exclude=/backup/ --exclude=/.cf-platform-active
+  rsync -aH --delete --info=stats1 "$@" && rsync -aH --size-only "$@"
 }
 
 overstap() {
