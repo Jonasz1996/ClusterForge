@@ -229,6 +229,7 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	f.Proxmox = c.proxmox(ctx)
 	f.PBS = c.pbs(ctx)
 	f.TrueNAS = c.trueNAS(ctx)
+	f.AIVerslag = c.aiverslag(ctx)
 	return f
 }
 

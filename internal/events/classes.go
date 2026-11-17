@@ -93,6 +93,7 @@ var classes = map[string]Class{
 	"home_app.doubt":               ClassInfo,
 	"pbs.api_requested":            ClassChange,
 	"truenas.call_requested":       ClassChange,
+	"aiverslag.call_requested":     ClassChange,
 	"pbs.token_created":            ClassChange,
 	"pbs.linked":                   ClassChange,
 	"zabbixagent.settings_changed": ClassChange, "zabbixagent.node_managed": ClassChange, "zabbixagent.node_unmanaged": ClassChange,

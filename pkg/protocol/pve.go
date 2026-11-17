@@ -237,6 +237,9 @@ type PVERun struct {
 
 	// TrueNAS hoort bij truenas_call (vanaf TrueNASSince).
 	TrueNAS *TrueNASMethodCall `json:"truenas,omitempty"`
+
+	// AIV hoort bij aiv_call (vanaf AIVSince).
+	AIV *AIVCallSpec `json:"aiv,omitempty"`
 }
 
 // PVESetting zijn de instellingen van set; nil laat staan.
@@ -490,7 +493,7 @@ func (p PVERun) Validate() error {
 			return fmt.Errorf("ongeldig begin van een naam %q", t.Match)
 		}
 	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI,
-		OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey, TrueNASCall:
+		OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey, TrueNASCall, AIVCall:
 		return p.validateHost()
 	case PVEBootstrap:
 		b := p.Bootstrap

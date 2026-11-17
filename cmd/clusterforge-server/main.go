@@ -32,6 +32,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentconf"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
+	"github.com/Jonasz1996/clusterforge/internal/aiverslag"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
@@ -276,6 +277,7 @@ func serve() error {
 	pbsSvc.Box, pbsSvc.Hosts = box, pvh
 	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
 	tnSvc := truenas.NewService(pool, ev, log, runner, bus)
+	aivSvc := aiverslag.NewService(pool, ev, log, runner, bus)
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
 	opnSvc.Box = box
@@ -473,6 +475,7 @@ func serve() error {
 	goLoop(ctx, log, "docker", dkr.Loop)
 	goLoop(ctx, log, "pbs", pbsSvc.Watch)
 	goLoop(ctx, log, "truenas", tnSvc.Watch)
+	goLoop(ctx, log, "aiverslag", aivSvc.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -490,7 +493,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

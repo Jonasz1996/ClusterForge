@@ -251,6 +251,7 @@ var Known = map[string]Spec{
 	"home_app.doubt":                {CategoryInventory, "Keuze gemaakt voor een dienst die misschien een app is"},
 	"pbs.api_requested":             {CategoryProxmox, "Actie op Proxmox Backup Server gevraagd"},
 	"truenas.call_requested":        {CategoryProxmox, "Actie op TrueNAS gevraagd"},
+	"aiverslag.call_requested":      {CategorySecurity, "Actie in AI-verslag gevraagd"},
 	"pbs.token_created":             {CategoryProxmox, "API-token op Proxmox Backup Server gemaakt"},
 	"pbs.linked":                    {CategoryProxmox, "Proxmox Backup Server aan Proxmox gekoppeld"},
 	// Zabbix: agents (zbxfix) en monitoring (fase 33).
