@@ -28,9 +28,9 @@ func TestCheckRead(t *testing.T) {
 		path   string
 		params map[string]string
 	}{
-		{"/api/app/tokens", nil},        // sleutels lezen nooit
-		{"/api/schrijflog", nil},        // niet in de lijst
-		{"/api/../etc/passwd", nil},     // geen ..
+		{"/api/app/tokens", nil},    // sleutels lezen nooit
+		{"/api/schrijflog", nil},    // niet in de lijst
+		{"/api/../etc/passwd", nil}, // geen ..
 		{"/api/state", map[string]string{"x": "1"}},
 		{"/api/fix/Netwerk/12", nil},
 		{"/api/fix/netwerk/12", map[string]string{"q": "1"}},

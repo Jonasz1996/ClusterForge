@@ -278,6 +278,7 @@ func serve() error {
 	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
 	tnSvc := truenas.NewService(pool, ev, log, runner, bus)
 	aivSvc := aiverslag.NewService(pool, ev, log, runner, bus)
+	aivSvc.Version = version
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
 	opnSvc.Box = box

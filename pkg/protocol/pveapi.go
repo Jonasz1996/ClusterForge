@@ -60,7 +60,7 @@ func isHostAction(a string) bool {
 		return true
 	case OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey, OPNCarp, OPNFirmware:
 		return true
-	case TrueNASCall, AIVCall:
+	case TrueNASCall, AIVCall, AIVInstall:
 		return true
 	}
 	return false
@@ -223,6 +223,8 @@ func (p PVERun) validateHost() error {
 		return p.TrueNAS.Validate()
 	case AIVCall:
 		return p.AIV.Validate()
+	case AIVInstall:
+		return p.AIVExt.Validate()
 	case OPNHASync:
 	case OPNKey:
 		k := p.OPNKey

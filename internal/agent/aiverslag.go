@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -139,7 +140,7 @@ func (h pveHost) aivFacts(ctx context.Context) *protocol.AIVFacts {
 	if req, err := http.NewRequestWithContext(pctx, http.MethodGet, f.URL+"/api/app/ping", nil); err == nil {
 		if res, err := aivHTTP(3 * time.Second).Do(req); err == nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
-			res.Body.Close()
+			_ = res.Body.Close()
 			f.Reachable = res.StatusCode == http.StatusOK
 		}
 	}
@@ -263,6 +264,10 @@ func (c *aivClient) send(ctx context.Context, method, path string, query url.Val
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
+	if method != http.MethodGet {
+		// Schrijfroutes van Inzicht (/api/inzicht/…) vragen deze kop.
+		req.Header.Set("X-Inzicht", "1")
+	}
 	if same {
 		c.sameSite(req)
 	}
@@ -270,7 +275,7 @@ func (c *aivClient) send(ctx context.Context, method, path string, query url.Val
 	if err != nil {
 		return 0, nil, fmt.Errorf("AI-verslag niet bereikbaar op %s: %w", c.base, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(res.Body, pveGetMax+1))
 	if err != nil {
 		return res.StatusCode, nil, err
@@ -473,3 +478,117 @@ func (r *RunExecutor) aivCall(ctx context.Context, c *protocol.AIVCallSpec, out 
 	}
 	return 0, nil
 }
+
+// aivPost is een korte POST van de server (alleen AIVPostPaths).
+func (h pveHost) aivPost(ctx context.Context, path string, body json.RawMessage) (json.RawMessage, error) {
+	if !h.isAIV() {
+		return nil, errNotAIV
+	}
+	if !protocol.AIVPostPaths[path] {
+		return nil, fmt.Errorf("%q is geen pad voor aiv_post", path)
+	}
+	return h.aivClient(60*time.Second).do(ctx, http.MethodPost, path, nil, body)
+}
+
+// aivPython is de Python van AI-verslag (venv), anders python3.
+func (h pveHost) aivPython() string {
+	if _, err := os.Stat(h.path(aivDir + "/venv/bin/python")); err == nil {
+		return aivDir + "/venv/bin/python"
+	}
+	return "python3"
+}
+
+// aivInstall zet een extensie in AI-verslag: het bestand naast app.py, de
+// regel onderaan app.py, de webdienst herstarten en nakijken dat ze
+// antwoordt. Lukt dat niet, dan gaan app.py en het oude bestand terug.
+func (r *RunExecutor) aivInstall(ctx context.Context, e *protocol.AIVExtension, out io.Writer) (int, error) {
+	h := r.host()
+	if !h.isAIV() {
+		return -1, errNotAIV
+	}
+	if err := e.Validate(); err != nil {
+		return -1, err
+	}
+	logf := func(format string, a ...any) { _, _ = fmt.Fprintf(out, format+"\n", a...) }
+	app := h.path(aivDir + "/app.py")
+	file := h.path(aivDir + "/" + e.Name + ".py")
+	hook := fmt.Sprintf("import %s; %s.routes(app, guard)", e.Name, e.Name)
+	appData, err := os.ReadFile(app)
+	if err != nil {
+		return 1, err
+	}
+	fi, err := os.Stat(app)
+	if err != nil {
+		return 1, err
+	}
+	oldExt, oldErr := os.ReadFile(file)
+
+	// Eerst nakijken dat Python de code aanvaardt, voor er iets verandert.
+	tmp := file + ".cf-nieuw.py"
+	if err := os.WriteFile(tmp, []byte(e.Code), 0o644); err != nil {
+		return 1, err
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	logf("$ %s -m py_compile %s", h.aivPython(), e.Name+".py")
+	if out, err := h.exec(ctx, h.aivPython(), "-m", "py_compile", tmp); err != nil {
+		return 1, fmt.Errorf("python aanvaardt %s niet: %v %s", e.Name, err, lastLines(string(out), 3))
+	}
+	if pyc, _ := filepath.Glob(filepath.Join(filepath.Dir(tmp), "__pycache__", strings.TrimSuffix(filepath.Base(tmp), ".py")+".*.pyc")); len(pyc) > 0 {
+		for _, f := range pyc {
+			_ = os.Remove(f)
+		}
+	}
+
+	restore := func(reason error) (int, error) {
+		logf("Terugzetten: %v", reason)
+		_ = writeFileAtomic(app, appData, fi.Mode().Perm())
+		if oldErr == nil {
+			_ = writeFileAtomic(file, oldExt, 0o644)
+		} else {
+			_ = os.Remove(file)
+		}
+		_, _ = h.exec(ctx, "systemctl", "restart", "aiverslag-web.service")
+		return 1, fmt.Errorf("%s installeren mislukt, alles teruggezet: %w", e.Name, reason)
+	}
+	if err := writeFileAtomic(file, []byte(e.Code), 0o644); err != nil {
+		return 1, err
+	}
+	aivChown(file, fi)
+	logf("%s.py geschreven (%d bytes, sha256 %s)", e.Name, len(e.Code), e.SHA256[:12])
+	if !strings.Contains(string(appData), hook) {
+		_ = writeFileAtomic(app+".cf-kopie", appData, fi.Mode().Perm())
+		nieuw := strings.TrimRight(string(appData), "\n") + "\n" + hook + "\n"
+		if err := writeFileAtomic(app, []byte(nieuw), fi.Mode().Perm()); err != nil {
+			return restore(err)
+		}
+		aivChown(app, fi)
+		logf("app.py: regel %q toegevoegd (kopie in app.py.cf-kopie)", hook)
+	} else {
+		logf("app.py laadt %s al", e.Name)
+	}
+	logf("$ systemctl restart aiverslag-web.service")
+	if _, err := h.exec(ctx, "systemctl", "restart", "aiverslag-web.service"); err != nil {
+		return restore(fmt.Errorf("herstarten: %w", err))
+	}
+	c := h.aivClient(10 * time.Second)
+	deadline := time.Now().Add(aivStartWait)
+	for {
+		if _, err := c.do(ctx, http.MethodGet, "/api/inzicht/clusterforge", nil, nil); err == nil {
+			break
+		} else if time.Now().After(deadline) {
+			return restore(fmt.Errorf("de webdienst antwoordt na de herstart niet met %s: %w", e.Name, err))
+		}
+		select {
+		case <-ctx.Done():
+			return restore(ctx.Err())
+		case <-time.After(aivStartPoll):
+		}
+	}
+	logf("AI-verslag draait met %s.", e.Name)
+	return 0, nil
+}
+
+var (
+	aivStartWait = 90 * time.Second
+	aivStartPoll = 2 * time.Second
+)

@@ -12,6 +12,138 @@ import (
 	"github.com/google/uuid"
 )
 
+const aIVContextChanges = `-- name: AIVContextChanges :many
+SELECT ch.ts, ch.source, ch.summary, n.hostname, coalesce(c.name, '')::text AS cluster_name
+FROM node_changes ch
+JOIN nodes n ON n.id = ch.node_id
+LEFT JOIN clusters c ON c.id = ch.cluster_id
+WHERE ch.ts > now() - interval '24 hours'
+ORDER BY ch.ts DESC
+LIMIT 300
+`
+
+type AIVContextChangesRow struct {
+	Ts          time.Time
+	Source      string
+	Summary     string
+	Hostname    string
+	ClusterName string
+}
+
+// De wijzigingen van de laatste dag per server (journaal), nieuwste eerst.
+func (q *Queries) AIVContextChanges(ctx context.Context) ([]AIVContextChangesRow, error) {
+	rows, err := q.db.Query(ctx, aIVContextChanges)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AIVContextChangesRow{}
+	for rows.Next() {
+		var i AIVContextChangesRow
+		if err := rows.Scan(
+			&i.Ts,
+			&i.Source,
+			&i.Summary,
+			&i.Hostname,
+			&i.ClusterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const aIVContextNodes = `-- name: AIVContextNodes :many
+SELECT n.hostname, n.role, n.lifecycle::text AS lifecycle, coalesce(host(n.primary_ip), '')::text AS address,
+       coalesce(c.name, '')::text AS cluster_name, coalesce(c.environment::text, '')::text AS environment
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+WHERE n.lifecycle <> 'decommissioned'
+ORDER BY lower(n.hostname)
+`
+
+type AIVContextNodesRow struct {
+	Hostname    string
+	Role        string
+	Lifecycle   string
+	Address     string
+	ClusterName string
+	Environment string
+}
+
+// Fase 38 M4: de servers die AI-verslag als context krijgt.
+func (q *Queries) AIVContextNodes(ctx context.Context) ([]AIVContextNodesRow, error) {
+	rows, err := q.db.Query(ctx, aIVContextNodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AIVContextNodesRow{}
+	for rows.Next() {
+		var i AIVContextNodesRow
+		if err := rows.Scan(
+			&i.Hostname,
+			&i.Role,
+			&i.Lifecycle,
+			&i.Address,
+			&i.ClusterName,
+			&i.Environment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const aIVContextVIPs = `-- name: AIVContextVIPs :many
+SELECT host(v.address)::text AS address, c.name AS cluster_name, c.environment::text AS environment,
+       coalesce(o.hostname, '')::text AS owner
+FROM vips v
+JOIN clusters c ON c.id = v.cluster_id
+LEFT JOIN nodes o ON o.id = v.owner_node_id
+ORDER BY v.address
+`
+
+type AIVContextVIPsRow struct {
+	Address     string
+	ClusterName string
+	Environment string
+	Owner       string
+}
+
+func (q *Queries) AIVContextVIPs(ctx context.Context) ([]AIVContextVIPsRow, error) {
+	rows, err := q.db.Query(ctx, aIVContextVIPs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AIVContextVIPsRow{}
+	for rows.Next() {
+		var i AIVContextVIPsRow
+		if err := rows.Scan(
+			&i.Address,
+			&i.ClusterName,
+			&i.Environment,
+			&i.Owner,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAIVAgents = `-- name: ListAIVAgents :many
 SELECT n.id, n.hostname, coalesce(host(n.primary_ip), '')::text AS address, (f.facts -> 'aiverslag')::jsonb AS aiverslag,
        a.protocol_version AS agent_protocol, a.version AS agent_version, s.heartbeat_at

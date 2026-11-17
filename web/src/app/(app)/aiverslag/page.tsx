@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useState } from "react";
 import { AskView } from "@/components/aiverslag/Ask";
 import { FindingsView } from "@/components/aiverslag/Findings";
@@ -26,6 +27,7 @@ import { useMe } from "@/lib/auth";
 import {
   aivDate,
   sevTone,
+  useAIVInstall,
   useAIVNow,
   useAIVOverview,
   type AIVInstance,
@@ -108,6 +110,9 @@ function OverviewView({ v }: { v: AIVInstance }) {
             </Win>
             <Win>
               <ServiceCard o={o.data} />
+            </Win>
+            <Win>
+              <ExtCard o={o.data} admin={admin} />
             </Win>
           </TileGrid>
           {Object.keys(o.data.errors).length > 0 && (
@@ -530,6 +535,126 @@ function ServiceCard({ o }: { o: AIVOverview }) {
         >
           AI-verslag openen
         </a>
+      )}
+    </Card>
+  );
+}
+
+// ExtCard: de koppeling ext56 in AI-verslag, die context uit ClusterForge
+// (servers, VIP's, onderhoud, wijzigingen) in de kennisbank zet.
+function ExtCard({ o, admin }: { o: AIVOverview; admin: boolean }) {
+  const ins = useAIVInstall(o.instance.node_id);
+  const [sure, setSure] = useState(false);
+  const e = o.ext;
+  const tooOld = o.instance.protocol < 54;
+  return (
+    <Card title="Koppeling in AI-verslag">
+      <p className="text-sm text-slate-600 dark:text-slate-400">
+        ClusterForge vertelt AI-verslag elke 5 minuten welke adressen jouw
+        servers en VIP&apos;s zijn, wanneer er gepland onderhoud is en wat er de
+        laatste 24 uur veranderde. Minder vals alarm bij een herstart of
+        failover; een gekaapte server valt nog altijd op.
+      </p>
+      {!e ? (
+        <p className="mt-3 text-sm text-slate-500">Stand niet gelezen.</p>
+      ) : (
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-slate-500">Stand</dt>
+          <dd>
+            {e.installed ? (
+              <Badge tone={e.update ? "amber" : "green"}>
+                {e.update ? "update klaar" : "geïnstalleerd"}
+              </Badge>
+            ) : (
+              <Badge>niet geïnstalleerd</Badge>
+            )}
+          </dd>
+          <dt className="text-slate-500">Versie</dt>
+          <dd>
+            {e.version ?? "–"}
+            {e.update || !e.installed ? ` (nieuw: ${e.bundled})` : ""}
+          </dd>
+          {e.installed && (
+            <>
+              <dt className="text-slate-500">Regels</dt>
+              <dd>
+                {e.rules} in de kennisbank
+                {e.stand?.nodes != null
+                  ? ` (${e.stand.nodes} servers, ${e.stand.vips ?? 0} VIP's)`
+                  : ""}
+              </dd>
+              <dt className="text-slate-500">Laatst gestuurd</dt>
+              <dd>
+                {e.pushed_at
+                  ? aivDate(Date.parse(e.pushed_at))
+                  : e.stand?.ts
+                    ? aivDate(e.stand.ts)
+                    : "–"}
+              </dd>
+              {(e.stand?.onderhoud?.length ?? 0) > 0 && (
+                <>
+                  <dt className="text-slate-500">Onderhoud nu</dt>
+                  <dd>{e.stand?.onderhoud?.join(", ")}</dd>
+                </>
+              )}
+            </>
+          )}
+        </dl>
+      )}
+      {e?.push_error && (
+        <div className="mt-3">
+          <Alert kind="error">Context sturen mislukt: {e.push_error}</Alert>
+        </div>
+      )}
+      {ins.isError && (
+        <div className="mt-3">
+          <Alert kind="error">
+            {ins.error instanceof Error ? ins.error.message : "Mislukt"}
+          </Alert>
+        </div>
+      )}
+      {ins.data && (
+        <div className="mt-3">
+          <Alert kind="success">
+            Taak gestart.{" "}
+            <Link
+              href={`/taken/detail?id=${ins.data.id}`}
+              className="underline"
+            >
+              Volgen
+            </Link>
+          </Alert>
+        </div>
+      )}
+      {admin && e && (!e.installed || e.update) && (
+        <div className="mt-3 space-y-2">
+          {tooOld ? (
+            <p className="text-xs text-slate-500">
+              Werk eerst de agent bij (Nodes → Agents bijwerken).
+            </p>
+          ) : (
+            <>
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={sure}
+                  onChange={(x) => setSure(x.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  De webdienst van AI-verslag herstart even (een kopie van
+                  app.py wordt teruggezet als hij niet meer start).
+                </span>
+              </label>
+              <Button
+                disabled={!sure || ins.isPending}
+                onClick={() => ins.mutate()}
+              >
+                {e.installed ? "Koppeling bijwerken" : "Koppeling installeren"}
+              </Button>
+            </>
+          )}
+        </div>
       )}
     </Card>
   );

@@ -26,6 +26,7 @@ type Overview struct {
 	App      json.RawMessage   `json:"app,omitempty"`
 	RunInfo  json.RawMessage   `json:"runinfo,omitempty"`
 	State    *StateSummary     `json:"state,omitempty"`
+	Ext      *ExtStatus        `json:"ext,omitempty"`
 	Warnings []Warning         `json:"warnings"`
 	Errors   map[string]string `json:"errors"`
 }
@@ -210,8 +211,24 @@ func (s *Service) Overview(ctx context.Context, id uuid.UUID) (Overview, error) 
 			}
 		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		st, err := s.ExtStatus(ctx, id)
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			o.Errors["ext"] = err.Error()
+			return
+		}
+		s.withPush(id, &st)
+		o.Ext = &st
+	}()
 	wg.Wait()
 	o.Warnings = Warnings(v, o.Start, o.App, o.State)
+	if o.Ext != nil && o.Ext.Installed && o.Ext.PushError != "" {
+		o.Warnings = append(o.Warnings, Warning{"warning", "context naar AI-verslag sturen mislukt: " + clip(o.Ext.PushError, 160)})
+	}
 	return o, nil
 }
 
