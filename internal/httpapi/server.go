@@ -137,6 +137,7 @@ type Server struct {
 	dashCache dashboardCache
 	// homeCache houdt de apps van de homepage-API v2 even bij (fase 36).
 	homeCache homeAppsCache
+	homeStats appStatsCache
 }
 
 var _ gen.ServerInterface = (*Server)(nil)

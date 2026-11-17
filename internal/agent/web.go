@@ -83,6 +83,12 @@ func (a *Agent) web(ctx context.Context, req protocol.WebRequest) protocol.WebRe
 	case protocol.WebOpCheckURL:
 		res := checkURL(ctx, a.webDial, req.Check)
 		return protocol.WebResponse{Check: &res}
+	case protocol.WebOpAppStats:
+		res, err := a.appStats(ctx, req.App)
+		if err != nil {
+			return protocol.WebResponse{Error: err.Error()}
+		}
+		return protocol.WebResponse{App: res}
 	case protocol.WebOpNPMSnapshot:
 		res, err := a.npmSnapshot(ctx)
 		if err != nil {

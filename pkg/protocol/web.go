@@ -50,7 +50,36 @@ const (
 	// WebOpNPMRestore zet een kopie terug: NPM stoppen, database en
 	// nginx-configuratie terugzetten, NPM starten.
 	WebOpNPMRestore = "npm_restore"
+	// WebOpAppStats leest de belangrijkste cijfers van een app (fase 36,
+	// homepage-API v2). De agent zoekt de sleutel van de app zelf op de
+	// node (Plex: Preferences.xml, *arr: config.xml); die verlaat de node
+	// nooit, alleen de cijfers gaan naar de server.
+	WebOpAppStats = "app_stats"
 )
+
+// AppStatsSince is de eerste protocolversie met WebOpAppStats.
+const AppStatsSince = 52
+
+// Soorten app-meters.
+const (
+	AppStatsPlex = "plex"
+	AppStatsArr  = "arr"
+)
+
+// WebAppStats zegt welke app de agent moet lezen.
+type WebAppStats struct {
+	Kind string `json:"kind"`
+	Port int    `json:"port"`
+	// Container: de Docker-container (de agent zoekt de map die op
+	// /config hangt); leeg = de app draait rechtstreeks op de node.
+	Container string `json:"container,omitempty"`
+	HTTPS     bool   `json:"https,omitempty"`
+}
+
+// AppStatsResult zijn de cijfers van een app: getallen en korte teksten.
+type AppStatsResult struct {
+	Values map[string]any `json:"values"`
+}
 
 const (
 	// WebRequestTimeout is hoe lang een verzoek mag duren; een terugzetting
@@ -73,6 +102,8 @@ type WebRequest struct {
 	NPM      *WebNPM   `json:"npm,omitempty"`
 	// Probe: bij WebOpDiscover ook elke TCP-poort aanspreken (http, https).
 	Probe bool `json:"probe,omitempty"`
+	// App: bij WebOpAppStats.
+	App *WebAppStats `json:"app,omitempty"`
 }
 
 // WebHTTP is één aanroep van een lokale webdienst.
@@ -120,6 +151,7 @@ type WebResponse struct {
 	Services []WebService    `json:"services,omitempty"`
 	Check    *WebCheckResult `json:"check,omitempty"`
 	NPM      *WebNPMResult   `json:"npm,omitempty"`
+	App      *AppStatsResult `json:"app,omitempty"`
 }
 
 // Soorten dienst.
@@ -152,6 +184,8 @@ type WebService struct {
 	Server   string `json:"server,omitempty"`
 	Location string `json:"location,omitempty"`
 }
+
+var validContainerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 // WebCheckResult is de uitkomst van een WebCheck.
 type WebCheckResult struct {
@@ -257,6 +291,18 @@ func (r *WebRequest) Validate() error {
 		}
 		return nil
 	case WebOpNPMSnapshot:
+		return nil
+	case WebOpAppStats:
+		a := r.App
+		if a == nil || (a.Kind != AppStatsPlex && a.Kind != AppStatsArr) {
+			return fmt.Errorf("onbekende app-meter")
+		}
+		if a.Port < 1 || a.Port > 65535 {
+			return fmt.Errorf("ongeldige poort %d", a.Port)
+		}
+		if a.Container != "" && !validContainerName.MatchString(a.Container) {
+			return fmt.Errorf("ongeldige container %q", a.Container)
+		}
 		return nil
 	case WebOpNPMCheck, WebOpNPMRestore:
 		n := r.NPM

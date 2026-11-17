@@ -422,3 +422,9 @@ func (s *Service) read(ctx context.Context, kind string, v any) (time.Time, stri
 	}
 	return at, msg, nil
 }
+
+// AgentWeb stuurt één webverzoek naar de agent van een node (fase 36:
+// app-cijfers voor de homepage-API v2).
+func (s *Service) AgentWeb(ctx context.Context, nodeID uuid.UUID, req protocol.WebRequest) (protocol.WebResponse, error) {
+	return s.bus.Web(ctx, nodeID, req)
+}

@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -64,7 +66,8 @@ func TestDashboardV2Apps(t *testing.T) {
 	}
 	plex, hp := by["plex"], by["homepage"]
 	if plex.Status != "ok" || plex.Values["version"] != "1.41.2" || plex.Where.Container != "plex" || plex.Where.Node != "plex1" ||
-		len(plex.Fields) == 0 || plex.Fields[0].Key != "status" || plex.URL != "http://192.168.10.50:32400" {
+		len(plex.Fields) == 0 || plex.Fields[0].Key != "status" || plex.URL != "http://192.168.10.50:32400" ||
+		!strings.Contains(fmt.Sprint(plex.Values["stats_error"]), "protocol 52") {
 		t.Errorf("plex: %+v", plex)
 	}
 	if hp.Where.Cluster != "Homepage" || hp.Status != "ok" || hp.Group != "Infrastructuur" {

@@ -21,6 +21,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/homeapps"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // Homepage-API v2 (fase 36): per app één tegel met alles wat ClusterForge
@@ -124,9 +125,100 @@ var tileFields = map[string]fieldInfo{
 	"reboot_required":     {Label: "Herstart nodig"},
 	"cpu":                 {Label: "CPU", Format: "percent"},
 	"memory":              {Label: "RAM", Format: "percent"},
+	// App-cijfers van de agent (protocol 52).
+	"streams":          {Label: "Streams", Format: "number"},
+	"transcodes":       {Label: "Transcodes", Format: "number"},
+	"libraries":        {Label: "Bibliotheken", Format: "number"},
+	"libraries_movies": {Label: "Filmbibliotheken", Format: "number"},
+	"libraries_shows":  {Label: "Seriebibliotheken", Format: "number"},
+	"queue":            {Label: "Wachtrij", Format: "number"},
+	"missing":          {Label: "Ontbreekt", Format: "number"},
+	"health_issues":    {Label: "Meldingen", Format: "number"},
+	"indexers":         {Label: "Indexers", Format: "number"},
 }
 
 var defaultTileFields = []string{"status", "nodes", "version", "zabbix_problems"}
+
+// Standaardvelden voor apps met een app-meter.
+var defaultStatsFields = map[string][]string{
+	protocol.AppStatsPlex: {"status", "streams", "transcodes", "libraries", "version"},
+	protocol.AppStatsArr:  {"status", "queue", "missing", "health_issues", "version"},
+}
+
+// --- app-cijfers van de agent, op de achtergrond ververst ---
+
+// AppStatsMaxAge: zo vaak vraagt de server een app opnieuw aan de agent.
+const AppStatsMaxAge = 60 * time.Second
+
+type appStatsEntry struct {
+	at      time.Time
+	values  map[string]any
+	err     string
+	running bool
+}
+
+type appStatsCache struct {
+	mu sync.Mutex
+	m  map[string]*appStatsEntry
+}
+
+// appStatsFor geeft de laatste cijfers en start op de achtergrond een nieuwe
+// meting als ze ouder zijn dan AppStatsMaxAge: de API wacht nooit op een app.
+func (s *Server) appStatsFor(a homeapps.App, protoByNode map[uuid.UUID]int) (map[string]any, string) {
+	if a.Stats != protocol.AppStatsPlex && a.Stats != protocol.AppStatsArr || s.publish == nil {
+		return nil, ""
+	}
+	var in *homeapps.Instance
+	for i := range a.Instances {
+		x := &a.Instances[i]
+		if x.Online && (in == nil || x.Node == a.ActiveNode) {
+			in = x
+		}
+	}
+	if in == nil {
+		return nil, ""
+	}
+	if protoByNode[in.NodeID] < protocol.AppStatsSince {
+		return nil, "agent te oud voor app-cijfers (bijwerken naar protocol 52)"
+	}
+	c := &s.homeStats
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]*appStatsEntry{}
+	}
+	e := c.m[a.Key]
+	if e == nil {
+		e = &appStatsEntry{}
+		c.m[a.Key] = e
+	}
+	if !e.running && time.Since(e.at) > AppStatsMaxAge {
+		e.running = true
+		req := protocol.WebRequest{Op: protocol.WebOpAppStats, Deadline: time.Now().Add(20 * time.Second),
+			App: &protocol.WebAppStats{Kind: a.Stats, Port: in.Port, Container: in.Container, HTTPS: in.Kind == "https"}}
+		node, key := in.NodeID, a.Key
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			res, err := s.publish.AgentWeb(ctx, node, req)
+			msg := ""
+			switch {
+			case err != nil:
+				msg = err.Error()
+			case res.Error != "":
+				msg = res.Error
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			x := c.m[key]
+			x.running, x.at, x.err = false, time.Now(), msg
+			if msg == "" && res.App != nil {
+				x.values = res.App.Values
+			}
+		}()
+	}
+	return e.values, e.err
+}
 
 // --- de cijfers, 15 s bewaard ---
 
@@ -213,6 +305,17 @@ func (s *Server) buildHomeApps(ctx context.Context) (homeAppsSet, error) {
 	if err := st.Save(ctx, now, res); err != nil {
 		s.log.Warn("homepage-API: apps bewaren", "err", err)
 	}
+	protoByNode := map[uuid.UUID]int{}
+	if rows, err := s.pool.Query(ctx, `SELECT node_id, protocol_version FROM agents WHERE revoked_at IS NULL AND node_id IS NOT NULL`); err == nil {
+		for rows.Next() {
+			var id uuid.UUID
+			var p int32
+			if rows.Scan(&id, &p) == nil {
+				protoByNode[id] = int(p)
+			}
+		}
+		rows.Close()
+	}
 
 	// Zabbix: open problemen per node.
 	zbx := map[uuid.UUID]int{}
@@ -284,6 +387,16 @@ func (s *Server) buildHomeApps(ctx context.Context) (homeAppsSet, error) {
 				v["crowdsec_alerts_24h"] = c.CrowdsecAlerts24h
 			}
 		}
+		if stats, msg := s.appStatsFor(a, protoByNode); stats != nil || msg != "" {
+			for k, x := range stats {
+				if _, taken := v[k]; !taken || k == "version" {
+					v[k] = x
+				}
+			}
+			if msg != "" {
+				v["stats_error"] = msg
+			}
+		}
 		out.values[a.Key] = v
 		out.fields[a.Key] = tileFieldsFor(a, v)
 		out.sects[a.Key] = tileSections(a, v)
@@ -312,6 +425,9 @@ func tileFieldsFor(a homeapps.App, v map[string]any) []v2Field {
 	keys := a.Override.Fields
 	if len(keys) == 0 {
 		keys = defaultTileFields
+		if d, ok := defaultStatsFields[a.Stats]; ok {
+			keys = d
+		}
 	}
 	var out []v2Field
 	for _, k := range keys {
