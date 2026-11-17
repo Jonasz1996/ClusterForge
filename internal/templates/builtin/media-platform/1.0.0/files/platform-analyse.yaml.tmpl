@@ -1,0 +1,10 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Bovenop compose.analyse.yaml van het platform (0.8.1 en later): hetzelfde
+# image als de app, en geen herstart door Docker zelf. platform-ctl.sh neemt
+# dit bestand alleen mee als de versie compose.analyse.yaml heeft en ANALYSE=aan.
+services:
+  analyse:
+    image: cf-platform:local
+    restart: "no"
+  analyse-omzetten:
+    image: cf-platform:local

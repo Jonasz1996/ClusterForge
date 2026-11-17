@@ -1,6 +1,8 @@
 package templates
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -56,11 +58,16 @@ func TestRenderMediaPlatform(t *testing.T) {
 		"/etc/clusterforge/platform.env": {"DATA_ROOT=/srv/platform-data\n", "NODE_NAME=media-02\n",
 			"PLATFORM_DATABASE_URL=postgresql+asyncpg://platform:Wachtwoord-123@192.168.10.144:5432/platform\n",
 			"PLATFORM_CLUSTER_NODES=media-01=192.168.10.146,media-02=192.168.10.147,media-03=192.168.10.148\n",
-			"OFFICE_JWT_SECRET=officegeheim1\n"},
+			"OFFICE_JWT_SECRET=officegeheim1\n", "ANALYSE=aan\n", "BEELD=aan\n", "PLAATSEN=aan\n",
+			"MODELLEN_ROOT=/opt/cf-platform/modellen\n", "SLEUTELS_ROOT=/var/lib/cf-platform/sleutels/gezichten\n",
+			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n"},
+		"/etc/clusterforge/platform-analyse.yaml":      {"analyse:\n    image: cf-platform:local", "analyse-omzetten:"},
+		"/etc/systemd/system/cf-platform-status.timer": {"OnUnitActiveSec=60"},
 		"/etc/clusterforge/platform-cluster.yaml":     {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local"},
 		"/usr/local/lib/clusterforge/platform-src.sh": {"REF='claude/stappenplan-uitwerken-lu4uv3'", "SRC=/opt/cf-platform/src", "-p cf-platform"},
 		"/usr/local/lib/clusterforge/platform-ctl.sh": {"docker image inspect -f '{{.Id}}' cf-platform:local", "-f /etc/clusterforge/platform-cluster.yaml",
-			"docker compose -p cf-platform", "VIP='192.168.10.150'", "overstap proef|echt", "db-copy \"$url\" --leegmaken"},
+			"docker compose -p cf-platform", "VIP='192.168.10.150'", "overstap proef|echt", "db-copy \"$url\" --leegmaken",
+			"REPLICATIE='001'", "db_backup\n    systemctl restart cf-platform", "\"app\":\"media-platform\"", "--format '{{.Names}} {{.Status}}'"},
 		"/etc/systemd/system/cf-platform.service":       {"ConditionPathExists=/srv/platform-data/.cf-platform-active"},
 		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-replication=001"},
 		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
@@ -83,4 +90,9 @@ func TestRenderMediaPlatform(t *testing.T) {
 			t.Errorf("%s: %v %s", path, err, out)
 		}
 	}
+}
+
+func sha256hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }

@@ -1,0 +1,11 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De stand van het platform op deze node voor ClusterForge (Aandacht nodig,
+# kaart Applicatie op de clusterpagina). De controles van het platform zelf
+# doet alleen de node met het VIP; de andere melden hun eigen deel.
+[Unit]
+Description=Stand van het platform voor ClusterForge
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh status --stil
+TimeoutStartSec=120
