@@ -183,6 +183,7 @@ var reauthWhat = map[string]string{
 	"totp_enable":     "tweestapsverificatie aanzetten",
 	"totp_disable":    "tweestapsverificatie uitzetten",
 	"assistant":       "instellingen van de assistent",
+	"zabbix_ack":      "een Zabbix-probleem bevestigen",
 }
 
 var enrollReasons = map[string]string{
@@ -569,6 +570,19 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "zabbix.problem_resolved":
 		secs, _ := p["duration_s"].(float64)
 		return fmt.Sprintf("Zabbix-probleem op %s opgelost na %s: %s", name, duration(time.Duration(secs)*time.Second), zabbixProblem(p, name))
+	case "zabbix.problem_acknowledged":
+		s := "Zabbix-probleem bevestigd"
+		if name != "" && name != r.SubjectID {
+			s += " op " + name
+		}
+		s += ": " + zabbixProblem(p, name)
+		if from, to := str(p, "from"), str(p, "to"); to != "" {
+			s += ", ernst van " + from + " naar " + to
+		}
+		if b, _ := p["close"].(bool); b {
+			s += ", en gesloten"
+		}
+		return s + colon(str(p, "message"))
 	case "zabbix.host_linked":
 		if h := str(p, "hostname"); h != "" {
 			return fmt.Sprintf("Zabbix-host %s gekoppeld aan node %s", str(p, "hostid"), h)

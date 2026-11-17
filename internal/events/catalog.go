@@ -338,10 +338,11 @@ var Known = map[string]Spec{
 
 	"node.status_changed": {CategoryStatus, "Status van node gewijzigd"},
 	// Zabbix-monitoring (fase 33): problemen op nodes uit Zabbix.
-	"zabbix.problem_started":  {CategoryStatus, "Probleem in Zabbix"},
-	"zabbix.problem_resolved": {CategoryStatus, "Probleem in Zabbix opgelost"},
-	"cluster.status_changed":  {CategoryStatus, "Status van cluster gewijzigd"},
-	"vip.owner_changed":       {CategoryStatus, "VIP verhuisd"},
+	"zabbix.problem_started":      {CategoryStatus, "Probleem in Zabbix"},
+	"zabbix.problem_resolved":     {CategoryStatus, "Probleem in Zabbix opgelost"},
+	"zabbix.problem_acknowledged": {CategoryStatus, "Probleem in Zabbix bevestigd"},
+	"cluster.status_changed":      {CategoryStatus, "Status van cluster gewijzigd"},
+	"vip.owner_changed":           {CategoryStatus, "VIP verhuisd"},
 
 	"cluster.database_down":           {CategoryStatus, "Database van cluster weg"},
 	"cluster.database_up":             {CategoryStatus, "Database van cluster draait weer"},

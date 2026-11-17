@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 import { Alert, Button, Card, PageHeader, cx } from "@/components/ui";
+import { AckButton } from "@/components/zabbix/Ack";
 import {
   availLabel,
   countBySeverity,
@@ -444,6 +445,7 @@ export function ProblemRow({ p, base, now }: { p: ZabbixProblem; base: string; n
           ))}
         </span>
       </span>
+      <AckButton p={p} />
       {links && (
         <a
           href={links.problem(p)}

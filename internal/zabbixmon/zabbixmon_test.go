@@ -349,7 +349,13 @@ func (f *paramFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.calls = append(f.calls, req.Method)
 	f.mu.Unlock()
-	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + f.fn(req.Method, req.Params) + `,"id":1}`))
+	res := f.fn(req.Method, req.Params)
+	if msg, ok := strings.CutPrefix(res, "ERR:"); ok {
+		b, _ := json.Marshal(msg)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32500,"message":"Application error.","data":` + string(b) + `},"id":1}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + res + `,"id":1}`))
 }
 
 func TestItemsAndSeries(t *testing.T) {
@@ -655,5 +661,73 @@ func TestLogProblems(t *testing.T) {
 	var payload []byte
 	if err := pool.QueryRow(ctx, `SELECT payload FROM events WHERE action = 'zabbix.problem_resolved'`).Scan(&payload); err != nil || !strings.Contains(string(payload), `"duration_s": 3720`) && !strings.Contains(string(payload), `"duration_s":3720`) {
 		t.Fatalf("payload %s %v", payload, err)
+	}
+}
+
+func TestAcknowledge(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	var clusterID, nodeID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO clusters (slug, name, type, environment) VALUES ('db', 'db', 'mariadb', 'prod') RETURNING id`).Scan(&clusterID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, primary_ip, cluster_id) VALUES ('db1', '192.168.10.191', $1) RETURNING id`, clusterID).Scan(&nodeID); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	f := &paramFake{fn: func(m string, p map[string]any) string {
+		if m == "event.acknowledge" {
+			got = p
+			if p["eventids"].([]any)[0] == "666" {
+				return `ERR:Cannot close problem: trigger does not allow manual closing.`
+			}
+			return `{"eventids":["801"]}`
+		}
+		return `[]`
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	s.Client = func(context.Context) (API, string, error) { return &zabbixagent.Client{URL: srv.URL, Token: "t"}, srv.URL, nil }
+	node := &NodeLink{NodeID: nodeID, Hostname: "db1", ClusterID: &clusterID}
+	s.configured = true
+	s.snap = &Snapshot{Problems: []Problem{
+		{EventID: "801", Name: "db1: Disk full", Severity: 4, Hosts: []HostRef{{Name: "db1", Node: node}}},
+		{EventID: "802", Name: "printer weg", Severity: 2, Hosts: []HostRef{{Name: "printer"}}},
+	}}
+
+	if _, _, err := s.AckPlan(ctx, "999"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("onbekend probleem: %v", err)
+	}
+	p, prod, err := s.AckPlan(ctx, "801")
+	if err != nil || !prod {
+		t.Fatalf("prod-probleem: %v %v", prod, err)
+	}
+	if _, prod, _ := s.AckPlan(ctx, "802"); prod {
+		t.Error("probleem zonder node is geen prod")
+	}
+	sev := 3
+	if err := s.Acknowledge(ctx, events.System(), "jonas", p, AckInput{Message: " schijf vergroot ", Close: true, Severity: &sev}); err != nil {
+		t.Fatal(err)
+	}
+	if got["action"].(float64) != ackAcknowledge|ackMessage|ackChangeSeverity|ackClose || got["severity"].(float64) != 3 ||
+		got["message"] != "schijf vergroot (via ClusterForge, jonas)" {
+		t.Errorf("parameters: %v", got)
+	}
+	if !s.snap.Problems[0].Acknowledged {
+		t.Error("de stand moet meteen bevestigd tonen")
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE action = 'zabbix.problem_acknowledged' AND subject_id = $1`, nodeID.String()).Scan(&n); err != nil || n != 1 {
+		t.Errorf("logboek: %d %v", n, err)
+	}
+	// Dezelfde ernst: geen wijziging van de ernst.
+	same := 4
+	if err := s.Acknowledge(ctx, events.System(), "jonas", p, AckInput{Severity: &same}); err != nil || got["action"].(float64) != ackAcknowledge|ackMessage {
+		t.Errorf("zelfde ernst: %v %v", got, err)
+	}
+	var fe *FieldError
+	if err := s.Acknowledge(ctx, events.System(), "jonas", Problem{EventID: "666"}, AckInput{Close: true}); !errors.As(err, &fe) || !strings.Contains(fe.Msg, "handmatig sluiten") {
+		t.Errorf("niet te sluiten: %v", err)
 	}
 }

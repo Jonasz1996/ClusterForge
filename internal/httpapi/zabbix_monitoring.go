@@ -263,3 +263,55 @@ func (s *Server) DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request, i
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// --- schrijven naar Zabbix (M6) ---
+
+func (s *Server) AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request, eventid string) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ZabbixAckInput
+	if !decode(w, r, &in) {
+		return
+	}
+	prob, prod, err := s.zabbixMon.AckPlan(r.Context(), eventid)
+	if err != nil {
+		if errors.Is(err, zabbixmon.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "dit probleem staat niet (meer) open in Zabbix")
+			return
+		}
+		s.internalError(w, r, err)
+		return
+	}
+	if prod {
+		if deref(in.TotpCode) == "" && deref(in.Password) == "" {
+			what := "het wachtwoord"
+			if p.User.TotpEnabledAt != nil {
+				what = "de code van je tweestapsverificatie"
+			}
+			writeError(w, http.StatusConflict, "needs_confirmation", "dit probleem raakt een prod-node: geef "+what)
+			return
+		}
+		if s.authError(w, r, s.auth.Confirm(r.Context(), p, deref(in.Password), deref(in.TotpCode), "zabbix_ack")) {
+			return
+		}
+	}
+	ack := zabbixmon.AckInput{Message: in.Message, Close: in.Close}
+	if in.Severity.IsSpecified() && !in.Severity.IsNull() {
+		v, _ := in.Severity.Get()
+		ack.Severity = &v
+	}
+	err = s.zabbixMon.Acknowledge(r.Context(), events.User(p.User.ID), p.User.Username, prob, ack)
+	if err != nil {
+		var fe *zabbixmon.FieldError
+		if errors.As(err, &fe) {
+			writeError(w, http.StatusBadRequest, "invalid", fe.Msg)
+			return
+		}
+		s.zabbixReadError(w, r, err)
+		return
+	}
+	s.kickZabbixMon()
+	w.WriteHeader(http.StatusNoContent)
+}

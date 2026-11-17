@@ -364,3 +364,20 @@ export function boardInput(v: unknown): ZabbixDashboardInput {
     }),
   };
 }
+
+// --- schrijven naar Zabbix (M6) ---
+
+export type ZabbixAckInput = components["schemas"]["ZabbixAckInput"];
+
+export function useAckZabbixProblem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ eventid, body }: { eventid: string; body: ZabbixAckInput }) =>
+      unwrap(await api.POST("/zabbix/problems/{eventid}/acknowledge", { params: { path: { eventid } }, body })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: key });
+      // De server leest Zabbix meteen opnieuw; even later klopt alles.
+      setTimeout(() => void qc.invalidateQueries({ queryKey: key }), 2_500);
+    },
+  });
+}

@@ -13983,6 +13983,19 @@ type VmActionInput struct {
 	Vmstate *bool `json:"vmstate,omitempty"`
 }
 
+// ZabbixAckInput defines model for ZabbixAckInput.
+type ZabbixAckInput struct {
+	Close bool `json:"close"`
+
+	// Message Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter
+	Message  string  `json:"message"`
+	Password *string `json:"password,omitempty"`
+
+	// Severity Nieuwe ernst 0-5; leeg laat hem staan
+	Severity nullable.Nullable[int] `json:"severity,omitempty"`
+	TotpCode *string                `json:"totp_code,omitempty"`
+}
+
 // ZabbixAgentNode defines model for ZabbixAgentNode.
 type ZabbixAgentNode struct {
 	// AgentService Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is
@@ -15737,6 +15750,9 @@ type UpdateZabbixDashboardJSONRequestBody = ZabbixDashboardInput
 // SetZabbixHostLinkJSONRequestBody defines body for SetZabbixHostLink for application/json ContentType.
 type SetZabbixHostLinkJSONRequestBody = ZabbixHostLinkInput
 
+// AcknowledgeZabbixProblemJSONRequestBody defines body for AcknowledgeZabbixProblem for application/json ContentType.
+type AcknowledgeZabbixProblemJSONRequestBody = ZabbixAckInput
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
@@ -16939,6 +16955,9 @@ type ServerInterface interface {
 	// GetZabbixOverview Zabbix-monitoring (fase 33)
 	// (GET /zabbix/overview)
 	GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams)
+	// AcknowledgeZabbixProblem Een probleem in Zabbix bevestigen (admin)
+	// (POST /zabbix/problems/{eventid}/acknowledge)
+	AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request, eventid string)
 	// RefreshZabbix Meteen een verzamelronde draaien
 	// (POST /zabbix/refresh)
 	RefreshZabbix(w http.ResponseWriter, r *http.Request)
@@ -19345,6 +19364,12 @@ func (_ Unimplemented) GetZabbixMetrics(w http.ResponseWriter, r *http.Request) 
 // GetZabbixOverview Zabbix-monitoring (fase 33)
 // (GET /zabbix/overview)
 func (_ Unimplemented) GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcknowledgeZabbixProblem Een probleem in Zabbix bevestigen (admin)
+// (POST /zabbix/problems/{eventid}/acknowledge)
+func (_ Unimplemented) AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request, eventid string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -30561,6 +30586,32 @@ func (siw *ServerInterfaceWrapper) GetZabbixOverview(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AcknowledgeZabbixProblem operation middleware
+func (siw *ServerInterfaceWrapper) AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "eventid" -------------
+	var eventid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "eventid", chi.URLParam(r, "eventid"), &eventid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "eventid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcknowledgeZabbixProblem(w, r, eventid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RefreshZabbix operation middleware
 func (siw *ServerInterfaceWrapper) RefreshZabbix(w http.ResponseWriter, r *http.Request) {
 
@@ -31431,6 +31482,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.UpdateZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix/problems/{eventid}/acknowledge", wrapper.AcknowledgeZabbixProblem)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.DeleteZabbixHostLink)

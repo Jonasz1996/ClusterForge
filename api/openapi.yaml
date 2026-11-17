@@ -4538,6 +4538,32 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /zabbix/problems/{eventid}/acknowledge:
+    post:
+      operationId: acknowledgeZabbixProblem
+      summary: Een probleem in Zabbix bevestigen (admin)
+      description: |
+        Bevestigt met een bericht, en zet eventueel een andere ernst of sluit het probleem (alleen als de trigger
+        handmatig sluiten toelaat). Raakt het probleem een node van een prod-cluster, dan is de code van
+        tweestapsverificatie (of het wachtwoord) nodig; zonder antwoordt de server 409 needs_confirmation.
+      parameters:
+        - name: eventid
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixAckInput" }
+      responses:
+        "204": { description: Bevestigd }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/link:
     parameters:
       - name: hostid
@@ -14998,6 +15024,15 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         updated_by: { type: string, nullable: true }
+    ZabbixAckInput:
+      type: object
+      required: [message, close]
+      properties:
+        message: { type: string, description: Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter }
+        close: { type: boolean }
+        severity: { type: integer, nullable: true, description: "Nieuwe ernst 0-5; leeg laat hem staan" }
+        totp_code: { type: string }
+        password: { type: string }
     ZabbixItem:
       type: object
       required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error]

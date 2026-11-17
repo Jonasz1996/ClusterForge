@@ -125,6 +125,8 @@ func TestSummaries(t *testing.T) {
 			"Zabbix meldt op web01: High CPU utilization (gemiddeld)"},
 		{row("zabbix.problem_resolved", "node", web01ID.String(), map[string]any{"name": "Disk full", "duration_s": 754}),
 			"Zabbix-probleem op web01 opgelost na 12 minuten: Disk full"},
+		{row("zabbix.problem_acknowledged", "node", web01ID.String(), map[string]any{"name": "web01: Disk full", "host": "web01", "close": true, "from": "hoog", "to": "gemiddeld", "message": "schijf vergroot"}),
+			"Zabbix-probleem bevestigd op web01: Disk full, ernst van hoog naar gemiddeld, en gesloten: schijf vergroot"},
 		{row("incident.resolved", "incident", "i1", map[string]any{"number": 3, "title": "Cluster Web is down", "duration_seconds": 754}),
 			"Incident #3 opgelost na 12 minuten: Cluster Web is down"},
 		{row("incident.reopened", "incident", "i1", map[string]any{"number": 3, "title": "Cluster Web is down"}),

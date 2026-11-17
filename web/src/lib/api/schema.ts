@@ -4263,6 +4263,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/problems/{eventid}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een probleem in Zabbix bevestigen (admin)
+         * @description Bevestigt met een bericht, en zet eventueel een andere ernst of sluit het probleem (alleen als de trigger
+         *     handmatig sluiten toelaat). Raakt het probleem een node van een prod-cluster, dan is de code van
+         *     tweestapsverificatie (of het wachtwoord) nodig; zonder antwoordt de server 409 needs_confirmation.
+         */
+        post: operations["acknowledgeZabbixProblem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/zabbix/hosts/{hostid}/link": {
         parameters: {
             query?: never;
@@ -14350,6 +14372,15 @@ export interface components {
             updated_at: string;
             updated_by: string | null;
         };
+        ZabbixAckInput: {
+            /** @description Mag leeg; ClusterForge zet er "via ClusterForge" en je naam achter */
+            message: string;
+            close: boolean;
+            /** @description Nieuwe ernst 0-5; leeg laat hem staan */
+            severity?: number | null;
+            totp_code?: string;
+            password?: string;
+        };
         ZabbixItem: {
             itemid: string;
             name: string;
@@ -22100,6 +22131,36 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    acknowledgeZabbixProblem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAckInput"];
+            };
+        };
+        responses: {
+            /** @description Bevestigd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     setZabbixHostLink: {
