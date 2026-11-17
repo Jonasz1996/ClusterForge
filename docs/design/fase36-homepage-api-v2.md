@@ -81,10 +81,25 @@ al is: clusters uit templates (homepage, media-platform, NPM, Authentik,
 Zabbix, Nextcloud, Galera, Patroni, ...), containers (image `plexinc/pms-docker`
 → Plex, `lscr.io/linuxserver/sonarr` → Sonarr, ...), systemd-units
 (`plexmediaserver`, `home-assistant@`, `adguardhome`, ...) en luisterende
-poorten (32400 → Plex). In de GUI: **Apps → Voorgesteld → Toevoegen** (of
-negeren). Eén app op een cluster volgt automatisch de VIP-eigenaar of de
-actieve node; drie losse Plex-servers worden drie apps (of één app met drie
-instanties, keuze in de GUI).
+poorten (32400 → Plex).
+
+**Automatisch beheerd (bijsturing Jonas 17/11).** Herkende apps worden
+**zonder klikken** toegevoegd, krijgen meters, een groep, een icoon en
+standaard tegelvelden, en verschijnen vanzelf als tegel op de homepage.
+Verdwijnt een app (container weg, node afgebouwd), dan verdwijnt ook de tegel
+(eerst 24 u "weg?"-markering, daarna weg). De GUI is er alleen om bij te
+sturen: verbergen, hernoemen, andere velden, groep, koppeling corrigeren. Wat
+Jonas bijstuurt blijft staan; de rest houdt ClusterForge zelf bij. Alleen wat
+niet zeker herkend wordt komt in *Twijfel* (één klik: app of negeren).
+
+Eén app op een cluster volgt automatisch de VIP-eigenaar of de actieve node;
+drie losse Plex-servers worden één app met drie instanties (één tegel, per
+instantie een regel in het detailscherm).
+
+Herkenning gebeurt met een ingebouwde catalogus (image-naam, unit-naam,
+poort, bestand zoals `/var/www/nextcloud/occ`) die per CF-versie groeit. De
+lijst met apps die Jonas na het installeren van alle agents doorgeeft, wordt
+de eerste invulling van die catalogus.
 
 ## Wie meet wat
 
@@ -150,6 +165,7 @@ tegelcheck van homepage rood kleurt).
 | `GET /clusters`, `/clusters/{slug}` | zoals v1, plus de apps van het cluster |
 | `GET /nodes`, `/nodes/{host}` | zoals nodes-API, plus apps/containers op de node |
 | `GET /sources/{bron}` | `agents`, `zabbix`, `crowdsec`, `opnsense`, `npm`, `authentik`, `pbs`, `proxmox`, `docker`, `soc` |
+| `GET /homepage/layout` | tegels die homepage moet tonen (beheerd door CF), met ETag |
 | `GET /homepage/services.yaml` | kant-en-klare homepage-config voor de tegels van dit token (groepen, volgorde, url, icoon, velden) |
 
 **Eén tegelformaat** voor apps én bronnen, gebouwd op het model van Jonas'
@@ -196,21 +212,28 @@ Twee mogelijkheden, allebei met alleen het CF-token:
   `json`-integratie (url `/api/dashboard/v2/apps/plex`, `fields` met
   `values.<key>`-paden). Werkt meteen, maar alleen de 8 velden op de tegel,
   geen detailscherm.
-- **B. Kleine `clusterforge`-integratie in de homepage-repo** (aanbevolen,
-  ~100 regels Python, zelfde stijl als `pbs.py`/`proxmox.py`): één keer
-  ClusterForge-URL + token instellen, dan per tegel enkel `app: plex`.
-  `summary()` = `fields`, `detail()` = `sections`, status en link komen mee,
-  en **Importeren** maakt in één keer alle tegels en groepen aan zoals in
-  ClusterForge ingesteld. Daarvoor moet de homepage-repo aan dit project
+- **B. `clusterforge`-integratie + tegelsynchronisatie in de homepage-repo**
+  (gekozen door Jonas, zelfde stijl als `pbs.py`/`proxmox.py`): in homepage
+  één keer ClusterForge-URL + token instellen. Daarna **beheert ClusterForge
+  de tegels**: homepage haalt elke minuut `GET /api/dashboard/v2/homepage/layout`
+  (groepen, volgorde, tegels met `app:`-sleutel, icoon, link, ETag) en maakt,
+  wijzigt en verwijdert zelf de tegels die van ClusterForge komen (gemarkeerd
+  `managed_by: clusterforge`). Tegels die Jonas zelf in homepage maakte
+  blijven onaangeroerd. `summary()` = `fields`, `detail()` = `sections`,
+  status en link komen mee. Daarvoor moet de homepage-repo aan dit project
   gekoppeld worden (nu kan ik er alleen in lezen).
+
+Variant A (`json`-integratie, per tegel de 8 velden) blijft als terugval
+zolang B er niet is.
 
 ## GUI
 
 **Instellingen → Homepage-API** (vervangt het huidige "Dashboard-API"-blok,
 v1-tokens blijven zichtbaar):
 
-- **Apps**: lijst met status, waar, laatste meting; tabblad *Voorgesteld*
-  (ontdekt, toevoegen/negeren). Per app: naam, icoon, groep, volgorde,
+- **Apps**: lijst met status, waar, laatste meting, "automatisch" of
+  "bijgestuurd"; tabblad *Twijfel* (alleen wat niet zeker herkend is). Per app,
+  alleen om bij te sturen (standaard ingevuld): naam, icoon, groep, volgorde,
   publieke URL, koppeling cluster/node/container/unit, meters aan/uit,
   interval, sleutel plakken (alleen waar nodig), **velden op de tegel kiezen**
   (sleep-volgorde, max 8, voorbeeldwaarde ernaast), voorbeeld van de tegel en
@@ -249,22 +272,24 @@ Playwright-schermen) en wordt apart gemeld zodra ze klaar is.
 
 | M | Wat | Klaar als |
 |---|---|---|
-| M0 | Apps-model, ontdekking, GUI Apps + Voorgesteld, migraties 00125-00126 | Jonas ziet zijn apps voorgesteld en kan ze koppelen |
+| M0 | Apps-model, herkenningscatalogus, automatisch toevoegen/verwijderen, GUI Apps + Twijfel, migraties 00125-00126 | Jonas' apps staan er vanzelf, correct gekoppeld |
 | M1 | Protocol 52 `appstats`, generieke meters (http, container, systemd, port), actieve node bepalen | elke app heeft status + basisvelden |
 | M2 | Ingebouwde meters: Plex, Nextcloud, media-platform, homepage, Home Assistant, Galera, Patroni | echte appstats op de tegels |
 | M3 | Serverbronnen per app en globaal: agent, cluster, Zabbix, CrowdSec, PBS, Proxmox, aandacht; OPNsense/NPM/Authentik zodra fase 34/35 er zijn | `sources` gevuld |
 | M4 | API v2 (endpoints, tegelformaat, scopes 00127, ETag, strict), OpenAPI, tests; v1 ongewijzigd | homepage kan alles via één token |
-| M5 | GUI tegelvelden kiezen, groepen/volgorde, voorbeeld, `services.yaml`; homepage-integratie (B) als de repo gekoppeld is | Jonas zet zijn homepage om zonder andere sleutels |
+| M5 | `/homepage/layout`, GUI bijsturen (velden, groepen, verbergen), homepage-integratie B met tegelsynchronisatie | homepage toont vanzelf alle apps, zonder andere sleutels |
 | M6 | Eigen controle via de GUI (http-json met pad-velden, sleutel uit bestand op de node of uit de GUI), grafiekjes (VictoriaMetrics), te-oud-afhandeling | ook apps zonder ingebouwde meter |
 
-## Vragen aan Jonas (met voorstel, bouwen loopt op het voorstel)
+## Antwoorden van Jonas (17/11 05:38 UTC)
 
-1. **Welke apps nog?** Voorstel: eerst de lijst hierboven (Plex, Nextcloud,
-   media-platform, homepage, Home Assistant, databases, Zabbix, VaultX, NPM,
-   Authentik, OPNsense, PBS, Proxmox, CrowdSec). Draai je ook *arr-apps,
-   Jellyfin, AdGuard, Immich of iets anders dat een eigen tegel verdient?
-2. **Homepage-integratie B?** Voorstel: ja, koppel de homepage-repo aan dit
-   project, dan bouw ik de `clusterforge`-integratie mee in M5. Anders werkt
-   variant A.
-3. **Sleutels lokaal laten lezen door de agent** (Plex-token, *arr-ApiKey,
-   Nextcloud via `occ`)? Voorstel: ja, standaard aan, per app uit te zetten.
+1. **Apps:** Jonas installeert de agents op alle servers die hij houdt en geeft
+   daarna de lijst met apps. Die lijst vult de herkenningscatalogus (M0/M2).
+2. **Homepage-integratie B: ja**, met als eis dat tegels automatisch herkend en
+   door ClusterForge beheerd worden (verwerkt hierboven). Homepage-repo moet
+   nog gekoppeld worden.
+3. **Sleutels lokaal lezen:** geen antwoord; voorstel blijft: standaard aan,
+   per app uit te zetten.
+
+Breder doel: de ClusterForge-agents beheren en monitoren het hele homelab;
+alles opvolgen en beheren vanuit ClusterForge. Fase 36 is daarin de laag die
+elke app herkent en zichtbaar maakt.
