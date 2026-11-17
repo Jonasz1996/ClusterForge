@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/publish"
 )
@@ -157,4 +158,32 @@ func (s *Server) ReleasePublishHost(w http.ResponseWriter, r *http.Request, host
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func windowParam[T ~string](w *T) string {
+	if w == nil {
+		return ""
+	}
+	return string(*w)
+}
+
+// GetPublishTraffic: verkeer van NPM (fase 39). Kijkers mogen het zien;
+// de IP's van bezoekers zijn er ook voor kijkers, zoals bij CrowdSec.
+func (s *Server) GetPublishTraffic(w http.ResponseWriter, r *http.Request, params gen.GetPublishTrafficParams) {
+	v, err := s.publish.Traffic(r.Context(), windowParam(params.Window))
+	if err != nil {
+		s.publishError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// GetPublishLogins: logins en mislukte logins in Authentik (fase 39).
+func (s *Server) GetPublishLogins(w http.ResponseWriter, r *http.Request, params gen.GetPublishLoginsParams) {
+	v, err := s.publish.Logins(r.Context(), windowParam(params.Window))
+	if err != nil {
+		s.publishError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }

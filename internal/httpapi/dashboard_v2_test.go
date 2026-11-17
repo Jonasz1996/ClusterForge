@@ -134,6 +134,16 @@ func TestDashboardV2Apps(t *testing.T) {
 	if s := dashboardGet(t, e, "/api/dashboard/v2/sources/npm", "Authorization", auth, &src); s != 200 {
 		t.Fatalf("npm: %d", s)
 	}
+	// Fase 39: verkeer en logins, ook zonder gegevens een geldig antwoord.
+	for _, src := range []string{"traffic", "logins"} {
+		var got map[string]any
+		if s := dashboardGet(t, e, "/api/dashboard/v2/sources/"+src+"?window=1h", "Authorization", auth, &got); s != 200 || got["window"] != "1h" || got["url"] == nil {
+			t.Fatalf("%s: %d %+v", src, s, got)
+		}
+	}
+	if s := dashboardGet(t, e, "/api/dashboard/v2/sources/traffic?window=1j", "Authorization", auth, nil); s != 400 {
+		t.Fatalf("ongeldig venster: %d", s)
+	}
 	var ov v2Overview
 	if s := dashboardGet(t, e, "/api/dashboard/v2/", "Authorization", auth, &ov); s != 200 || ov.Apps != 2 {
 		t.Fatalf("overzicht: %d %+v", s, ov)

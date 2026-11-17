@@ -42,6 +42,17 @@ func TestPublishAPI(t *testing.T) {
 	if s := c.do("POST", "/api/v1/publish/actions", map[string]any{"action": "delete", "host_id": 99}, nil); s != http.StatusBadRequest && s != http.StatusNotFound {
 		t.Errorf("verwijderen onbekende host: %d", s)
 	}
+	var tv struct {
+		Window string `json:"window"`
+		Series []any  `json:"series"`
+		IPs    []any  `json:"ips"`
+	}
+	if s := c.do("GET", "/api/v1/publish/traffic?window=7d", nil, &tv); s != http.StatusOK || tv.Window != "7d" || tv.Series == nil || tv.IPs == nil {
+		t.Fatalf("verkeer: %d %+v", s, tv)
+	}
+	if s := c.do("GET", "/api/v1/publish/logins", nil, &raw); s != http.StatusOK || raw["window"] != "24h" {
+		t.Fatalf("logins: %d %+v", s, raw)
+	}
 	if s := c.do("POST", "/api/v1/publish/hosts/99/release", nil, nil); s != http.StatusNotFound {
 		t.Errorf("loslaten onbekende host: %d", s)
 	}

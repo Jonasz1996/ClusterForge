@@ -468,6 +468,7 @@ func serve() error {
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
 	goLoop(ctx, log, "opnsense", opnSvc.Loop)
 	goLoop(ctx, log, "publish", pub.Loop)
+	goLoop(ctx, log, "publish-feeds", pub.FeedLoop)
 	goLoop(ctx, log, "zabbixmon", zbm.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)

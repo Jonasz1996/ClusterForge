@@ -4296,6 +4296,48 @@ func (e GetMapParamsLayer) Valid() bool {
 	}
 }
 
+// Defines values for GetPublishLoginsParamsWindow.
+const (
+	GetPublishLoginsParamsWindowN1h  GetPublishLoginsParamsWindow = "1h"
+	GetPublishLoginsParamsWindowN24h GetPublishLoginsParamsWindow = "24h"
+	GetPublishLoginsParamsWindowN7d  GetPublishLoginsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetPublishLoginsParamsWindow enum.
+func (e GetPublishLoginsParamsWindow) Valid() bool {
+	switch e {
+	case GetPublishLoginsParamsWindowN1h:
+		return true
+	case GetPublishLoginsParamsWindowN24h:
+		return true
+	case GetPublishLoginsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPublishTrafficParamsWindow.
+const (
+	GetPublishTrafficParamsWindowN1h  GetPublishTrafficParamsWindow = "1h"
+	GetPublishTrafficParamsWindowN24h GetPublishTrafficParamsWindow = "24h"
+	GetPublishTrafficParamsWindowN7d  GetPublishTrafficParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetPublishTrafficParamsWindow enum.
+func (e GetPublishTrafficParamsWindow) Valid() bool {
+	switch e {
+	case GetPublishTrafficParamsWindowN1h:
+		return true
+	case GetPublishTrafficParamsWindowN24h:
+		return true
+	case GetPublishTrafficParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListSecurityFindingsParamsStatus.
 const (
 	ListSecurityFindingsParamsStatusAanvaard ListSecurityFindingsParamsStatus = "aanvaard"
@@ -15239,6 +15281,22 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetPublishLoginsParams defines parameters for GetPublishLogins.
+type GetPublishLoginsParams struct {
+	Window *GetPublishLoginsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetPublishLoginsParamsWindow defines parameters for GetPublishLogins.
+type GetPublishLoginsParamsWindow string
+
+// GetPublishTrafficParams defines parameters for GetPublishTraffic.
+type GetPublishTrafficParams struct {
+	Window *GetPublishTrafficParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetPublishTrafficParamsWindow defines parameters for GetPublishTraffic.
+type GetPublishTrafficParamsWindow string
+
 // GetPveApiParams defines parameters for GetPveApi.
 type GetPveApiParams struct {
 	Path string `form:"path" json:"path"`
@@ -16800,6 +16858,9 @@ type ServerInterface interface {
 	// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
 	// (POST /publish/hosts/{hostId}/release)
 	ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int)
+	// GetPublishLogins Logins en mislukte logins in Authentik, per gebruiker, IP en app (fase 39)
+	// (GET /publish/logins)
+	GetPublishLogins(w http.ResponseWriter, r *http.Request, params GetPublishLoginsParams)
 	// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
 	// (GET /publish/overview)
 	GetPublishOverview(w http.ResponseWriter, r *http.Request)
@@ -16818,6 +16879,9 @@ type ServerInterface interface {
 	// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
 	// (POST /publish/test/{what})
 	TestPublishLink(w http.ResponseWriter, r *http.Request, what string)
+	// GetPublishTraffic Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
+	// (GET /publish/traffic)
+	GetPublishTraffic(w http.ResponseWriter, r *http.Request, params GetPublishTrafficParams)
 	// ListPveHosts Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
 	// (GET /pve-hosts)
 	ListPveHosts(w http.ResponseWriter, r *http.Request)
@@ -19062,6 +19126,12 @@ func (_ Unimplemented) ReleasePublishHost(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetPublishLogins Logins en mislukte logins in Authentik, per gebruiker, IP en app (fase 39)
+// (GET /publish/logins)
+func (_ Unimplemented) GetPublishLogins(w http.ResponseWriter, r *http.Request, params GetPublishLoginsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
 // (GET /publish/overview)
 func (_ Unimplemented) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
@@ -19095,6 +19165,12 @@ func (_ Unimplemented) SavePublishSettings(w http.ResponseWriter, r *http.Reques
 // TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
 // (POST /publish/test/{what})
 func (_ Unimplemented) TestPublishLink(w http.ResponseWriter, r *http.Request, what string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishTraffic Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
+// (GET /publish/traffic)
+func (_ Unimplemented) GetPublishTraffic(w http.ResponseWriter, r *http.Request, params GetPublishTrafficParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -29214,6 +29290,39 @@ func (siw *ServerInterfaceWrapper) ReleasePublishHost(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishLogins operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishLogins(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishLoginsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishLogins(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPublishOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
 
@@ -29301,6 +29410,39 @@ func (siw *ServerInterfaceWrapper) TestPublishLink(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.TestPublishLink(w, r, what)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishTraffic operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishTraffic(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishTrafficParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishTraffic(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -32632,6 +32774,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/publish/overview", wrapper.GetPublishOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/traffic", wrapper.GetPublishTraffic)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/logins", wrapper.GetPublishLogins)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/refresh", wrapper.RefreshPublish)

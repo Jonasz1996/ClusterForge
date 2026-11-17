@@ -19,6 +19,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/homeapps"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -135,6 +136,12 @@ var tileFields = map[string]fieldInfo{
 	"missing":          {Label: "Ontbreekt", Format: "number"},
 	"health_issues":    {Label: "Meldingen", Format: "number"},
 	"indexers":         {Label: "Indexers", Format: "number"},
+	// Verkeer van NPM en Authentik (fase 39), laatste 24 uur.
+	"requests_24h": {Label: "Aanvragen 24u", Format: "number"},
+	"visitors_24h": {Label: "Bezoekers 24u", Format: "number"},
+	"errors_24h":   {Label: "Fouten 24u", Format: "number"},
+	"denied_24h":   {Label: "Geweigerd 24u", Format: "number"},
+	"opened_24h":   {Label: "Geopend 24u", Format: "number"},
 }
 
 var defaultTileFields = []string{"status", "nodes", "version", "zabbix_problems"}
@@ -325,6 +332,12 @@ func (s *Server) buildHomeApps(ctx context.Context) (homeAppsSet, error) {
 		}
 	}
 
+	// Verkeer van NPM en geopende apps in Authentik (fase 39).
+	usage, opens := map[string]publish.HostUsage{}, map[string]int{}
+	if u, o, err := s.publish.UsageByDomain(ctx); err == nil {
+		usage, opens = u, o
+	}
+
 	out := homeAppsSet{at: now, res: res, values: map[string]map[string]any{}, fields: map[string][]v2Field{}, sects: map[string][]v2Section{}}
 	for _, a := range res.Apps {
 		v := map[string]any{
@@ -369,6 +382,25 @@ func (s *Server) buildHomeApps(ctx context.Context) (homeAppsSet, error) {
 		}
 		if a.Authentik != "" {
 			v["authentik"] = a.Authentik
+		}
+		if len(a.Domains) > 0 {
+			var u publish.HostUsage
+			seen := false
+			for _, d := range a.Domains {
+				if x, ok := usage[strings.ToLower(d)]; ok {
+					seen = true
+					u.Requests += x.Requests
+					u.Visitors += x.Visitors
+					u.S5xx += x.S5xx
+					u.Denied += x.Denied
+				}
+			}
+			if seen {
+				v["requests_24h"], v["visitors_24h"], v["errors_24h"], v["denied_24h"] = u.Requests, u.Visitors, u.S5xx, u.Denied
+			}
+		}
+		if n, ok := opens[strings.ToLower(a.Name)]; ok {
+			v["opened_24h"] = n
 		}
 		for _, in := range a.Instances {
 			if in.Node == a.ActiveNode && in.HTTPStatus > 0 {
@@ -476,6 +508,10 @@ func tileSections(a homeapps.App, v map[string]any) []v2Section {
 	add("Adres", "domain")
 	add("Authentik", "authentik")
 	add("Versie", "version")
+	add("Aanvragen 24u", "requests_24h")
+	add("Bezoekers 24u", "visitors_24h")
+	add("Serverfouten 24u", "errors_24h")
+	add("Geopend via Authentik 24u", "opened_24h")
 	add("Zabbix-problemen", "zabbix_problems")
 	add("Updates", "updates")
 	out := []v2Section{{Type: "kv", Title: "Overzicht", Items: kv}}
@@ -652,7 +688,7 @@ func (s *Server) dashV2Overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, o)
 }
 
-var v2Sources = []string{"agents", "crowdsec", "soc", "zabbix", "opnsense", "npm"}
+var v2Sources = []string{"agents", "crowdsec", "soc", "zabbix", "opnsense", "npm", "traffic", "logins"}
 
 // dashV2Source: GET /sources/{bron}: één tegel per bron. Zabbix, OPNsense en
 // SOC zijn dezelfde als in v1.
@@ -670,6 +706,10 @@ func (s *Server) dashV2Source(w http.ResponseWriter, r *http.Request) {
 		s.dashV2CrowdSec(w, r)
 	case "npm", "authentik", "publish":
 		s.dashV2Publish(w, r)
+	case "traffic":
+		s.dashV2Traffic(w, r)
+	case "logins":
+		s.dashV2Logins(w, r)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "onbekende bron; kies uit "+strings.Join(v2Sources, ", "))
 	}
@@ -941,4 +981,86 @@ func (s *Server) decideHomeAppDoubt(w http.ResponseWriter, r *http.Request) {
 	}
 	s.invalidateHomeApps()
 	s.listHomeApps(w, r)
+}
+
+// publishAllClusters: verkeer en logins gaan over alle clusters.
+func (s *Server) publishAllClusters(w http.ResponseWriter, r *http.Request) bool {
+	t, _ := r.Context().Value(dashboardTokenKey{}).(store.ApiToken)
+	if len(t.ClusterIds) > 0 {
+		writeError(w, http.StatusForbidden, "forbidden", "NPM en Authentik gaan over alle clusters; maak er een token voor alle clusters voor")
+		return false
+	}
+	if s.publish == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "publicatie is niet beschikbaar")
+		return false
+	}
+	return true
+}
+
+// dashV2Traffic: GET /sources/traffic?window=24h: verkeer van NPM in één
+// tegel, met de drukste hosts en de IP's die aandacht vragen.
+func (s *Server) dashV2Traffic(w http.ResponseWriter, r *http.Request) {
+	if !s.publishAllClusters(w, r) {
+		return
+	}
+	v, err := s.publish.Traffic(r.Context(), r.URL.Query().Get("window"))
+	if err != nil {
+		s.publishError(w, err)
+		return
+	}
+	top := []map[string]any{}
+	for i, h := range v.Hosts {
+		if i == 5 {
+			break
+		}
+		top = append(top, map[string]any{"domain": h.Domain, "requests": h.Requests, "visitors": h.Visitors, "errors": h.S5xx})
+	}
+	watch := []map[string]any{}
+	for _, p := range v.IPs {
+		if len(watch) == 10 || (!p.Suspicious && (p.Ban == nil || p.AfterBan == 0)) {
+			continue
+		}
+		state := "verdacht, geen ban"
+		if p.Ban != nil {
+			state = "geblokkeerd maar komt nog binnen"
+		}
+		watch = append(watch, map[string]any{"ip": p.IP, "requests": p.Requests, "denied": p.Denied, "state": state, "why": p.Why})
+	}
+	good := v.Compare.BannedPassing == 0 && v.Compare.Suspicious == 0
+	errRate := 0.0
+	if v.Totals.Requests > 0 {
+		errRate = float64(v.Totals.S5xx) * 100 / float64(v.Totals.Requests)
+	}
+	writeJSON(w, strictCode(r, good), map[string]any{
+		"ok": good, "window": v.Window, "requests": v.Totals.Requests, "visitors": v.Totals.Visitors,
+		"errors": v.Totals.S5xx, "error_rate": errRate, "denied": v.Totals.Denied, "bytes": v.Totals.Bytes,
+		"connections": v.Totals.Connections, "banned_seen": v.Compare.BannedSeen, "banned_passing": v.Compare.BannedPassing,
+		"suspicious": v.Compare.Suspicious, "active_bans": v.Compare.ActiveBans, "top_hosts": top, "watch_ips": watch,
+		"url": baseURL(r, s.cfg.TrustProxyHeaders) + "/publicatie/verkeer",
+	})
+}
+
+// dashV2Logins: GET /sources/logins?window=24h: logins en mislukte logins.
+func (s *Server) dashV2Logins(w http.ResponseWriter, r *http.Request) {
+	if !s.publishAllClusters(w, r) {
+		return
+	}
+	v, err := s.publish.Logins(r.Context(), r.URL.Query().Get("window"))
+	if err != nil {
+		s.publishError(w, err)
+		return
+	}
+	ips := []map[string]any{}
+	for i, f := range v.FailedIPs {
+		if i == 10 {
+			break
+		}
+		ips = append(ips, map[string]any{"ip": f.IP, "failed": f.Failed, "usernames": f.Usernames, "country": f.Country, "banned": f.Ban != nil})
+	}
+	good := v.Totals.Unbanned == 0
+	writeJSON(w, strictCode(r, good), map[string]any{
+		"ok": good, "window": v.Window, "logins": v.Totals.Logins, "failed": v.Totals.Failed, "users": v.Totals.Users,
+		"failed_ips": v.Totals.FailedIPs, "failed_ips_not_banned": v.Totals.Unbanned, "app_opens": v.Totals.AppOpening,
+		"top_failed_ips": ips, "url": baseURL(r, s.cfg.TrustProxyHeaders) + "/publicatie/logins",
+	})
 }

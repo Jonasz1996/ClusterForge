@@ -5515,6 +5515,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PveObject" }
         "401": { $ref: "#/components/responses/Error" }
+  /publish/traffic:
+    get:
+      operationId: getPublishTraffic
+      summary: Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ["1h", "24h", "7d"] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/logins:
+    get:
+      operationId: getPublishLogins
+      summary: Logins en mislukte logins in Authentik, per gebruiker, IP en app (fase 39)
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ["1h", "24h", "7d"] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
   /publish/refresh:
     post:
       operationId: refreshPublish
