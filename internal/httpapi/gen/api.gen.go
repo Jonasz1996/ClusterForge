@@ -4137,6 +4137,30 @@ func (e VmAction) Valid() bool {
 	}
 }
 
+// Defines values for ZabbixAgentNodesInputAction.
+const (
+	ZabbixAgentNodesInputActionApply    ZabbixAgentNodesInputAction = "apply"
+	ZabbixAgentNodesInputActionManage   ZabbixAgentNodesInputAction = "manage"
+	ZabbixAgentNodesInputActionRotate   ZabbixAgentNodesInputAction = "rotate"
+	ZabbixAgentNodesInputActionUnmanage ZabbixAgentNodesInputAction = "unmanage"
+)
+
+// Valid indicates whether the value is a known member of the ZabbixAgentNodesInputAction enum.
+func (e ZabbixAgentNodesInputAction) Valid() bool {
+	switch e {
+	case ZabbixAgentNodesInputActionApply:
+		return true
+	case ZabbixAgentNodesInputActionManage:
+		return true
+	case ZabbixAgentNodesInputActionRotate:
+		return true
+	case ZabbixAgentNodesInputActionUnmanage:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditActorType.
 const (
 	AuditActorTypeAgent  AuditActorType = "agent"
@@ -13790,6 +13814,120 @@ type VmActionInput struct {
 	Vmstate *bool `json:"vmstate,omitempty"`
 }
 
+// ZabbixAgentNode defines model for ZabbixAgentNode.
+type ZabbixAgentNode struct {
+	// AgentService Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is
+	AgentService       string                                `json:"agent_service"`
+	AppliedAt          nullable.Nullable[time.Time]          `json:"applied_at"`
+	ApplyError         string                                `json:"apply_error"`
+	ApplyFailedAt      nullable.Nullable[time.Time]          `json:"apply_failed_at"`
+	ApplyJobId         nullable.Nullable[openapi_types.UUID] `json:"apply_job_id"`
+	ApplyRunning       bool                                  `json:"apply_running"`
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	Docker             bool                                  `json:"docker"`
+	Enabled            bool                                  `json:"enabled"`
+	Hostname           string                                `json:"hostname"`
+	Ip                 string                                `json:"ip"`
+	Managed            bool                                  `json:"managed"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Pending            bool                                  `json:"pending"`
+	PskCreatedAt       nullable.Nullable[time.Time]          `json:"psk_created_at"`
+	PskIdentity        string                                `json:"psk_identity"`
+	Supported          bool                                  `json:"supported"`
+	ZabbixHostId       string                                `json:"zabbix_host_id"`
+}
+
+// ZabbixAgentNodesInput defines model for ZabbixAgentNodesInput.
+type ZabbixAgentNodesInput struct {
+	Action ZabbixAgentNodesInputAction `json:"action"`
+
+	// All Alle nodes die nog niet toegepast zijn (apply) of alle nodes
+	All      *bool                 `json:"all,omitempty"`
+	NodeIds  *[]openapi_types.UUID `json:"node_ids,omitempty"`
+	TotpCode *string               `json:"totp_code,omitempty"`
+}
+
+// ZabbixAgentNodesInputAction defines model for ZabbixAgentNodesInput.Action.
+type ZabbixAgentNodesInputAction string
+
+// ZabbixAgentNodesResult defines model for ZabbixAgentNodesResult.
+type ZabbixAgentNodesResult struct {
+	Jobs    []openapi_types.UUID `json:"jobs"`
+	Skipped []string             `json:"skipped"`
+}
+
+// ZabbixAgentSettings defines model for ZabbixAgentSettings.
+type ZabbixAgentSettings struct {
+	// ApiUrl Adres van api_jsonrpc.php
+	ApiUrl string `json:"api_url"`
+
+	// AutoApply Elke node met een agent krijgt vanzelf zabbix-agent2
+	AutoApply bool `json:"auto_apply"`
+
+	// AutoProd Ook nodes van prod-clusters
+	AutoProd bool `json:"auto_prod"`
+
+	// Available De server heeft een masterkey om sleutels te bewaren
+	Available bool `json:"available"`
+
+	// DockerTemplate Extra template voor nodes met Docker
+	DockerTemplate string `json:"docker_template"`
+
+	// HostGroup Groep voor hosts die ClusterForge aanmaakt
+	HostGroup    string `json:"host_group"`
+	HostMetadata string `json:"host_metadata"`
+
+	// Proxy Proxy voor nieuwe hosts; leeg is de server
+	Proxy string `json:"proxy"`
+
+	// Server Server= in zabbix_agent2.conf
+	Server string `json:"server"`
+
+	// ServerActive ServerActive= in zabbix_agent2.conf
+	ServerActive string    `json:"server_active"`
+	Templates    []string  `json:"templates"`
+	TokenSet     bool      `json:"token_set"`
+	UpdatedAt    time.Time `json:"updated_at"`
+
+	// Version Versie van de Zabbix-repository
+	Version string `json:"version"`
+}
+
+// ZabbixAgentSettingsInput defines model for ZabbixAgentSettingsInput.
+type ZabbixAgentSettingsInput struct {
+	ApiUrl         string   `json:"api_url"`
+	AutoApply      bool     `json:"auto_apply"`
+	AutoProd       bool     `json:"auto_prod"`
+	DockerTemplate string   `json:"docker_template"`
+	HostGroup      string   `json:"host_group"`
+	HostMetadata   string   `json:"host_metadata"`
+	Proxy          string   `json:"proxy"`
+	Server         string   `json:"server"`
+	ServerActive   string   `json:"server_active"`
+	Templates      []string `json:"templates"`
+
+	// Token Weglaten laat het token staan; leeg haalt het weg
+	Token    *string `json:"token,omitempty"`
+	TotpCode *string `json:"totp_code,omitempty"`
+	Version  string  `json:"version"`
+}
+
+// ZabbixAgentTestResult defines model for ZabbixAgentTestResult.
+type ZabbixAgentTestResult struct {
+	Message string `json:"message"`
+	Ok      bool   `json:"ok"`
+	Version string `json:"version"`
+}
+
+// ZabbixAgentsOverview defines model for ZabbixAgentsOverview.
+type ZabbixAgentsOverview struct {
+	Nodes    []ZabbixAgentNode   `json:"nodes"`
+	Settings ZabbixAgentSettings `json:"settings"`
+}
+
 // AuditActorType defines model for AuditActorType.
 type AuditActorType string
 
@@ -14950,6 +15088,12 @@ type SetEnvUpdatePolicyJSONRequestBody = UpdatePolicyInput
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
 
+// SetZabbixAgentNodesJSONRequestBody defines body for SetZabbixAgentNodes for application/json ContentType.
+type SetZabbixAgentNodesJSONRequestBody = ZabbixAgentNodesInput
+
+// UpdateZabbixAgentSettingsJSONRequestBody defines body for UpdateZabbixAgentSettings for application/json ContentType.
+type UpdateZabbixAgentSettingsJSONRequestBody = ZabbixAgentSettingsInput
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
@@ -16077,6 +16221,18 @@ type ServerInterface interface {
 	// UpdateVip VIP wijzigen (admin)
 	// (PATCH /vips/{vipId})
 	UpdateVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID)
+	// GetZabbixAgents Zabbix-agents op alle nodes
+	// (GET /zabbix-agents)
+	GetZabbixAgents(w http.ResponseWriter, r *http.Request)
+	// SetZabbixAgentNodes Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+	// (POST /zabbix-agents/nodes)
+	SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request)
+	// UpdateZabbixAgentSettings Zabbix-agent-instellingen bewaren (admin)
+	// (PUT /zabbix-agents/settings)
+	UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request)
+	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
+	// (POST /zabbix-agents/test)
+	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -18330,6 +18486,30 @@ func (_ Unimplemented) DeleteVip(w http.ResponseWriter, r *http.Request, vipId o
 // UpdateVip VIP wijzigen (admin)
 // (PATCH /vips/{vipId})
 func (_ Unimplemented) UpdateVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixAgents Zabbix-agents op alle nodes
+// (GET /zabbix-agents)
+func (_ Unimplemented) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetZabbixAgentNodes Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+// (POST /zabbix-agents/nodes)
+func (_ Unimplemented) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateZabbixAgentSettings Zabbix-agent-instellingen bewaren (admin)
+// (PUT /zabbix-agents/settings)
+func (_ Unimplemented) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
+// (POST /zabbix-agents/test)
+func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -28913,6 +29093,62 @@ func (siw *ServerInterfaceWrapper) UpdateVip(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixAgents operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixAgents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZabbixAgentNodes operation middleware
+func (siw *ServerInterfaceWrapper) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZabbixAgentNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateZabbixAgentSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateZabbixAgentSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestZabbixAgentAPI operation middleware
+func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestZabbixAgentAPI(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -29718,6 +29954,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/soc", wrapper.GetSoc)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix-agents", wrapper.GetZabbixAgents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix-agents/settings", wrapper.UpdateZabbixAgentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix-agents/test", wrapper.TestZabbixAgentAPI)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix-agents/nodes", wrapper.SetZabbixAgentNodes)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)

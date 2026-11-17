@@ -4254,6 +4254,75 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SocOverview" }
         "401": { $ref: "#/components/responses/Error" }
+  /zabbix-agents:
+    get:
+      operationId: getZabbixAgents
+      summary: Zabbix-agents op alle nodes
+      description: Instellingen en elke node met een agent met de stand van zabbix-agent2 en zijn PSK. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentsOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /zabbix-agents/settings:
+    put:
+      operationId: updateZabbixAgentSettings
+      summary: Zabbix-agent-instellingen bewaren (admin)
+      description: |
+        token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
+        nooit teruggegeven. auto_prod aanzetten vraagt de code van je tweestapsverificatie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixAgentSettingsInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /zabbix-agents/test:
+    post:
+      operationId: testZabbixAgentAPI
+      summary: De Zabbix API proberen met de bewaarde instellingen (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentTestResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /zabbix-agents/nodes:
+    post:
+      operationId: setZabbixAgentNodes
+      summary: Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+      description: |
+        action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
+        blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
+        rotate geeft de node een nieuwe sleutel en past toe. Een prod-node vraagt totp_code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixAgentNodesInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentNodesResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /crowdsec:
     get:
       operationId: getCrowdSec
@@ -14322,6 +14391,97 @@ components:
           allOf: [{ $ref: "#/components/schemas/Job" }]
           nullable: true
           description: null als er op geen node iets verandert
+    ZabbixAgentSettings:
+      type: object
+      required: [auto_apply, auto_prod, server, server_active, version, host_metadata, api_url, host_group, templates,
+        docker_template, proxy, token_set, available, updated_at]
+      properties:
+        auto_apply: { type: boolean, description: Elke node met een agent krijgt vanzelf zabbix-agent2 }
+        auto_prod: { type: boolean, description: Ook nodes van prod-clusters }
+        server: { type: string, description: "Server= in zabbix_agent2.conf" }
+        server_active: { type: string, description: "ServerActive= in zabbix_agent2.conf" }
+        version: { type: string, description: Versie van de Zabbix-repository, zoals 8.0 }
+        host_metadata: { type: string }
+        api_url: { type: string, description: Adres van api_jsonrpc.php }
+        host_group: { type: string, description: Groep voor hosts die ClusterForge aanmaakt }
+        templates: { type: array, items: { type: string } }
+        docker_template: { type: string, description: Extra template voor nodes met Docker }
+        proxy: { type: string, description: Proxy voor nieuwe hosts; leeg is de server }
+        token_set: { type: boolean }
+        available: { type: boolean, description: De server heeft een masterkey om sleutels te bewaren }
+        updated_at: { type: string, format: date-time }
+    ZabbixAgentSettingsInput:
+      type: object
+      required: [auto_apply, auto_prod, server, server_active, version, host_metadata, api_url, host_group, templates,
+        docker_template, proxy]
+      properties:
+        auto_apply: { type: boolean }
+        auto_prod: { type: boolean }
+        server: { type: string }
+        server_active: { type: string }
+        version: { type: string }
+        host_metadata: { type: string }
+        api_url: { type: string }
+        host_group: { type: string }
+        templates: { type: array, items: { type: string } }
+        docker_template: { type: string }
+        proxy: { type: string }
+        token: { type: string, description: Weglaten laat het token staan; leeg haalt het weg }
+        totp_code: { type: string }
+    ZabbixAgentNode:
+      type: object
+      required: [node_id, hostname, ip, cluster_id, cluster_name, cluster_environment, online, supported, docker,
+        agent_service, enabled, managed, psk_identity, psk_created_at, applied_at, apply_job_id, apply_running,
+        apply_error, apply_failed_at, zabbix_host_id, pending]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        ip: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_environment: { type: string }
+        online: { type: boolean }
+        supported: { type: boolean }
+        docker: { type: boolean }
+        agent_service: { type: string, description: Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is }
+        enabled: { type: boolean }
+        managed: { type: boolean }
+        psk_identity: { type: string }
+        psk_created_at: { type: string, format: date-time, nullable: true }
+        applied_at: { type: string, format: date-time, nullable: true }
+        apply_job_id: { type: string, format: uuid, nullable: true }
+        apply_running: { type: boolean }
+        apply_error: { type: string }
+        apply_failed_at: { type: string, format: date-time, nullable: true }
+        zabbix_host_id: { type: string }
+        pending: { type: boolean }
+    ZabbixAgentsOverview:
+      type: object
+      required: [settings, nodes]
+      properties:
+        settings: { $ref: "#/components/schemas/ZabbixAgentSettings" }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ZabbixAgentNode" } }
+    ZabbixAgentTestResult:
+      type: object
+      required: [ok, version, message]
+      properties:
+        ok: { type: boolean }
+        version: { type: string }
+        message: { type: string }
+    ZabbixAgentNodesInput:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [manage, unmanage, apply, rotate] }
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        all: { type: boolean, description: Alle nodes die nog niet toegepast zijn (apply) of alle nodes }
+        totp_code: { type: string }
+    ZabbixAgentNodesResult:
+      type: object
+      required: [jobs, skipped]
+      properties:
+        jobs: { type: array, items: { type: string, format: uuid } }
+        skipped: { type: array, items: { type: string } }
     CrowdSecSettings:
       type: object
       required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available]

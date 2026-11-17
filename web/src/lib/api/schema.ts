@@ -3981,6 +3981,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Zabbix-agents op alle nodes
+         * @description Instellingen en elke node met een agent met de stand van zabbix-agent2 en zijn PSK. Ook voor viewers.
+         */
+        get: operations["getZabbixAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Zabbix-agent-instellingen bewaren (admin)
+         * @description token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
+         *     nooit teruggegeven. auto_prod aanzetten vraagt de code van je tweestapsverificatie.
+         */
+        put: operations["updateZabbixAgentSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De Zabbix API proberen met de bewaarde instellingen (admin) */
+        post: operations["testZabbixAgentAPI"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+         * @description action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
+         *     blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
+         *     rotate geeft de node een nieuwe sleutel en past toe. Een prod-node vraagt totp_code.
+         */
+        post: operations["setZabbixAgentNodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec": {
         parameters: {
             query?: never;
@@ -13696,6 +13776,100 @@ export interface components {
             /** @description null als er op geen node iets verandert */
             job: components["schemas"]["Job"] | null;
         };
+        ZabbixAgentSettings: {
+            /** @description Elke node met een agent krijgt vanzelf zabbix-agent2 */
+            auto_apply: boolean;
+            /** @description Ook nodes van prod-clusters */
+            auto_prod: boolean;
+            /** @description Server= in zabbix_agent2.conf */
+            server: string;
+            /** @description ServerActive= in zabbix_agent2.conf */
+            server_active: string;
+            /** @description Versie van de Zabbix-repository */
+            version: string;
+            host_metadata: string;
+            /** @description Adres van api_jsonrpc.php */
+            api_url: string;
+            /** @description Groep voor hosts die ClusterForge aanmaakt */
+            host_group: string;
+            templates: string[];
+            /** @description Extra template voor nodes met Docker */
+            docker_template: string;
+            /** @description Proxy voor nieuwe hosts; leeg is de server */
+            proxy: string;
+            token_set: boolean;
+            /** @description De server heeft een masterkey om sleutels te bewaren */
+            available: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ZabbixAgentSettingsInput: {
+            auto_apply: boolean;
+            auto_prod: boolean;
+            server: string;
+            server_active: string;
+            version: string;
+            host_metadata: string;
+            api_url: string;
+            host_group: string;
+            templates: string[];
+            docker_template: string;
+            proxy: string;
+            /** @description Weglaten laat het token staan; leeg haalt het weg */
+            token?: string;
+            totp_code?: string;
+        };
+        ZabbixAgentNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            ip: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_environment: string;
+            online: boolean;
+            supported: boolean;
+            docker: boolean;
+            /** @description Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is */
+            agent_service: string;
+            enabled: boolean;
+            managed: boolean;
+            psk_identity: string;
+            /** Format: date-time */
+            psk_created_at: string | null;
+            /** Format: date-time */
+            applied_at: string | null;
+            /** Format: uuid */
+            apply_job_id: string | null;
+            apply_running: boolean;
+            apply_error: string;
+            /** Format: date-time */
+            apply_failed_at: string | null;
+            zabbix_host_id: string;
+            pending: boolean;
+        };
+        ZabbixAgentsOverview: {
+            settings: components["schemas"]["ZabbixAgentSettings"];
+            nodes: components["schemas"]["ZabbixAgentNode"][];
+        };
+        ZabbixAgentTestResult: {
+            ok: boolean;
+            version: string;
+            message: string;
+        };
+        ZabbixAgentNodesInput: {
+            /** @enum {string} */
+            action: "manage" | "unmanage" | "apply" | "rotate";
+            node_ids?: string[];
+            /** @description Alle nodes die nog niet toegepast zijn (apply) of alle nodes */
+            all?: boolean;
+            totp_code?: string;
+        };
+        ZabbixAgentNodesResult: {
+            jobs: string[];
+            skipped: string[];
+        };
         CrowdSecSettings: {
             auto_apply: boolean;
             bouncer_default: boolean;
@@ -20750,6 +20924,105 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getZabbixAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentsOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    updateZabbixAgentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAgentSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    testZabbixAgentAPI: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentTestResult"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setZabbixAgentNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAgentNodesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentNodesResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getCrowdSec: {
