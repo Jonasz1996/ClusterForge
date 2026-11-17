@@ -278,7 +278,10 @@ roles:
       - file:
           path: /etc/systemd/system/cf-platform-status.timer
           template: cf-platform-status.timer.tmpl
-      - service: { name: cf-platform-status.timer, enabled: true, state: started }
+      - command:
+          title: timer van de stand
+          run: systemctl daemon-reload && systemctl enable --now cf-platform-status.timer
+          unless: systemctl is-enabled --quiet cf-platform-status.timer && systemctl is-active --quiet cf-platform-status.timer
       # Het eigen VIP van PostgreSQL komt in conf.d (ClusterForge, na de uitrol).
       - directory: { path: /etc/keepalived/conf.d, mode: "0755" }
       - file:

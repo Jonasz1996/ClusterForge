@@ -2901,6 +2901,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29) */
+        get: operations["getClusterApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/risk": {
         parameters: {
             query?: never;
@@ -11589,6 +11608,79 @@ export interface components {
             max: number;
             reason: string;
         };
+        ClusterApps: {
+            apps: components["schemas"]["ClusterApp"][];
+            storage?: components["schemas"]["AppStorage"];
+        };
+        AppIssue: {
+            /** @enum {string} */
+            tone: "red" | "amber";
+            title: string;
+            detail?: string;
+        };
+        ClusterApp: {
+            app: string;
+            title: string;
+            nodes: components["schemas"]["NodeAppStatus"][];
+            issues: components["schemas"]["AppIssue"][];
+        };
+        NodeAppStatus: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            online: boolean;
+            /** @description Ouder dan 10 minuten of de agent antwoordt niet */
+            stale: boolean;
+            app: string;
+            title?: string;
+            /** @description De gebouwde commit */
+            version?: string;
+            /** @description De gekozen versie (branch */
+            ref?: string;
+            /** @description actief, stand-by of voor-overstap */
+            role?: string;
+            /** Format: date-time */
+            updated_at: string;
+            checks: {
+                id: string;
+                label: string;
+                ok: boolean;
+                severity?: string;
+                detail?: string;
+            }[];
+            values: {
+                id: string;
+                label: string;
+                value: string;
+                /** Format: int64 */
+                bytes?: number;
+            }[];
+        };
+        AppStorage: {
+            leader?: string;
+            volume_count: number;
+            under_replicated: number;
+            under_replicated_ids?: number[];
+            /**
+             * Format: int64
+             * @description Elk volume één keer geteld
+             */
+            logical_bytes: number;
+            replications?: {
+                [key: string]: number;
+            };
+            nodes: {
+                hostname: string;
+                /** Format: int64 */
+                bytes: number;
+                /** Format: int64 */
+                disk_total: number;
+                /** Format: int64 */
+                disk_free: number;
+                volumes: number;
+            }[];
+            issues: components["schemas"]["AppIssue"][];
+        };
         ClusterRisk: {
             score: number | null;
             /** @description A tot F; leeg zonder score */
@@ -19183,6 +19275,30 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getClusterApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterApps"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getClusterRisk: {

@@ -135,6 +135,24 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AppIssueTone.
+const (
+	AppIssueToneAmber AppIssueTone = "amber"
+	AppIssueToneRed   AppIssueTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AppIssueTone enum.
+func (e AppIssueTone) Valid() bool {
+	switch e {
+	case AppIssueToneAmber:
+		return true
+	case AppIssueToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssistantConversationKind.
 const (
 	Analysis AssistantConversationKind = "analysis"
@@ -4490,6 +4508,36 @@ type ApiTokenInput struct {
 	TtlDays *int `json:"ttl_days,omitempty"`
 }
 
+// AppIssue defines model for AppIssue.
+type AppIssue struct {
+	Detail *string      `json:"detail,omitempty"`
+	Title  string       `json:"title"`
+	Tone   AppIssueTone `json:"tone"`
+}
+
+// AppIssueTone defines model for AppIssue.Tone.
+type AppIssueTone string
+
+// AppStorage defines model for AppStorage.
+type AppStorage struct {
+	Issues []AppIssue `json:"issues"`
+	Leader *string    `json:"leader,omitempty"`
+
+	// LogicalBytes Elk volume één keer geteld
+	LogicalBytes int64 `json:"logical_bytes"`
+	Nodes        []struct {
+		Bytes     int64  `json:"bytes"`
+		DiskFree  int64  `json:"disk_free"`
+		DiskTotal int64  `json:"disk_total"`
+		Hostname  string `json:"hostname"`
+		Volumes   int    `json:"volumes"`
+	} `json:"nodes"`
+	Replications       *map[string]int `json:"replications,omitempty"`
+	UnderReplicated    int             `json:"under_replicated"`
+	UnderReplicatedIds *[]int          `json:"under_replicated_ids,omitempty"`
+	VolumeCount        int             `json:"volume_count"`
+}
+
 // AssistantConversation defines model for AssistantConversation.
 type AssistantConversation struct {
 	// CanAsk Of jij in dit gesprek verder kunt vragen; alleen in je eigen gesprekken
@@ -5136,6 +5184,20 @@ type Cluster struct {
 	TemplateVersion nullable.Nullable[string] `json:"template_version"`
 	Type            ClusterType               `json:"type"`
 	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// ClusterApp defines model for ClusterApp.
+type ClusterApp struct {
+	App    string          `json:"app"`
+	Issues []AppIssue      `json:"issues"`
+	Nodes  []NodeAppStatus `json:"nodes"`
+	Title  string          `json:"title"`
+}
+
+// ClusterApps defines model for ClusterApps.
+type ClusterApps struct {
+	Apps    []ClusterApp `json:"apps"`
+	Storage *AppStorage  `json:"storage,omitempty"`
 }
 
 // ClusterComponent defines model for ClusterComponent.
@@ -11540,6 +11602,41 @@ type NodeActionInput struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
+// NodeAppStatus defines model for NodeAppStatus.
+type NodeAppStatus struct {
+	App    string `json:"app"`
+	Checks []struct {
+		Detail   *string `json:"detail,omitempty"`
+		Id       string  `json:"id"`
+		Label    string  `json:"label"`
+		Ok       bool    `json:"ok"`
+		Severity *string `json:"severity,omitempty"`
+	} `json:"checks"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Online   bool               `json:"online"`
+
+	// Ref De gekozen versie (branch
+	Ref *string `json:"ref,omitempty"`
+
+	// Role actief, stand-by of voor-overstap
+	Role *string `json:"role,omitempty"`
+
+	// Stale Ouder dan 10 minuten of de agent antwoordt niet
+	Stale     bool      `json:"stale"`
+	Title     *string   `json:"title,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Values    []struct {
+		Bytes *int64 `json:"bytes,omitempty"`
+		Id    string `json:"id"`
+		Label string `json:"label"`
+		Value string `json:"value"`
+	} `json:"values"`
+
+	// Version De gebouwde commit
+	Version *string `json:"version,omitempty"`
+}
+
 // NodeBackups defines model for NodeBackups.
 type NodeBackups struct {
 	Backups []BackupVolume                `json:"backups"`
@@ -15105,6 +15202,9 @@ type ServerInterface interface {
 	// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
 	// (PUT /clusters/{clusterId}/agent-upgrade-auto)
 	SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterApps De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+	// (GET /clusters/{clusterId}/apps)
+	GetClusterApps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
 	// (GET /clusters/{clusterId}/backup-policy)
 	GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -16386,6 +16486,12 @@ func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clu
 // SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
 // (PUT /clusters/{clusterId}/agent-upgrade-auto)
 func (_ Unimplemented) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterApps De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+// (GET /clusters/{clusterId}/apps)
+func (_ Unimplemented) GetClusterApps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19470,6 +19576,32 @@ func (siw *ServerInterfaceWrapper) SetClusterAgentUpgradeAuto(w http.ResponseWri
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetClusterAgentUpgradeAuto(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterApps operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterApps(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterApps(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -29550,6 +29682,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/node-links/{linkId}/ignore", wrapper.IgnoreNodeLink)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/apps", wrapper.GetClusterApps)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)

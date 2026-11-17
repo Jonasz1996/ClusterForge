@@ -3087,6 +3087,20 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/apps:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterApps
+      summary: De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterApps" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/risk:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -12124,6 +12138,96 @@ components:
       properties:
         max: { type: integer }
         reason: { type: string }
+    ClusterApps:
+      type: object
+      required: [apps]
+      properties:
+        apps:
+          type: array
+          items: { $ref: "#/components/schemas/ClusterApp" }
+        storage: { $ref: "#/components/schemas/AppStorage" }
+    AppIssue:
+      type: object
+      required: [tone, title]
+      properties:
+        tone: { type: string, enum: [red, amber] }
+        title: { type: string }
+        detail: { type: string }
+    ClusterApp:
+      type: object
+      required: [app, title, nodes, issues]
+      properties:
+        app: { type: string }
+        title: { type: string }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/NodeAppStatus" }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/AppIssue" }
+    NodeAppStatus:
+      type: object
+      required: [node_id, hostname, online, stale, app, updated_at, checks, values]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        online: { type: boolean }
+        stale: { type: boolean, description: Ouder dan 10 minuten of de agent antwoordt niet }
+        app: { type: string }
+        title: { type: string }
+        version: { type: string, description: De gebouwde commit }
+        ref: { type: string, description: De gekozen versie (branch, tag of commit) }
+        role: { type: string, description: "actief, stand-by of voor-overstap" }
+        updated_at: { type: string, format: date-time }
+        checks:
+          type: array
+          items:
+            type: object
+            required: [id, label, ok]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              ok: { type: boolean }
+              severity: { type: string }
+              detail: { type: string }
+        values:
+          type: array
+          items:
+            type: object
+            required: [id, label, value]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              value: { type: string }
+              bytes: { type: integer, format: int64 }
+    AppStorage:
+      type: object
+      required: [volume_count, under_replicated, logical_bytes, nodes, issues]
+      properties:
+        leader: { type: string }
+        volume_count: { type: integer }
+        under_replicated: { type: integer }
+        under_replicated_ids:
+          type: array
+          items: { type: integer }
+        logical_bytes: { type: integer, format: int64, description: Elk volume één keer geteld }
+        replications:
+          type: object
+          additionalProperties: { type: integer }
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [hostname, bytes, disk_total, disk_free, volumes]
+            properties:
+              hostname: { type: string }
+              bytes: { type: integer, format: int64 }
+              disk_total: { type: integer, format: int64 }
+              disk_free: { type: integer, format: int64 }
+              volumes: { type: integer }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/AppIssue" }
     ClusterRisk:
       type: object
       required: [score, grade, cards, computed_at]

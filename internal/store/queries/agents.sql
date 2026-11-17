@@ -101,3 +101,16 @@ UPDATE nodes SET primary_ip = $2, updated_at = now() WHERE id = $1 AND primary_i
 
 -- name: SetVIPOwner :exec
 UPDATE vips SET owner_node_id = $2, owner_since = now() WHERE id = $1;
+
+-- name: ListAppFacts :many
+-- Nodes met de stand van een app of SeaweedFS in hun facts (fase 29),
+-- voor de kaart Applicatie en Aandacht nodig. Zonder cluster_id: alle.
+SELECT n.id, n.cluster_id, n.hostname, n.primary_ip, n.lifecycle,
+       a.last_seen_at AS agent_last_seen_at, f.facts
+FROM nodes n
+JOIN node_facts f ON f.node_id = n.id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+WHERE n.cluster_id IS NOT NULL
+  AND (sqlc.narg(cluster_id)::uuid IS NULL OR n.cluster_id = sqlc.narg(cluster_id)::uuid)
+  AND (f.facts ? 'apps' OR f.facts ? 'seaweed')
+ORDER BY lower(n.hostname);

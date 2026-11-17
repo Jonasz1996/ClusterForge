@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
+import { ClusterAppsCard } from "@/components/apps/ClusterApps";
 import { ClusterBackupsCard } from "@/components/backups/Backups";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
@@ -162,6 +163,7 @@ function ClusterDetailInner() {
           )}
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
+          <ClusterAppsCard clusterId={id} />
           <RecentChangesCard kind="cluster" id={id} />
           <ClusterRiskCard clusterId={id} isAdmin={isAdmin} />
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />

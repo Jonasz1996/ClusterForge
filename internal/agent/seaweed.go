@@ -479,7 +479,82 @@ func (c *Collector) seaweedMaster(ctx context.Context, base string) (*protocol.S
 	for _, l := range ds.Topology.Layouts {
 		m.Layouts = append(m.Layouts, protocol.SeaweedLayout{Collection: l.Collection, Replication: l.Replication, Writable: len(l.Writables)})
 	}
+	if m.IsLeader {
+		c.seaweedVolumes(ctx, base, m)
+	}
 	return m, ds.Version, nil
+}
+
+// seaweedVolumes leest op de leider /vol/status: elk volume met zijn
+// kopieën. Een volume met minder kopieën dan zijn replicatie vraagt (001:
+// twee, 002: drie) telt als te weinig gerepliceerd (fase 29).
+func (c *Collector) seaweedVolumes(ctx context.Context, base string, m *protocol.SeaweedMaster) {
+	var vs struct {
+		Volumes struct {
+			DataCenters map[string]map[string]map[string][]struct {
+				ID               int             `json:"Id"`
+				Size             uint64          `json:"Size"`
+				ReplicaPlacement json.RawMessage `json:"ReplicaPlacement"`
+			} `json:"DataCenters"`
+		} `json:"Volumes"`
+	}
+	if err := c.seaweedGet(ctx, base+"/vol/status", &vs); err != nil {
+		return
+	}
+	type vol struct {
+		copies int
+		want   int
+		size   uint64
+		rp     string
+	}
+	vols := map[int]*vol{}
+	nodeBytes := map[string]uint64{}
+	for _, racks := range vs.Volumes.DataCenters {
+		for _, nodes := range racks {
+			for url, list := range nodes {
+				for _, v := range list {
+					nodeBytes[url] += v.Size
+					x := vols[v.ID]
+					if x == nil {
+						rp := replicaPlacement(v.ReplicaPlacement)
+						x = &vol{rp: rp, want: 1}
+						for _, d := range rp {
+							if d >= '0' && d <= '9' {
+								x.want += int(d - '0')
+							}
+						}
+						vols[v.ID] = x
+					}
+					x.copies++
+					if v.Size > x.size {
+						x.size = v.Size
+					}
+				}
+			}
+		}
+	}
+	if len(vols) == 0 {
+		return
+	}
+	m.VolumeCount = len(vols)
+	m.Replications = map[string]int{}
+	m.NodeBytes = nodeBytes
+	ids := make([]int, 0, len(vols))
+	for id := range vols {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		x := vols[id]
+		m.LogicalBytes += x.size
+		m.Replications[x.rp]++
+		if x.copies < x.want {
+			m.UnderReplicated++
+			if len(m.UnderReplicatedIDs) < 20 {
+				m.UnderReplicatedIDs = append(m.UnderReplicatedIDs, id)
+			}
+		}
+	}
 }
 
 func (c *Collector) seaweedVolume(ctx context.Context, base string) (*protocol.SeaweedVolume, string, error) {
