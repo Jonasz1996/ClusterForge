@@ -17002,6 +17002,9 @@ type ServerInterface interface {
 	// SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
 	// (POST /opnsense/firewalls/{nodeId}/sync)
 	SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetOpnsenseSystem Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4)
+	// (GET /opnsense/firewalls/{nodeId}/system)
+	GetOpnsenseSystem(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
 	// (GET /pbs/coverage)
 	GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams)
@@ -19270,6 +19273,12 @@ func (_ Unimplemented) ListOpnsenseRevisions(w http.ResponseWriter, r *http.Requ
 // SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
 // (POST /opnsense/firewalls/{nodeId}/sync)
 func (_ Unimplemented) SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseSystem Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4)
+// (GET /opnsense/firewalls/{nodeId}/system)
+func (_ Unimplemented) GetOpnsenseSystem(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -29325,6 +29334,32 @@ func (siw *ServerInterfaceWrapper) SyncOpnsense(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpnsenseSystem operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseSystem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseSystem(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPbsCoverage operation middleware
 func (siw *ServerInterfaceWrapper) GetPbsCoverage(w http.ResponseWriter, r *http.Request) {
 
@@ -33401,6 +33436,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice/ignore", wrapper.IgnoreOpnsenseAdvice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/system", wrapper.GetOpnsenseSystem)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)

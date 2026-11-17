@@ -264,11 +264,11 @@ export async function opnDiff(id: string, from: string, to: string, other?: stri
   ) as unknown as OpnDiff;
 }
 
-export async function opnPlan(id: string, calls: OpnCall[], restore?: string): Promise<OpnPlan> {
+export async function opnPlan(id: string, calls: OpnCall[], restore?: string, legacy?: OpnLegacyEdit[], node?: string): Promise<OpnPlan> {
   return unwrap(
     await api.POST("/opnsense/firewalls/{nodeId}/plan", {
       params: { path: { nodeId: id } },
-      body: { calls, restore },
+      body: { calls, restore, legacy, node },
     }),
   ) as unknown as OpnPlan;
 }
@@ -283,8 +283,13 @@ function useAfterJob() {
   };
 }
 
+export type OpnLegacyEdit = { section: "interfaces" | "system"; key?: string; field: string; value?: string; delete?: boolean };
+
 export type OpnChangeInput = {
   calls: OpnCall[];
+  // legacy zijn velden zonder API (interfaces, systeem), op firewall node.
+  legacy?: OpnLegacyEdit[];
+  node?: string;
   // restore zet een revisie uit /conf/backup terug in plaats van calls.
   restore?: string;
   confirm_within?: number;
@@ -645,5 +650,51 @@ export function useOpnAdviceIgnore(id: string) {
         }),
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["opnsense", "advice"] }),
+  });
+}
+
+// --- Interfaces en systeem (fase 40 M4) -------------------------------------
+
+export type OpnSysIface = {
+  key: string;
+  device: string;
+  descr?: string;
+  enabled: boolean;
+  ipaddr?: string;
+  subnet?: string;
+  ipaddrv6?: string;
+  subnetv6?: string;
+  gateway?: string;
+  blockpriv: boolean;
+  blockbogons: boolean;
+  mtu?: string;
+};
+
+export type OpnSysNode = {
+  node_id: string;
+  hostname: string;
+  role: string;
+  host: string;
+  domain: string;
+  dns: string[];
+  ntp?: string;
+  timezone?: string;
+  dns_override: boolean;
+  interfaces: OpnSysIface[];
+  free: string[];
+  next_key: string;
+  legacy: boolean;
+  error?: string;
+};
+
+export function useOpnSystem(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "system", id],
+    queryFn: async () =>
+      unwrap(await api.GET("/opnsense/firewalls/{nodeId}/system", { params: { path: { nodeId: id! } } })) as unknown as {
+        cluster: string;
+        nodes: OpnSysNode[];
+      },
+    enabled: !!id,
   });
 }

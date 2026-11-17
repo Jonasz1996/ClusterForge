@@ -5271,6 +5271,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/opnsense/firewalls/{nodeId}/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4) */
+        get: operations["getOpnsenseSystem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/opnsense/firewalls/{nodeId}/drift": {
         parameters: {
             query?: never;
@@ -24507,6 +24526,30 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per firewall de toegewezen interfaces, vrije apparaten en de systeemvelden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getOpnsenseDrift: {

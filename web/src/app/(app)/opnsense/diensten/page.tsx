@@ -4,7 +4,7 @@ import { Suspense, useState } from "react";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { OpnGate } from "@/components/opnsense/bits";
 import type { Pending } from "@/components/opnsense/edit";
-import { ItemTiles } from "@/components/opnsense/ItemTable";
+import { ItemTiles, type ItemSpec } from "@/components/opnsense/ItemTable";
 import { Tile as Win } from "@/components/Tiles";
 import { Badge, Card, Input, PageHeader } from "@/components/ui";
 import { useOpnGet, type OpnFirewall, type OpnSearch } from "@/lib/opnsense";
@@ -22,7 +22,7 @@ export default function OpnServicesPage() {
             <ItemTiles
               key={c.key}
               c={c}
-              specs={[]}
+              specs={logSpecs}
               extra={(n, admin, onChange) => (
                 <>
                   <Win>
@@ -182,3 +182,69 @@ function Plugins({ n, admin, onChange }: { n: OpnFirewall; admin: boolean; onCha
     </Card>
   );
 }
+
+const logSpecs: ItemSpec[] = [
+  {
+    title: "Syslog: naar een andere server",
+    search: "syslog/settings/searchDestinations",
+    base: "syslog/settings",
+    x: "Destination",
+    root: "destination",
+    what: "syslog-bestemming",
+    name: "hostname",
+    cols: [
+      ["transport", "Transport"],
+      ["hostname", "Server"],
+      ["port", "Poort"],
+      ["description", "Omschrijving"],
+    ],
+    fields: () => [
+      { key: "enabled", label: "Aan", kind: "check" },
+      {
+        key: "transport",
+        label: "Transport",
+        kind: "select",
+        options: [
+          ["udp4", "UDP (IPv4)"],
+          ["tcp4", "TCP (IPv4)"],
+          ["tls4", "TLS (IPv4)"],
+          ["udp6", "UDP (IPv6)"],
+          ["tcp6", "TCP (IPv6)"],
+        ],
+      },
+      { key: "hostname", label: "Server" },
+      { key: "port", label: "Poort" },
+      { key: "level", label: "Niveaus", hint: "Met komma's, zoals info,notice,warn,err,crit,alert,emerg" },
+      { key: "description", label: "Omschrijving", wide: true },
+    ],
+    defaults: { enabled: "1", transport: "udp4", port: "514" },
+  },
+  {
+    title: "Cron: geplande taken",
+    search: "cron/settings/searchJobs",
+    base: "cron/settings",
+    x: "Job",
+    root: "job",
+    what: "cronjob",
+    name: "description",
+    cols: [
+      ["minutes", "Min"],
+      ["hours", "Uur"],
+      ["days", "Dag"],
+      ["command", "Opdracht"],
+      ["description", "Omschrijving"],
+    ],
+    fields: () => [
+      { key: "enabled", label: "Aan", kind: "check" },
+      { key: "minutes", label: "Minuten" },
+      { key: "hours", label: "Uren" },
+      { key: "days", label: "Dagen" },
+      { key: "months", label: "Maanden" },
+      { key: "weekdays", label: "Weekdagen" },
+      { key: "command", label: "Opdracht", hint: "Een configd-actie uit de lijst van OPNsense" },
+      { key: "parameters", label: "Parameters" },
+      { key: "description", label: "Omschrijving", wide: true },
+    ],
+    defaults: { enabled: "1", minutes: "0", hours: "*", days: "*", months: "*", weekdays: "*" },
+  },
+];

@@ -457,3 +457,15 @@ func (s *Server) IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request, no
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"key": in.Key, "ignore": in.Ignore})
 }
+
+func (s *Server) GetOpnsenseSystem(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	v, err := s.opnsense.System(r.Context(), nodeId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}

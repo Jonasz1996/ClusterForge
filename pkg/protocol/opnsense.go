@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -276,6 +277,59 @@ type OPNChange struct {
 	// Restore zet een revisie uit /conf/backup terug (bestandsnaam) in
 	// plaats van Calls, en herlaadt daarna alle diensten.
 	Restore string `json:"restore,omitempty"`
+	// Legacy verandert velden in de oude delen van config.xml die geen API
+	// hebben: interfaces en systeem (vanaf protocol 56, OPNLegacySince).
+	// Ze gaan na Calls, met hetzelfde herstelpunt en dezelfde timer.
+	Legacy []OPNLegacyEdit `json:"legacy,omitempty"`
+}
+
+// OPNLegacySince is het protocol vanaf waar de agent Legacy kent.
+const OPNLegacySince = 56
+
+// OPNLegacyEdit is één veld in config.xml.
+type OPNLegacyEdit struct {
+	// Section is interfaces of system.
+	Section string `json:"section"`
+	// Key is bij interfaces de interface (lan, wan, opt3).
+	Key   string `json:"key,omitempty"`
+	Field string `json:"field"`
+	// Value is de nieuwe waarde; bij dnsserver een lijst met komma's.
+	Value string `json:"value,omitempty"`
+	// Delete haalt het veld weg (zoals enable om uit te zetten).
+	Delete bool `json:"delete,omitempty"`
+}
+
+var (
+	opnLegacyFields = map[string][]string{
+		"interfaces": {"descr", "enable", "if", "ipaddr", "subnet", "ipaddrv6", "subnetv6", "gateway", "gatewayv6", "blockpriv", "blockbogons", "mtu", "spoofmac"},
+		"system":     {"hostname", "domain", "dnsserver", "timeservers", "timezone", "dnsallowoverride"},
+	}
+	opnIfaceKey   = regexp.MustCompile(`^(lan|wan|opt[0-9]{1,3})$`)
+	opnLegacyText = regexp.MustCompile(`^[A-Za-z0-9 ._:/,+@-]{0,200}$`)
+)
+
+// ValidOPNIfaceKey is true voor lan, wan of optN.
+func ValidOPNIfaceKey(k string) bool { return opnIfaceKey.MatchString(k) }
+
+// Validate controleert één veld.
+func (e OPNLegacyEdit) Validate() error {
+	fields, ok := opnLegacyFields[e.Section]
+	if !ok {
+		return fmt.Errorf("onbekend onderdeel %q", e.Section)
+	}
+	if !slices.Contains(fields, e.Field) {
+		return fmt.Errorf("veld %s.%s mag niet", e.Section, e.Field)
+	}
+	if e.Section == "interfaces" && !opnIfaceKey.MatchString(e.Key) {
+		return fmt.Errorf("ongeldige interface %q", e.Key)
+	}
+	if e.Section == "system" && e.Key != "" {
+		return fmt.Errorf("systeemvelden hebben geen sleutel")
+	}
+	if !opnLegacyText.MatchString(e.Value) {
+		return fmt.Errorf("ongeldige waarde voor %s", e.Field)
+	}
+	return nil
 }
 
 var opnRevisionFile = regexp.MustCompile(`^config-[0-9]{9,12}(\.[0-9]{1,6})?\.xml$`)
@@ -301,8 +355,16 @@ func (c *OPNChange) Validate() error {
 		if !ValidOPNRevisionFile(c.Restore) || len(c.Calls) > 0 {
 			return fmt.Errorf("ongeldige revisie om terug te zetten")
 		}
-	} else if len(c.Calls) == 0 || len(c.Calls) > 50 || len(c.Apply) > 10 {
-		return fmt.Errorf("een wijziging heeft 1-50 aanroepen en hoogstens 10 om toe te passen")
+	} else if (len(c.Calls) == 0 && len(c.Legacy) == 0) || len(c.Calls) > 50 || len(c.Apply) > 10 || len(c.Legacy) > 40 {
+		return fmt.Errorf("een wijziging heeft 1-50 aanroepen, hoogstens 10 om toe te passen en 40 velden")
+	}
+	if c.Restore != "" && len(c.Legacy) > 0 {
+		return fmt.Errorf("terugzetten gaat niet samen met velden")
+	}
+	for _, e := range c.Legacy {
+		if err := e.Validate(); err != nil {
+			return err
+		}
 	}
 	for _, call := range append(append([]OPNCall{}, c.Calls...), c.Apply...) {
 		if !ValidOPNsenseAPIPath(call.Path) {

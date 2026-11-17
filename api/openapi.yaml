@@ -5619,6 +5619,20 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/system:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseSystem
+      summary: Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4)
+      responses:
+        "200":
+          description: Per firewall de toegewezen interfaces, vrije apparaten en de systeemvelden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /opnsense/firewalls/{nodeId}/drift:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }

@@ -292,6 +292,11 @@ export const navGroups: NavGroup[] = [
             keywords: "opnsense dienst service herstarten plugin installeren",
           },
           {
+            href: "/opnsense/systeem",
+            label: "Interfaces en systeem",
+            keywords: "opnsense interfaces toewijzen ip adres gateway hostnaam domein dns ntp tijdzone",
+          },
+          {
             href: "/opnsense/advies",
             label: "Regeladvies",
             keywords: "opnsense regels advies voorstellen dubbel overschaduwd ongebruikt geblokkeerd toelaten opruimen",

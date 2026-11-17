@@ -584,6 +584,30 @@ func TestChangeFlow(t *testing.T) {
 	if _, err := s.ApplyAdvice(ctx, events.System(), ida, []string{"open:x"}, "Firewalls"); err == nil {
 		t.Fatal("een voorstel dat niet bestaat toegepast")
 	}
+	// M4: velden zonder API alleen op de gekozen firewall, zonder sync.
+	leg := []protocol.OPNLegacyEdit{{Section: "system", Field: "hostname", Value: "fw2b"}}
+	if _, err := s.StartChange(ctx, events.System(), ida, Change{Legacy: leg, Node: &idb}); err == nil {
+		t.Fatal("velden zonder overtikken")
+	}
+	bus.mu.Lock()
+	bus.actions = nil
+	bus.mu.Unlock()
+	j, err = s.StartChange(ctx, events.System(), ida, Change{Legacy: leg, Node: &idb, Confirm: "Firewalls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j = wait(j.ID); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("velden: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	if strings.Join(bus.actions, ",") != "opn_api,opn_confirm" {
+		t.Fatalf("velden: %v", bus.actions)
+	}
+	// De nep-sync rekent met de revisietijd van de master; zet die van de
+	// backup terug.
+	bus.facts[idb].Config.Time--
+	bus.actions = nil
+	bus.mu.Unlock()
 	if _, err := pool.Exec(ctx, `DELETE FROM nodes WHERE id = $1`, db1); err != nil {
 		t.Fatal(err)
 	}

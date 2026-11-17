@@ -288,7 +288,17 @@ func TestOPNApplyConfirmAndRollback(t *testing.T) {
 		t.Fatalf("api %+v", st)
 	}
 	inner := c.Run
+	legacy := ""
 	c.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == opnConfigctl && len(args) > 1 && (args[0] == "filter" || args[1] == "reconfigure" || args[0] == "service") {
+			_, _ = inner(ctx, name, args...)
+			return []byte("OK\n"), nil
+		}
+		if name == opnPHP && strings.HasSuffix(args[0], "legacy.php") {
+			b, _ := os.ReadFile(args[1])
+			legacy = string(b)
+			return []byte(`{"status":"ok"}`), nil
+		}
 		if name == opnPHP {
 			// restore.php: zet het herstelpunt terug zoals OPNsense zou doen.
 			b, _ := os.ReadFile(args[1])
@@ -369,6 +379,31 @@ func TestOPNApplyConfirmAndRollback(t *testing.T) {
 	last := fake.calls[len(fake.calls)-1]
 	if !strings.HasPrefix(last, "POST /api/firewall/alias/reconfigure") {
 		t.Fatalf("oude toestand niet toegepast: %v", fake.calls)
+	}
+
+	// Fase 40 M4: velden zonder API (interface en systeem).
+	_ = os.WriteFile(filepath.Join(c.Root, opnConfigXML), []byte(testOPNConfig), 0o644)
+	fake.fail = ""
+	ch4 := &protocol.OPNChange{ID: "abcd1234-0004", ConfirmWithin: 60, Description: "interface",
+		Legacy: []protocol.OPNLegacyEdit{{Section: "interfaces", Key: "opt3", Field: "ipaddr", Value: "192.168.50.1"}, {Section: "system", Field: "dnsserver", Value: "9.9.9.9,1.1.1.1"}}}
+	out.Reset()
+	if code, err := r.opn(context.Background(), &protocol.PVERun{Action: protocol.OPNAPI, OPN: ch4}, &out, &protocol.RunStatus{}); err != nil || code != 0 {
+		t.Fatalf("velden %d %v\n%s", code, err, out.String())
+	}
+	if !strings.Contains(legacy, `"key":"opt3"`) || !strings.Contains(out.String(), "configctl interface reconfigure opt3") ||
+		!slices.Contains(*calls, opnConfigctl+" interface reconfigure opt3") || !slices.Contains(*calls, opnConfigctl+" service reload all") {
+		t.Fatalf("velden niet toegepast: %s\n%v\n%s", legacy, *calls, out.String())
+	}
+	if st, _ := loadOPNChange(opnChangePath(c.Root, ch4.ID)); st == nil || !st.ReloadAll {
+		t.Fatalf("terugdraaien herlaadt niet alles: %+v", st)
+	}
+	bad := protocol.OPNChange{ID: "abcd1234-0005", ConfirmWithin: 60, Legacy: []protocol.OPNLegacyEdit{{Section: "interfaces", Key: "lan", Field: "ipaddr", Value: "1.2.3.4<x>"}}}
+	if bad.Validate() == nil {
+		t.Fatal("ongeldige waarde aanvaard")
+	}
+	bad.Legacy[0] = protocol.OPNLegacyEdit{Section: "system", Field: "webgui", Value: "x"}
+	if bad.Validate() == nil {
+		t.Fatal("webgui mag niet")
 	}
 }
 

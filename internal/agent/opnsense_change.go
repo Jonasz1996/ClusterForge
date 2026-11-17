@@ -244,7 +244,7 @@ func (r *RunExecutor) opnApply(ctx context.Context, c *Collector, ch *protocol.O
 	for _, call := range ch.Calls {
 		st.Calls = append(st.Calls, call.Path)
 	}
-	st.ReloadAll = ch.Restore != ""
+	st.ReloadAll = ch.Restore != "" || len(ch.Legacy) > 0
 	path := opnChangePath(r.Root, ch.ID)
 	if err := saveJSON(path, st); err != nil {
 		return -1, err
@@ -294,6 +294,11 @@ func (r *RunExecutor) opnApply(ctx context.Context, c *Collector, ch *protocol.O
 			rs.PVE = &protocol.PVERunResult{}
 		}
 		rs.PVE.Data = raw
+	}
+	if len(ch.Legacy) > 0 {
+		if err := opnLegacyApply(ctx, c, ch.Legacy, ch.Description, out); err != nil {
+			return fail(err)
+		}
 	}
 	_, _ = fmt.Fprintf(out, "\ntoegepast; wacht op bevestiging van ClusterForge tot %s\n", st.Deadline.Local().Format("15:04:05"))
 	return 0, nil
@@ -638,6 +643,105 @@ func opnRestoreRevision(ctx context.Context, c *Collector, file, desc string, ou
 		return fmt.Errorf("revisie terugzetten mislukte: %v: %s", err, lastLines(strings.TrimSpace(string(res)), 2))
 	}
 	opnReloadAll(ctx, c, out)
+	return nil
+}
+
+// opnLegacyPHP verandert velden in de oude delen van config.xml (interfaces
+// en systeem) en bewaart dat als revisie.
+const opnLegacyPHP = `<?php
+require_once('script/load_phalcon.php');
+use OPNsense\Core\Config;
+$edits = json_decode(file_get_contents($argv[1]), true);
+$why = $argv[2] ?? 'ClusterForge';
+$cnf = Config::getInstance();
+$obj = $cnf->object();
+foreach ($edits as $e) {
+    if ($e['section'] === 'interfaces') {
+        if (!isset($obj->interfaces)) {
+            $obj->addChild('interfaces');
+        }
+        $k = $e['key'];
+        if (!isset($obj->interfaces->$k)) {
+            $obj->interfaces->addChild($k);
+        }
+        $node = $obj->interfaces->$k;
+    } else {
+        $node = $obj->system;
+    }
+    $f = $e['field'];
+    for ($i = 0; $i < 20 && isset($node->$f); $i++) {
+        unset($node->$f);
+    }
+    if (!empty($e['delete'])) {
+        continue;
+    }
+    if ($f === 'dnsserver') {
+        foreach (array_filter(array_map('trim', explode(',', $e['value'] ?? ''))) as $v) {
+            $node->addChild('dnsserver', htmlspecialchars($v));
+        }
+        continue;
+    }
+    $node->addChild($f, htmlspecialchars($e['value'] ?? ''));
+}
+$cnf->save(['description' => $why, 'username' => 'cf-agent']);
+echo json_encode(['status' => 'ok']) . "\n";
+`
+
+// opnLegacyApply schrijft de velden en maakt ze actief: elke geraakte
+// interface opnieuw instellen, bij systeemvelden alle diensten herladen, en
+// daarna het filter.
+func opnLegacyApply(ctx context.Context, c *Collector, edits []protocol.OPNLegacyEdit, desc string, out io.Writer) error {
+	dir := c.path(opnStateDir)
+	b, err := json.Marshal(edits)
+	if err != nil {
+		return err
+	}
+	data := filepath.Join(dir, "legacy.json")
+	script := filepath.Join(dir, "legacy.php")
+	if err := os.WriteFile(data, b, 0o600); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(data) }()
+	if err := os.WriteFile(script, []byte(opnLegacyPHP), 0o600); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(script) }()
+	ifaces, system := []string{}, false
+	for _, e := range edits {
+		if e.Section == "system" {
+			system = true
+			_, _ = fmt.Fprintf(out, "$ systeem %s = %s\n", e.Field, orDash(e.Value))
+			continue
+		}
+		if !slices.Contains(ifaces, e.Key) {
+			ifaces = append(ifaces, e.Key)
+		}
+		if e.Delete {
+			_, _ = fmt.Fprintf(out, "$ interface %s: %s weg\n", e.Key, e.Field)
+		} else {
+			_, _ = fmt.Fprintf(out, "$ interface %s: %s = %s\n", e.Key, e.Field, orDash(e.Value))
+		}
+	}
+	res, err := c.run(ctx, opnPHP, script, data, desc)
+	if err != nil {
+		return fmt.Errorf("config.xml aanpassen mislukte: %v: %s", err, lastLines(strings.TrimSpace(string(res)), 2))
+	}
+	if err := opnCheckResult(res); err != nil {
+		return err
+	}
+	for _, k := range ifaces {
+		_, _ = fmt.Fprintf(out, "$ configctl interface reconfigure %s\n", k)
+		if res, err := c.run(ctx, opnConfigctl, "interface", "reconfigure", k); err != nil {
+			return fmt.Errorf("interface %s opnieuw instellen mislukte: %v %s", k, err, strings.TrimSpace(string(res)))
+		}
+	}
+	if system {
+		opnReloadAll(ctx, c, out)
+	}
+	_, _ = fmt.Fprintln(out, "$ configctl filter reload")
+	if res, err := c.run(ctx, opnConfigctl, "filter", "reload"); err != nil {
+		return fmt.Errorf("filter herladen mislukte: %v %s", err, strings.TrimSpace(string(res)))
+	}
 	return nil
 }
 

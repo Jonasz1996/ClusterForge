@@ -143,6 +143,20 @@ var netRules = slices.Concat(
 	items("unbound/settings", "DomainOverride", "domain", "domein-override", "unbound/service/reconfigure", LevelNormal),
 	items("kea/dhcpv4", "Reservation", "reservation", "DHCP-reservatie", "kea/service/reconfigure", LevelNormal),
 	items("dnsmasq/settings", "Host", "host", "Dnsmasq-host", "dnsmasq/service/reconfigure", LevelNormal),
+	// Fase 40 M4: DHCP-bereiken, DNS-doorsturing, syslog en cron.
+	items("kea/dhcpv4", "Subnet", "subnet4", "Kea-subnet", "kea/service/reconfigure", LevelNormal),
+	items("dnsmasq/settings", "Range", "range", "DHCP-bereik", "dnsmasq/service/reconfigure", LevelNormal),
+	items("unbound/settings", "Forward", "dot", "DNS-doorsturing", "unbound/service/reconfigure", LevelNormal),
+	items("syslog/settings", "Destination", "destination", "syslog-bestemming", "syslog/service/reconfigure", LevelNormal),
+	items("cron/settings", "Job", "job", "cronjob", "cron/service/reconfigure", LevelNormal),
+	[]*rule{
+		rl(`kea/dhcpv4/set`, "dhcpv4", `general|lexpire|ha`, "kea/service/reconfigure", LevelNormal,
+			func(map[string]string, map[string]any) string { return "Kea-instellingen wijzigen" }),
+		rl(`dnsmasq/settings/set`, "dnsmasq", ruleKey, "dnsmasq/service/reconfigure", LevelNormal,
+			func(map[string]string, map[string]any) string { return "Dnsmasq-instellingen wijzigen" }),
+		rl(`unbound/settings/set`, "unbound", `general|advanced|acls|dnsbl|forwarding`, "unbound/service/reconfigure", LevelNormal,
+			func(map[string]string, map[string]any) string { return "Unbound-instellingen wijzigen" }),
+	},
 )
 
 var svcWord = map[string]string{"start": "starten", "stop": "stoppen", "restart": "herstarten"}
