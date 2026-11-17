@@ -5506,6 +5506,61 @@ paths:
               schema: { $ref: "#/components/schemas/PveObject" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/auto:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseAuto
+      summary: Automatisch beheer van het cluster (fase 40) - de stand per soort en de voorstellen voor aliassen, DNS-overrides en DHCP-reservaties
+      responses:
+        "200":
+          description: Stand, voorstellen, conflicten en wat al klopt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setOpnsenseAuto
+      summary: De stand per soort (uit, voorbeeld, beheerd), het domein en de genegeerde voorstellen (admin; beheerd aanzetten op prod met code of wachtwoord)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: De bewaarde stand
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/auto/apply:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: applyOpnsenseAuto
+      summary: Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /opnsense/firewalls/{nodeId}/drift:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }

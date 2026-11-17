@@ -15893,6 +15893,12 @@ type CleanupNodeDiskJSONRequestBody CleanupNodeDiskJSONBody
 // DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
 type DownloadOpnsenseBackupJSONRequestBody = PveObject
 
+// SetOpnsenseAutoJSONRequestBody defines body for SetOpnsenseAuto for application/json ContentType.
+type SetOpnsenseAutoJSONRequestBody = PveObject
+
+// ApplyOpnsenseAutoJSONRequestBody defines body for ApplyOpnsenseAuto for application/json ContentType.
+type ApplyOpnsenseAutoJSONRequestBody = PveObject
+
 // StartOpnsenseCarpJSONRequestBody defines body for StartOpnsenseCarp for application/json ContentType.
 type StartOpnsenseCarpJSONRequestBody = PveObject
 
@@ -16933,6 +16939,15 @@ type ServerInterface interface {
 	// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
 	// (GET /opnsense/firewalls/{nodeId}/api)
 	GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams)
+	// GetOpnsenseAuto Automatisch beheer van het cluster (fase 40) - de stand per soort en de voorstellen voor aliassen, DNS-overrides en DHCP-reservaties
+	// (GET /opnsense/firewalls/{nodeId}/auto)
+	GetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SetOpnsenseAuto De stand per soort (uit, voorbeeld, beheerd), het domein en de genegeerde voorstellen (admin; beheerd aanzetten op prod met code of wachtwoord)
+	// (PUT /opnsense/firewalls/{nodeId}/auto)
+	SetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ApplyOpnsenseAuto Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord)
+	// (POST /opnsense/firewalls/{nodeId}/auto/apply)
+	ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
 	// (GET /opnsense/firewalls/{nodeId}/backups)
 	ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -19126,6 +19141,24 @@ func (_ Unimplemented) ListOpnsenseClusters(w http.ResponseWriter, r *http.Reque
 // GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
 // (GET /opnsense/firewalls/{nodeId}/api)
 func (_ Unimplemented) GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseAuto Automatisch beheer van het cluster (fase 40) - de stand per soort en de voorstellen voor aliassen, DNS-overrides en DHCP-reservaties
+// (GET /opnsense/firewalls/{nodeId}/auto)
+func (_ Unimplemented) GetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetOpnsenseAuto De stand per soort (uit, voorbeeld, beheerd), het domein en de genegeerde voorstellen (admin; beheerd aanzetten op prod met code of wachtwoord)
+// (PUT /opnsense/firewalls/{nodeId}/auto)
+func (_ Unimplemented) SetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyOpnsenseAuto Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord)
+// (POST /opnsense/firewalls/{nodeId}/auto/apply)
+func (_ Unimplemented) ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -28665,6 +28698,84 @@ func (siw *ServerInterfaceWrapper) GetOpnsenseApi(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpnsenseAuto operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseAuto(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOpnsenseAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetOpnsenseAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOpnsenseAuto(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyOpnsenseAuto operation middleware
+func (siw *ServerInterfaceWrapper) ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyOpnsenseAuto(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOpnsenseBackups operation middleware
 func (siw *ServerInterfaceWrapper) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request) {
 
@@ -33161,6 +33272,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/flows", wrapper.GetOpnsenseFlows)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto", wrapper.GetOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto", wrapper.SetOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto/apply", wrapper.ApplyOpnsenseAuto)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)
