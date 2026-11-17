@@ -297,6 +297,9 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 			return store.Job{}, ValidationError{fmt.Sprintf("de agent op %s is te oud voor interfaces en systeem (protocol %d, %d nodig); werk hem bij via Nodes → Agents bijwerken", only.Hostname, only.Protocol, protocol.OPNLegacySince)}
 		}
 	}
+	if err := s.protect(ctx, ck.Master.NodeID, c.Calls); err != nil {
+		return store.Job{}, err
+	}
 	if plan.Level == LevelAccess && strings.TrimSpace(c.Confirm) != ck.Cluster.Name {
 		return store.Job{}, ValidationError{fmt.Sprintf("deze wijziging kan de toegang tot de firewall raken; tik %s over om te bevestigen", ck.Cluster.Name)}
 	}

@@ -1557,6 +1557,34 @@ ClusterForge vindt de backup via CARP en pfsync. Alles daarna gaat via het menu 
   nodig. Het filterlog en de andere logs van beide firewalls lees je bij Logs. De dashboard-API heeft
   `/api/dashboard/v1/opnsense`.
 
+### Automatisch beheer (fase 40, agentprotocol 56)
+
+Het doel: de webinterface van OPNsense niet meer nodig hebben. Ontwerp in
+[docs/design/fase40-opnsense-automatisch.md](docs/design/fase40-opnsense-automatisch.md).
+
+- **Verkeer.** De agent leest het filterlog van elke firewall en ClusterForge telt per bron, doel, poort en regel wat
+  doorging en wat geblokkeerd werd (bewaard 30 dagen). Zo zie je welke regel raakt en wat er tegengehouden wordt. Het
+  dashboard en `/api/dashboard/v1/opnsense` geven ook `blocked_24h` en `passed_24h`.
+- **Automatisch.** Per cluster kies je voor aliassen, DNS en DHCP-reservaties *uit*, *voorbeeld* of *beheerd*.
+  ClusterForge houdt dan bij: de aliassen `cf_nodes`, `cf_vips` en `cf_<cluster>` met de adressen van je nodes en
+  VIP's, een Unbound-hostoverride per node en VIP onder je domein, en een vaste DHCP-reservatie (Kea, anders Dnsmasq)
+  met het MAC-adres dat de agent ziet. Alleen wat met `cf:` of `cf_` begint, is van ClusterForge; een bestaande
+  regel van jou met hetzelfde adres of dezelfde naam wordt een conflict, nooit overschreven. Weghalen doet het nooit
+  vanzelf. In *beheerd* loopt dat elke tien minuten als een gewone veilige wijziging; firewallregels (toelaten of
+  blokkeren) blijven altijd een voorstel.
+- **Regeladvies.** Voorstellen uit wat ClusterForge weet: verkeer dat werd geblokkeerd naar een poort waarop een node
+  echt luistert (een nieuwe regel net boven de blokkerende), dubbele regels, regels die nooit raken omdat een eerdere
+  alles al afvangt, regels zonder treffer in 30 dagen en regels die veel van internet doorlaten. Je kiest, tikt de
+  naam van het cluster over en het gaat als één wijziging; negeren onthoudt ClusterForge per cluster.
+- **Interfaces en systeem.** Interfaces toewijzen, hun naam, adres, gateway en aan/uit, en hostnaam, domein,
+  DNS-servers, tijdservers en tijdzone. Die staan in config.xml zonder API: de agent zet ze met een herstelpunt en
+  terugdraaitimer, per firewall en zonder sync, en herlaadt de interface.
+- **Gebruikers en VPN.** Gebruikers, groepen, certificaten en CA's, IPsec (verbindingen, children, pre-shared keys),
+  IDS-beleid en de traffic shaper. De gebruikers `root` en `clusterforge` en de groep `admins` raakt ClusterForge nooit.
+- **Meer DHCP, DNS en diensten.** Kea-subnetten, Dnsmasq-ranges, Unbound-forwarders en DNS over TLS, en bij Diensten
+  syslog-bestemmingen en cronjobs.
+- Fouten van het automatisch beheer en een filterlog dat niet te lezen is, staan bij Aandacht nodig.
+
 ## Zelfherstel
 
 Bij elke database op de pagina **Databases** staat de kaart **Zelfherstel**: wat er mis is, op welke node, waarom, en wat ClusterForge eraan zou doen. Dat werkt voor elke MariaDB, MySQL en PostgreSQL die de agent ziet, ook als ClusterForge haar niet zelf toepaste, zoals een Galera-cluster dat je met de hand opzette. ClusterForge herstelt met vaste acties in de agent en de server, niet met scripts: eerst vaststellen, dan een plan in gewone taal, en pas met **Nu herstellen**, of vanzelf als je dat per cluster aanzet, een taak met een stap per node, in het logboek en in de tijdlijn van het incident. Een kijker ziet de kaart ook; alleen een beheerder herstelt.
