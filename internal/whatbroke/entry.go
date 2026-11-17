@@ -118,6 +118,12 @@ func FromEvent(e audit.Entry) Entry {
 		en.From, en.Delay = e.Ts.Add(-statusDelay), "de status komt uit de heartbeat van elke 10 s"
 	case "proxmox.host_offline", "proxmox.sync_failed", "vm.status_changed", "vm.missing", "vm.moved":
 		en.From, en.Delay = e.Ts.Add(-syncDelay), "Proxmox wordt elke 20 s gelezen"
+	case "zabbix.problem_started":
+		// Zabbix zag het probleem al op since; ClusterForge leest elke minuut.
+		if t, err := time.Parse(time.RFC3339, payloadText(e.Payload["since"])); err == nil && t.Before(e.Ts) {
+			en.From, en.Delay = t, "Zabbix meldt het probleem sinds dit tijdstip; ClusterForge leest Zabbix elke minuut"
+		}
+		en.Detail["severity"] = payloadText(e.Payload["severity_label"])
 	case "drift.detected", "drift.changed":
 		en.From, en.Delay = e.Ts.Add(-driftDelay), "drift wordt elk kwartier gecontroleerd"
 	case "kube.rolled_out":
@@ -190,7 +196,8 @@ func eventKind(action string) string {
 	case action == "node.status_changed" || action == "cluster.status_changed" || action == "node.cron_failed" || action == "node.cron_recovered" || action == "cron_job.run_failed" || action == "vip.owner_changed" ||
 		action == "service.status_changed" || action == "kube.app_status_changed" || action == "cluster.database_down" ||
 		action == "cluster.database_up" || action == "cluster.database_node_out" || action == "cluster.database_node_back" ||
-		action == "cluster.database_restarted" || action == "cluster.database_failover" || action == "cluster.database_state_transfer":
+		action == "cluster.database_restarted" || action == "cluster.database_failover" || action == "cluster.database_state_transfer" ||
+		strings.HasPrefix(action, "zabbix.problem_"):
 		return "status"
 	case prefix == "incident":
 		return "incident"

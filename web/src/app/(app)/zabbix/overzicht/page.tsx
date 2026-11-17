@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { CoverageCard, HostMap, NowCard, ProblemTrend, StateBand, Tiles, ZabbixPage, ZabbixSelf } from "@/components/zabbix/Zabbix";
+import { MaintenanceCard } from "@/components/zabbix/Maintenance";
 import type { ZabbixWindow } from "@/lib/zabbixMonitoring";
 
 export default function ZabbixOverviewPage() {
@@ -37,6 +38,7 @@ function Overview() {
           <ProblemTrend o={o} />
           <HostMap o={o} />
           <CoverageCard o={o} />
+          <MaintenanceCard />
         </>
       )}
     </ZabbixPage>

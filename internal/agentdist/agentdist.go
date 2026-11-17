@@ -25,6 +25,9 @@ var downloadable = map[string]bool{
 	"cf-agent-linux-arm64":        true,
 	"cf-agent-linux-amd64.sha256": true,
 	"cf-agent-linux-arm64.sha256": true,
+	// OPNsense (fase 34).
+	"cf-agent-freebsd-amd64":        true,
+	"cf-agent-freebsd-amd64.sha256": true,
 }
 
 // InstallScript serveert /install/agent.sh.

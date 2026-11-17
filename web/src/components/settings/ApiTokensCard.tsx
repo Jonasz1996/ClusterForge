@@ -68,6 +68,22 @@ export function ApiTokensCard({ isAdmin }: { isAdmin: boolean }) {
             </code>
             <span className="text-slate-500"> (alleen met een token voor alle clusters; ?strict=1: HTTP 503 vanaf niveau verhoogd)</span>
           </dd>
+          <dt className="text-slate-500">Zabbix</dt>
+          <dd>
+            <code className="text-xs break-all">
+              {origin}
+              {base}/zabbix
+            </code>
+            <span className="text-slate-500"> (problemen per ernst, bereikbare hosts, proxy en HA; ?cluster=&lt;slug&gt; voor één cluster; ?strict=1: HTTP 503 vanaf probleem)</span>
+          </dd>
+          <dt className="text-slate-500">OPNsense</dt>
+          <dd>
+            <code className="text-xs break-all">
+              {origin}
+              {base}/opnsense
+            </code>
+            <span className="text-slate-500"> (MASTER, VIP&apos;s, firewalls online, problemen en onderhoudsmodus; ?strict=1: HTTP 503 als het niet gezond is)</span>
+          </dd>
           <dt className="text-slate-500">Samenvatting + clusters</dt>
           <dd>
             <code className="text-xs break-all">

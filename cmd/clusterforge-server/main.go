@@ -63,6 +63,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
@@ -258,6 +259,8 @@ func serve() error {
 	}
 	// Het SOC telt de kwetsbaarheden en de verharding mee.
 	socs.Vulns = secs.SOCVulns
+	// Fase 33: wat Zabbix ziet, in de dekking en "Nu belangrijk".
+	socs.Zabbix = zbm.SOC
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
 	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
@@ -269,6 +272,8 @@ func serve() error {
 	// Fase 32: Proxmox Backup Server via de agent (protocol 49).
 	pbsSvc := pbs.NewService(pool, ev, log, runner, bus)
 	pbsSvc.Box, pbsSvc.Hosts = box, pvh
+	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
+	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
@@ -454,6 +459,7 @@ func serve() error {
 	goLoop(ctx, log, "cmps", cmps.Run)
 	goLoop(ctx, log, "crowdsec", csec.Loop)
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
+	goLoop(ctx, log, "opnsense", opnSvc.Loop)
 	goLoop(ctx, log, "zabbixmon", zbm.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)
@@ -477,7 +483,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, OPNsense: opnSvc, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

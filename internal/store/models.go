@@ -1504,6 +1504,19 @@ type ObservedConnectionHour struct {
 	Samples   int64
 }
 
+type OpnsenseBackup struct {
+	ID      uuid.UUID
+	NodeID  uuid.UUID
+	TakenAt time.Time
+	Reason  string
+	Sha256  string
+	Size    int32
+	Version string
+	KeyID   string
+	Nonce   string
+	Data    []byte
+}
+
 type ProxmoxBackup struct {
 	ConnectionID uuid.UUID
 	Volid        string
@@ -1987,11 +2000,37 @@ type ZabbixAgentSetting struct {
 	UpdatedBy      *uuid.UUID
 }
 
+type ZabbixDashboard struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	Refresh     int32
+	Panels      []byte
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+}
+
 type ZabbixHostLink struct {
 	Hostid    string
 	NodeID    *uuid.UUID
 	UpdatedAt time.Time
 	UpdatedBy *uuid.UUID
+}
+
+type ZabbixMaintenance struct {
+	NodeID        uuid.UUID
+	Hostid        string
+	Maintenanceid string
+	ActiveTill    time.Time
+	CreatedAt     time.Time
+}
+
+type ZabbixMonitorSetting struct {
+	ID              bool
+	MaintenanceSync bool
+	UpdatedAt       time.Time
+	UpdatedBy       *uuid.UUID
 }
 
 type ZabbixSnapshot struct {

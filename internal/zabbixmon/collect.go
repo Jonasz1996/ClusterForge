@@ -140,6 +140,8 @@ type Health struct {
 	Uptime             *float64   `json:"uptime"`
 	Busiest            []Process  `json:"busiest"`
 	Updated            *time.Time `json:"updated"`
+	// Items: per waarde (nvps, queue, …) het itemid, voor een grafiek.
+	Items map[string]string `json:"items"`
 }
 
 // NodeRef is een ClusterForge-node zonder Zabbix-host.
@@ -575,7 +577,7 @@ func health(items []rawItem, hosts []Host) []Health {
 		}
 		h := by[it.HostID]
 		if h == nil {
-			h = &Health{HostID: it.HostID, Name: cmp.Or(name[it.HostID], it.HostID), Busiest: []Process{}}
+			h = &Health{HostID: it.HostID, Name: cmp.Or(name[it.HostID], it.HostID), Busiest: []Process{}, Items: map[string]string{}}
 			by[it.HostID] = h
 			order = append(order, it.HostID)
 		}
@@ -583,6 +585,9 @@ func health(items []rawItem, hosts []Host) []Health {
 			h.Updated = t
 		}
 		val := v
+		if k := healthKey(it.Key); k != "process" {
+			h.Items[k] = it.ItemID
+		}
 		switch healthKey(it.Key) {
 		case "nvps":
 			h.NVPS = &val

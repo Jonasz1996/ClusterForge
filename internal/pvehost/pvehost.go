@@ -462,9 +462,14 @@ func (s *Service) bootstrapSpec(ctx context.Context, actor events.Actor, serverU
 	if !strings.HasPrefix(serverURL, "https://") && !strings.HasPrefix(serverURL, "http://") {
 		return nil, ValidationError{"geef het adres waarmee de CT ClusterForge bereikt, zoals http://192.168.113.153:8080"}
 	}
-	var sums map[string]string
+	sums := map[string]string{}
 	if s.AgentSHA256 != nil {
-		sums = s.AgentSHA256()
+		// Een CT is Linux: alleen amd64 en arm64.
+		for arch, sum := range s.AgentSHA256() {
+			if arch == "amd64" || arch == "arm64" {
+				sums[arch] = sum
+			}
+		}
 	}
 	if len(sums) == 0 {
 		return nil, ValidationError{"deze server biedt geen cf-agent aan (geen sha256 naast de binaries); is het image compleet?"}

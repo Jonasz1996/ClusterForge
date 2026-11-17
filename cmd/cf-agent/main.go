@@ -62,6 +62,9 @@ Gebruik:
                      zet het oude agent.json terug als de agent de server op
                      het nieuwe adres niet bereikt; de timer
                      cf-agent-reconfig-rollback start dit
+  cf-agent opn-rollback -id <wijziging>
+                     draait een OPNsense-wijziging terug die ClusterForge niet
+                     op tijd bevestigde; de terugdraaitimer start dit
   cf-agent version
 `
 
@@ -104,6 +107,8 @@ func main() {
 		err = upgradeRollback(os.Args[2:], log)
 	case "reconfigure-rollback":
 		err = reconfigureRollback(os.Args[2:], log)
+	case "opn-rollback":
+		err = opnRollback(os.Args[2:], log)
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -228,6 +233,17 @@ func reconfigureRollback(args []string, log *slog.Logger) error {
 	return agent.RollbackReconfigure(ctx, *config, *statePath, log, func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, name, args...).CombinedOutput()
 	})
+}
+
+// opnRollback draait een OPNsense-wijziging terug die ClusterForge niet op
+// tijd bevestigde. De terugdraaitimer van de wijziging start dit.
+func opnRollback(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("opn-rollback", flag.ExitOnError)
+	id := fl.String("id", "", "nummer van de wijziging")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	return agent.RollbackOPNChange(ctx, *id, log)
 }
 
 func enroll(args []string) error {
