@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { AIVLookupSection, AIVSocStrip } from "@/components/aiverslag/Lookup";
 import { AuditList } from "@/components/audit/AuditList";
 import { askConfirm } from "@/components/Confirm";
 import { Modal } from "@/components/Modal";
@@ -89,6 +90,7 @@ function Soc() {
       {o && (
         <>
           <LevelBand o={o} />
+          <AIVSocStrip />
           <Tiles o={o} />
           <div className="grid gap-6 xl:grid-cols-5">
             <NowCard items={o.now} className="xl:col-span-3" />
@@ -838,6 +840,7 @@ function AttackerDialog({ ip, o, onClose }: { ip: string; o: SocOverview; onClos
             )}
           </div>
         )}
+        <AIVLookupSection q={ip} />
       </div>
     </Modal>
   );

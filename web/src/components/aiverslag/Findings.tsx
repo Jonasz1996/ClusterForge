@@ -4,7 +4,10 @@ import { useMemo, useState } from "react";
 import { useAIVRunner, webURL } from "@/components/aiverslag/bits";
 import { Empty, QueryState } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Input, Select } from "@/components/ui";
+import { askConfirm } from "@/components/Confirm";
+import { toast } from "@/components/Toast";
 import { useMe } from "@/lib/auth";
+import { useCrowdSecDecide } from "@/lib/crowdsec";
 import {
   sevTone,
   useAIVGet,
@@ -40,6 +43,71 @@ type FixInfo = {
   note?: string;
   can_run: boolean;
 };
+
+// publicIPs haalt de publieke IPv4-adressen uit de tekst van een bevinding,
+// voor "Ban op alle nodes" (CrowdSec, fase 14).
+export function publicIPs(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(
+    /(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d])/g,
+  )) {
+    const p = m[1].split(".").map(Number);
+    if (p.some((x) => x > 255)) continue;
+    const [a, b] = p;
+    if (
+      a === 10 ||
+      a === 127 ||
+      a === 0 ||
+      a >= 224 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
+    )
+      continue;
+    out.add(m[1]);
+  }
+  return [...out].slice(0, 3);
+}
+
+function BanButton({ ip, why }: { ip: string; why: string }) {
+  const decide = useCrowdSecDecide();
+  const ban = async () => {
+    if (
+      !(await askConfirm(`${ip} een week bannen op alle nodes met CrowdSec?`, {
+        confirmLabel: "Bannen",
+        danger: true,
+      }))
+    )
+      return;
+    decide.mutate(
+      {
+        scope: "ip",
+        value: ip,
+        duration: "168h",
+        reason: `AI-verslag: ${why}`.slice(0, 120),
+      },
+      {
+        onSuccess: (r) =>
+          toast(
+            `${ip} geband op ${r.nodes.join(", ") || "geen node"}${r.errors.length ? `; niet op: ${r.errors.join("; ")}` : ""}.`,
+            r.errors.length ? "error" : "success",
+          ),
+        onError: (e) =>
+          toast(e instanceof Error ? e.message : "Bannen mislukt", "error"),
+      },
+    );
+  };
+  return (
+    <Button
+      variant="secondary-danger"
+      disabled={decide.isPending}
+      onClick={() => void ban()}
+    >
+      Ban {ip} op alle nodes
+    </Button>
+  );
+}
 
 const sevOrder: Record<string, number> = { hoog: 3, midden: 2, laag: 1 };
 
@@ -245,6 +313,9 @@ function ItemDetail({
           >
             Verwijderen
           </Button>
+          {publicIPs(`${it.titel} ${it.uitleg}`).map((ip) => (
+            <BanButton key={ip} ip={ip} why={it.titel} />
+          ))}
           {it.fix && (
             <Button variant="secondary" onClick={() => setFixOpen((x) => !x)}>
               Fix …

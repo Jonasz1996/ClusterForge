@@ -47,6 +47,15 @@ func (s *Server) listAIV(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": list, "protocol": protocol.AIVSince})
 }
 
+// aivSummary geeft de laatste achtergrondronde (SOC-pagina, M3).
+func (s *Server) aivSummary(w http.ResponseWriter, r *http.Request) {
+	sums := s.aiverslag.Cached()
+	if sums == nil {
+		sums = []aiverslag.Summary{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": sums})
+}
+
 func (s *Server) aivOverview(w http.ResponseWriter, r *http.Request) {
 	id, ok := aivNode(w, r)
 	if !ok {

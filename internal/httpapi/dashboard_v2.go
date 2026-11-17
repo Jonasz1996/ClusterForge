@@ -688,7 +688,7 @@ func (s *Server) dashV2Overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, o)
 }
 
-var v2Sources = []string{"agents", "crowdsec", "soc", "zabbix", "opnsense", "npm", "traffic", "logins"}
+var v2Sources = []string{"agents", "crowdsec", "soc", "zabbix", "opnsense", "npm", "traffic", "logins", "aiverslag"}
 
 // dashV2Source: GET /sources/{bron}: één tegel per bron. Zabbix, OPNsense en
 // SOC zijn dezelfde als in v1.
@@ -700,6 +700,8 @@ func (s *Server) dashV2Source(w http.ResponseWriter, r *http.Request) {
 		s.dashboardOpnsenseHandler(w, r)
 	case "soc":
 		s.dashboardSocHandler(w, r)
+	case "aiverslag":
+		s.dashboardAIVHandler(w, r)
 	case "agents":
 		s.dashV2Agents(w, r)
 	case "crowdsec":
