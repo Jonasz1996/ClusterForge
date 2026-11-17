@@ -208,6 +208,11 @@ export const navGroups: NavGroup[] = [
         ],
       },
       {
+        href: "/truenas",
+        label: "TrueNAS",
+        keywords: "truenas nas opslag zfs pool scrub schijf smart temperatuur melding alert dataset",
+      },
+      {
         href: "/opnsense",
         label: "OPNsense",
         keywords: "opnsense firewall carp pfsync ha vip gateway router",

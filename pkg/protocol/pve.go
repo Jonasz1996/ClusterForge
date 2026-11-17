@@ -58,6 +58,9 @@ type PVERequest struct {
 	// Path en Params bij PVEOpGet (vanaf PVEAPISince).
 	Path   string            `json:"path,omitempty"`
 	Params map[string]string `json:"params,omitempty"`
+	// Args bij TrueNASOpGet: een JSON-lijst met de argumenten van de methode
+	// in Path.
+	Args json.RawMessage `json:"args,omitempty"`
 }
 
 type PVEResponse struct {
@@ -231,6 +234,9 @@ type PVERun struct {
 	CARPMaintenance *bool `json:"carp_maintenance,omitempty"`
 	// Firmware hoort bij opn_firmware: check, update of upgrade.
 	Firmware string `json:"firmware,omitempty"`
+
+	// TrueNAS hoort bij truenas_call (vanaf TrueNASSince).
+	TrueNAS *TrueNASMethodCall `json:"truenas,omitempty"`
 }
 
 // PVESetting zijn de instellingen van set; nil laat staan.
@@ -484,7 +490,7 @@ func (p PVERun) Validate() error {
 			return fmt.Errorf("ongeldig begin van een naam %q", t.Match)
 		}
 	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI,
-		OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey:
+		OPNAPI, OPNConfirm, OPNRollback, OPNHASync, OPNKey, TrueNASCall:
 		return p.validateHost()
 	case PVEBootstrap:
 		b := p.Bootstrap
@@ -572,7 +578,7 @@ func (c *PVECreate) validate() error {
 // PVETimeout is de tijdslimiet van een run pve.
 func (p PVERun) Timeout() time.Duration {
 	switch p.Action {
-	case PVEMigrate, PVETemplate, PVEAPI, PBSAPI:
+	case PVEMigrate, PVETemplate, PVEAPI, PBSAPI, TrueNASCall:
 		// Een aanroep kan een back-up, terugzetten of verhuizen zijn.
 		return 4 * time.Hour
 	case PVEPassthrough:

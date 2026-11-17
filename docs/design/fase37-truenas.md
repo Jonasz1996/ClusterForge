@@ -53,12 +53,17 @@ install.sh op TrueNAS (herkend aan `/usr/bin/midclt` + `/etc/version`):
    Aandacht nodig (degraded pool, SMART-fout, volle pool, mislukte
    replicatie, oude snapshot) en een score per TrueNAS.
 
-## Vragen aan Jonas (bouwen gaat door met het voorstel)
+## Antwoorden van Jonas (17/11 12:17 UTC)
 
-1. SCALE of CORE, en welke versie? Voorstel: SCALE 24.10/25.x.
-2. Hoeveel TrueNAS-machines, en is er replicatie tussen twee?
-3. Draaien er apps op TrueNAS die ClusterForge moet beheren, of alleen opslag?
+Eén TrueNAS **Community Edition** (SCALE-lijn, 25.04+), **alleen opslag**.
+Dus geen apps en geen replicatie naar een tweede TrueNAS. M3 wordt shares
+(SMB/NFS) en diensten; replicatie blijft alleen lezen als ze er is.
 
 ## Stand van de bouw
 
-- (wordt bijgewerkt per mijlpaal)
+- **M1 af**: protocol 53 (`truenas_get`, `truenas_call`, facts `truenas`),
+  install.sh TrueNAS-modus (`/data/clusterforge`, `boot.sh`, POSTINIT),
+  `internal/truenas` (servers, lezen, taken, overzicht met waarschuwingen,
+  allowlist: scrub, melding wegklikken/terugzetten, SMART-test, taak
+  afbreken), endpoints `/api/v1/truenas…` buiten de OpenAPI, pagina
+  TrueNAS. Geen migraties.

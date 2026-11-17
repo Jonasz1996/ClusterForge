@@ -525,6 +525,15 @@ func (a *Agent) handlePVE(data []byte) protocol.PVEResponse {
 			return protocol.PVEResponse{Error: err.Error()}
 		}
 		return protocol.PVEResponse{Data: data}
+	case protocol.TrueNASOpGet:
+		if err := req.ValidateTrueNASGet(); err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		data, err := h.trueNASGet(ctx, req.Path, req.Args)
+		if err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		return protocol.PVEResponse{Data: data}
 	case protocol.OPNOpGet, protocol.OPNOpPost, protocol.OPNOpConfigctl, protocol.OPNOpRevisions, protocol.OPNOpRevision, protocol.OPNOpFacts, protocol.OPNOpBackup:
 		return a.handleOPN(ctx, req)
 	case protocol.PVEOpHardware:
