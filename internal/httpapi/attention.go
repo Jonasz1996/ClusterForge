@@ -250,6 +250,12 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		s.trueNASAttention(add)
 	}
 
+	// AI-verslag (fase 38): dreigingsniveau, ongeziene alarmen, diensten,
+	// oude analyse en schijf, uit de laatste achtergrondronde.
+	if s.aiverslag != nil {
+		s.aivAttention(add)
+	}
+
 	// Zabbix-monitoring (fase 33): API, proxy, HA, problemen die niemand
 	// bevestigt en nodes die Zabbix niet ziet.
 	if s.zabbixMon != nil {

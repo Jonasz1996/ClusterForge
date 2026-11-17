@@ -56,6 +56,12 @@ func (r *RunExecutor) host() pveHost {
 
 // pve voert een run pve uit.
 func (r *RunExecutor) pve(ctx context.Context, dir string, p *protocol.PVERun, out io.Writer, st *protocol.RunStatus) (int, error) {
+	if p.Action == protocol.AIVInstall {
+		return r.aivInstall(ctx, p.AIVExt, out)
+	}
+	if p.Action == protocol.AIVCall {
+		return r.aivCall(ctx, p.AIV, out, st)
+	}
 	if p.Action == protocol.TrueNASCall {
 		return r.trueNASCall(ctx, dir, p.TrueNAS, out, st)
 	}

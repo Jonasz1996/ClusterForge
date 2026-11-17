@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 53
+const Version = 54
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -231,6 +231,11 @@ type Facts struct {
 	//
 	// TrueNAS beschrijft TrueNAS SCALE op deze machine; nil zonder.
 	TrueNAS *TrueNASFacts `json:"truenas,omitempty"`
+	// Vanaf AIVSince.
+	//
+	// AIVerslag beschrijft AI-verslag (Jonas' OPNsense-analyse) op deze
+	// machine; nil zonder.
+	AIVerslag *AIVFacts `json:"aiverslag,omitempty"`
 }
 
 // Tools zijn de gereedschappen die storingsinjectie nodig heeft: nft voor
