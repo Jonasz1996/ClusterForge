@@ -1613,6 +1613,57 @@ type ProxmoxTask struct {
 	EndedAt      *time.Time
 }
 
+type PublishHost struct {
+	ID           uuid.UUID
+	NpmHostID    int32
+	Domain       string
+	Desired      []byte
+	ClusterID    *uuid.UUID
+	NodeID       *uuid.UUID
+	ServicePort  *int32
+	CreatedByCf  bool
+	AkProviderPk *int32
+	AkAppSlug    *string
+	AkCreated    bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	UpdatedBy    *uuid.UUID
+}
+
+type PublishRead struct {
+	Kind   string
+	Data   []byte
+	Error  string
+	ReadAt time.Time
+}
+
+type PublishService struct {
+	NodeID    uuid.UUID
+	Services  []byte
+	Error     string
+	CheckedAt time.Time
+}
+
+type PublishSetting struct {
+	ID                 bool
+	Domain             string
+	Defaults           []byte
+	NpmClusterID       *uuid.UUID
+	NpmNodeID          *uuid.UUID
+	NpmPort            int32
+	NpmIdentity        string
+	NpmSecretEnc       []byte
+	NpmKeyID           string
+	AuthentikClusterID *uuid.UUID
+	AuthentikNodeID    *uuid.UUID
+	AuthentikPort      int32
+	AuthentikTokenEnc  []byte
+	AuthentikKeyID     string
+	AuthentikOutpost   string
+	UpdatedAt          time.Time
+	UpdatedBy          *uuid.UUID
+}
+
 type RecipeVersion struct {
 	Name      string
 	Version   string
