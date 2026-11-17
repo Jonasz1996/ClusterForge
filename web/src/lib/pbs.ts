@@ -262,3 +262,14 @@ export const jobKindLabel: Record<PbsJob["kind"], string> = {
   verify: "Verify",
   sync: "Sync",
 };
+
+// pbsCreateToken maakt of vernieuwt een API-token; de waarde komt één keer terug.
+export async function pbsCreateToken(
+  id: string,
+  t: { userid: string; tokenid: string; comment?: string; expire?: number; regenerate?: boolean },
+): Promise<{ full_tokenid: string; value: string }> {
+  return unwrap(await api.POST("/pbs/servers/{nodeId}/tokens", { params: { path: { nodeId: id } }, body: t })) as unknown as {
+    full_tokenid: string;
+    value: string;
+  };
+}

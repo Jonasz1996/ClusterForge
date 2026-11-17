@@ -273,6 +273,9 @@ func (s *Service) StartCall(ctx context.Context, actor events.Actor, id uuid.UUI
 	if err != nil {
 		return store.Job{}, ValidationError{err.Error()}
 	}
+	if ok.Quiet {
+		return store.Job{}, ValidationError{"een API-token maken of vernieuwen gaat via Toegang → Token maken, zodat de waarde niet in een taak komt"}
+	}
 	if ok.Confirm != "" && strings.TrimSpace(c.Confirm) != ok.Confirm {
 		return store.Job{}, ValidationError{fmt.Sprintf("tik %s over om te bevestigen", ok.Confirm)}
 	}

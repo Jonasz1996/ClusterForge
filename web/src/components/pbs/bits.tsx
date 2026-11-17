@@ -111,6 +111,7 @@ export function CallForm({
   submitLabel,
   intro,
   confirm,
+  onlyChanged,
   onClose,
 }: {
   id: string;
@@ -123,8 +124,11 @@ export function CallForm({
   submitLabel: string;
   intro?: ReactNode;
   confirm?: string;
+  // onlyChanged: alleen veranderde velden meesturen (standaard bij wijzigen).
+  onlyChanged?: boolean;
   onClose: () => void;
 }) {
+  const diff = onlyChanged ?? method === "set";
   const [vals, setVals] = useState<Record<string, string>>(initial);
   const [typed, setTyped] = useState("");
   const { run, pending, banner } = usePbsRunner(id);
@@ -134,8 +138,10 @@ export function CallForm({
     const params: Record<string, string> = { ...fixed };
     for (const f of shown) {
       const v = (vals[f.key] ?? "").trim();
-      if (method === "set" && v === (initial[f.key] ?? "")) continue;
+      if (diff && v === (initial[f.key] ?? "")) continue;
       if (v === "" && f.type !== "checkbox") continue;
+      // Een uitgevinkt vakje dat al uit stond, gaat niet mee: oudere PBS-versies kennen niet elk veld.
+      if (f.type === "checkbox" && v !== "1" && (initial[f.key] ?? "") !== "1") continue;
       if (f.type === "checkbox") params[f.key] = v === "1" ? "1" : "0";
       else params[f.key] = v;
     }

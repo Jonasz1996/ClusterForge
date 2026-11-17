@@ -15094,6 +15094,9 @@ type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
 // CallPbsApiJSONRequestBody defines body for CallPbsApi for application/json ContentType.
 type CallPbsApiJSONRequestBody = PveCallInput
 
+// CreatePbsTokenJSONRequestBody defines body for CreatePbsToken for application/json ContentType.
+type CreatePbsTokenJSONRequestBody = PveObject
+
 // CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
 type CreateProxmoxJSONRequestBody = ProxmoxInput
 
@@ -16071,6 +16074,9 @@ type ServerInterface interface {
 	// GetPbsOverview Overzicht van een PBS - machine, datastores, jobs, mislukte taken en waarschuwingen
 	// (GET /pbs/servers/{nodeId}/overview)
 	GetPbsOverview(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// CreatePbsToken Een API-token op de PBS maken of vernieuwen (admin); de waarde komt één keer terug en wordt nergens bewaard
+	// (POST /pbs/servers/{nodeId}/tokens)
+	CreatePbsToken(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// ListProxmox Gekoppelde Proxmox-omgevingen
 	// (GET /proxmox)
 	ListProxmox(w http.ResponseWriter, r *http.Request)
@@ -18093,6 +18099,12 @@ func (_ Unimplemented) CallPbsApi(w http.ResponseWriter, r *http.Request, nodeId
 // GetPbsOverview Overzicht van een PBS - machine, datastores, jobs, mislukte taken en waarschuwingen
 // (GET /pbs/servers/{nodeId}/overview)
 func (_ Unimplemented) GetPbsOverview(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreatePbsToken Een API-token op de PBS maken of vernieuwen (admin); de waarde komt één keer terug en wordt nergens bewaard
+// (POST /pbs/servers/{nodeId}/tokens)
+func (_ Unimplemented) CreatePbsToken(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27258,6 +27270,32 @@ func (siw *ServerInterfaceWrapper) GetPbsOverview(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// CreatePbsToken operation middleware
+func (siw *ServerInterfaceWrapper) CreatePbsToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePbsToken(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProxmox operation middleware
 func (siw *ServerInterfaceWrapper) ListProxmox(w http.ResponseWriter, r *http.Request) {
 
@@ -30350,6 +30388,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/api", wrapper.CallPbsApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/tokens", wrapper.CreatePbsToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

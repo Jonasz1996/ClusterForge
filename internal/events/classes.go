@@ -86,6 +86,7 @@ var classes = map[string]Class{
 	"proxmox.sync_requested": ClassInfo, "proxmox.sync_failed": ClassSymptom, "proxmox.sync_recovered": ClassInfo,
 	"pvehost.action_requested": ClassChange,
 	"pbs.api_requested":        ClassChange,
+	"pbs.token_created":        ClassChange,
 	"proxmox.host_offline":     ClassChange, "proxmox.host_online": ClassInfo,
 	"proxmox.self_location_set": ClassInfo, "proxmox.self_location_cleared": ClassInfo,
 	"node.link_proposed": ClassInfo, "node.link_confirmed": ClassChange, "node.link_ignored": ClassInfo,

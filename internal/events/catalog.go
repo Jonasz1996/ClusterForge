@@ -244,6 +244,7 @@ var Known = map[string]Spec{
 	"proxmox.self_location_cleared": {CategoryProxmox, "Ingevulde VM van ClusterForge weggehaald"},
 	"pvehost.action_requested":      {CategoryProxmox, "Actie op Proxmox-host gevraagd"},
 	"pbs.api_requested":             {CategoryProxmox, "Actie op Proxmox Backup Server gevraagd"},
+	"pbs.token_created":             {CategoryProxmox, "API-token op Proxmox Backup Server gemaakt"},
 	"vm.status_changed":             {CategoryProxmox, "Status van VM gewijzigd"},
 	"vm.moved":                      {CategoryProxmox, "VM verhuisd"},
 	"vm.missing":                    {CategoryProxmox, "VM verdwenen uit Proxmox"},

@@ -23,6 +23,13 @@ func TestCheck(t *testing.T) {
 		{"create", "/nodes/localhost/status", map[string]string{"command": "reboot"}, true, "PBS herstarten", "localhost"},
 		{"create", "/access/users/cf@pbs/token/pve", nil, true, "API-token cf@pbs!pve maken", ""},
 		{"set", "/nodes/localhost/apt/update", nil, false, "", ""},
+		{"set", "/access/acl", map[string]string{"path": "/datastore/store1", "role": "DatastoreBackup", "auth-id": "pve@pbs!pve"}, true, "recht DatastoreBackup op /datastore/store1 geven aan pve@pbs!pve", ""},
+		{"set", "/nodes/localhost/disks/wipedisk", map[string]string{"disk": "sdb"}, true, "schijf sdb wissen", "sdb"},
+		{"set", "/nodes/localhost/network", nil, true, "netwerkwijzigingen van PBS toepassen", "netwerk"},
+		{"create", "/nodes/localhost/services/proxmox-backup-proxy/restart", nil, true, "dienst proxmox-backup-proxy herstarten", ""},
+		{"create", "/nodes/localhost/services/ssh;rm/restart", nil, false, "", ""},
+		{"create", "/admin/datastore/store1/namespace", map[string]string{"name": "prod"}, true, "namespace prod in store1", ""},
+		{"delete", "/admin/datastore/store1/namespace", map[string]string{"ns": "prod", "delete-groups": "1"}, true, "namespace prod verwijderen uit store1", "prod"},
 		{"get", "/admin/datastore", nil, false, "", ""},
 	}
 	for _, c := range cases {

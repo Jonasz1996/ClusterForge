@@ -50,6 +50,8 @@ func (p *pbsSim) cmd(_ context.Context, _ string, argv, _ []string, out io.Write
 		p.gcRan = true
 		p.mu.Unlock()
 		_, _ = io.WriteString(out, `"`+pbsUPID+`"`+"\n")
+	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users/pve@pbs/token/pve "):
+		_, _ = io.WriteString(out, `{"tokenid":"pve@pbs!pve","value":"7f1c2d3e-geheim"}`+"\n")
 	case strings.HasPrefix(c, "proxmox-backup-debug api create /config/remote "):
 		_, _ = io.WriteString(out, "null\n")
 	default:
@@ -169,6 +171,18 @@ func TestPBS(t *testing.T) {
 	if b := fmt.Sprint(raw); strings.Contains(b, "zeer-geheim-123") {
 		t.Fatal("wachtwoord staat in de taak")
 	}
+	// Een token: de waarde komt één keer terug, nooit via een taak.
+	if s := c.do("POST", base+"/api", map[string]any{"method": "create", "path": "/access/users/pve@pbs/token/pve"}, nil); s != 400 {
+		t.Fatalf("token als taak: %d", s)
+	}
+	var tok struct {
+		Full  string `json:"full_tokenid"`
+		Value string `json:"value"`
+	}
+	if s := c.do("POST", base+"/tokens", map[string]any{"userid": "pve@pbs", "tokenid": "pve"}, &tok); s != 200 || tok.Full != "pve@pbs!pve" || tok.Value != "7f1c2d3e-geheim" {
+		t.Fatalf("token: %d %+v", s, tok)
+	}
+
 	sim.mu.Lock()
 	defer sim.mu.Unlock()
 	found := false

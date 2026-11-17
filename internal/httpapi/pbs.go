@@ -85,3 +85,22 @@ func (s *Server) CallPbsApi(w http.ResponseWriter, r *http.Request, nodeId uuid.
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+// CreatePbsToken maakt een API-token en geeft zijn waarde één keer terug.
+func (s *Server) CreatePbsToken(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in pbs.NewToken
+	if !decode(w, r, &in) {
+		return
+	}
+	t, err := s.pbs.CreateToken(r.Context(), events.User(p.User.ID), nodeId, in)
+	if err != nil {
+		s.pbsError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, t)
+}

@@ -108,6 +108,8 @@ export const navGroups: NavGroup[] = [
           { href: "/pbs/inhoud", label: "Inhoud", keywords: "pbs snapshot groep namespace back-up beschermen notitie verifieer" },
           { href: "/pbs/jobs", label: "Jobs", keywords: "pbs prune verify sync remote gc schema bandbreedte traffic" },
           { href: "/pbs/taken", label: "Taken", keywords: "pbs task log upid back-up verify gc" },
+          { href: "/pbs/toegang", label: "Toegang", adminOnly: true, keywords: "pbs gebruiker token rechten acl rol" },
+          { href: "/pbs/systeem", label: "Systeem", keywords: "pbs schijf smart zfs netwerk dns dienst update certificaat syslog herstarten" },
         ],
       },
     ],
