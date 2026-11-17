@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Tile, TileGrid } from "@/components/Tiles";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
@@ -178,7 +179,8 @@ function ContainerDetail() {
 
       {running && <LiveStats node={node} id={d.Id} />}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <TileGrid>
+        <Tile>
         <Card title="Overzicht">
           <Dl
             rows={[
@@ -196,7 +198,9 @@ function ContainerDetail() {
             ]}
           />
         </Card>
+        </Tile>
         {d.State.Health && (
+          <Tile>
           <Card title={`Health: ${d.State.Health.Status}`}>
             <ul className="space-y-2 text-xs">
               {(d.State.Health.Log ?? []).slice(-5).reverse().map((l) => (
@@ -210,7 +214,9 @@ function ContainerDetail() {
               ))}
             </ul>
           </Card>
+          </Tile>
         )}
+        <Tile>
         <Card title="Netwerk">
           <Dl
             rows={[
@@ -220,6 +226,8 @@ function ContainerDetail() {
             ]}
           />
         </Card>
+        </Tile>
+        <Tile>
         <Card title="Opslag">
           {(d.Mounts ?? []).length === 0 ? (
             <p className="text-sm text-slate-500">Geen volumes of bind mounts.</p>
@@ -241,6 +249,8 @@ function ContainerDetail() {
             </ul>
           )}
         </Card>
+        </Tile>
+        <Tile>
         <Card title="Omgevingsvariabelen">
           {(d.Config.Env ?? []).length === 0 ? (
             <p className="text-sm text-slate-500">Geen.</p>
@@ -248,6 +258,8 @@ function ContainerDetail() {
             <Secrets env={d.Config.Env!} />
           )}
         </Card>
+        </Tile>
+        <Tile>
         <Card title="Labels">
           {Object.keys(labels).length === 0 ? (
             <p className="text-sm text-slate-500">Geen.</p>
@@ -264,8 +276,9 @@ function ContainerDetail() {
             </ul>
           )}
         </Card>
-      </div>
+        </Tile>
       {running && top.data && (
+        <Tile wide>
         <Card title="Processen">
           <div className="overflow-x-auto">
             <table className={tableClass}>
@@ -292,7 +305,9 @@ function ContainerDetail() {
             </table>
           </div>
         </Card>
+        </Tile>
       )}
+      </TileGrid>
       {modal}
     </div>
   );

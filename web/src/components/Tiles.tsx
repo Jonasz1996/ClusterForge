@@ -194,7 +194,20 @@ export function Tile({ children, wide = false, tall = false }: { children: React
     if (!el) return;
     const sync = () => {
       const key = slug(headingText(el) || "venster");
-      const want = location.hash === `#${key}`;
+      const hash = location.hash;
+      // Een link naar een plek in dit venster (zoals #gezondheid of
+      // #agents-bijwerken) opent het venster; het adres wordt dan
+      // #venster-…, zodat Terug niet opnieuw opent.
+      let inner = false;
+      if (hash.length > 1 && !hash.startsWith("#venster-")) {
+        try {
+          inner = el.querySelector(`#${CSS.escape(decodeURIComponent(hash.slice(1)))}`) !== null;
+        } catch {
+          inner = false;
+        }
+        if (inner) history.replaceState(history.state, "", `#${key}`);
+      }
+      const want = inner || hash === `#${key}`;
       setOpen((o) => {
         if (o && !want) pushed.current = false;
         return want;
@@ -208,11 +221,11 @@ export function Tile({ children, wide = false, tall = false }: { children: React
     const mo = new MutationObserver(() => {
       if (headingText(el) || ++tries > 50) {
         mo.disconnect();
-        if (location.hash.startsWith("#venster-")) sync();
+        if (location.hash.length > 1) sync();
       }
     });
     if (headingText(el)) {
-      if (location.hash.startsWith("#venster-")) sync();
+      if (location.hash.length > 1) sync();
     } else mo.observe(el, { childList: true, subtree: true });
     const onOpen = () => expand();
     el.addEventListener("cf-tile-open", onOpen);
@@ -366,4 +379,13 @@ export function TileButton() {
       <ExpandIcon />
     </button>
   );
+}
+
+// openTileOf laat een sprong naar id (in een lijst van onderdelen) het
+// venster openen waar id in staat, in plaats van ernaartoe te scrollen.
+export function openTileOf(e: { preventDefault: () => void }, id: string) {
+  const tile = document.getElementById(id)?.closest<HTMLElement>("[data-tile]");
+  if (!tile) return;
+  e.preventDefault();
+  tile.dispatchEvent(new Event("cf-tile-open"));
 }

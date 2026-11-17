@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ViewToggle } from "@/components/Tiles";
+import { ViewToggle, openTileOf } from "@/components/Tiles";
 
 function slug(s: string) {
   return (
@@ -63,12 +63,7 @@ export function SectionNav({ views = false }: { views?: boolean }) {
         <a
           key={l.id}
           href={`#${l.id}`}
-          onClick={(e) => {
-            const tile = document.getElementById(l.id)?.closest<HTMLElement>("[data-tile]");
-            if (!tile) return;
-            e.preventDefault();
-            tile.dispatchEvent(new Event("cf-tile-open"));
-          }}
+          onClick={(e) => openTileOf(e, l.id)}
           className="shrink-0 rounded-full border border-slate-200 px-3 py-1 text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
         >
           {l.label}
