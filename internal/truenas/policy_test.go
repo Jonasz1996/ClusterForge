@@ -16,6 +16,9 @@ func TestCheck(t *testing.T) {
 		{"pool.snapshot.delete", `["tank/data@auto-1"]`, "snapshot tank/data@auto-1 verwijderen"},
 		{"pool.snapshottask.update", `[3,{"enabled":false}]`, "snapshot-taak 3 uitzetten"},
 		{"cloudsync.sync", `[2]`, "cloud-sync-taak 2 nu uitvoeren"},
+		{"service.control", `["RESTART","cifs",{"silent":false}]`, "dienst cifs herstarten"},
+		{"service.update", `[4,{"enable":true}]`, "dienst 4 automatisch laten starten"},
+		{"sharing.smb.update", `[1,{"enabled":false}]`, "SMB-share 1 uitzetten"},
 	}
 	for _, c := range ok {
 		a, err := check(c.m, json.RawMessage(c.a))
@@ -33,6 +36,9 @@ func TestCheck(t *testing.T) {
 		{"pool.snapshot.create", `[{"dataset":"tank","name":"a","vmware_sync":true}]`},
 		{"pool.snapshottask.update", `[3,{"enabled":true,"lifetime_value":1}]`},
 		{"pool.snapshot.delete", `["tank"]`},
+		{"service.control", `["STOP","middlewared"]`},
+		{"service.update", `[4,{"enable":true,"state":"x"}]`},
+		{"sharing.smb.update", `[1,{"path":"/"}]`},
 	}
 	for _, c := range bad {
 		if _, err := check(c.m, json.RawMessage(c.a)); err == nil {

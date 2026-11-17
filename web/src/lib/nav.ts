@@ -223,6 +223,11 @@ export const navGroups: NavGroup[] = [
             label: "Bescherming",
             keywords: "truenas snapshot-taak cloud sync rsync replicatie back-up",
           },
+          {
+            href: "/truenas/shares",
+            label: "Shares",
+            keywords: "truenas smb nfs share dienst service ssh starten stoppen",
+          },
         ],
       },
       {

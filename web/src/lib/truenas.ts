@@ -331,3 +331,23 @@ export function useTrueNASSnapshots(id: string, dataset: string) {
     retry: false,
   });
 }
+
+// --- M3: shares en diensten ----------------------------------------------
+
+export type TNSmbShare = { id: number; name: string; path: string; enabled: boolean; comment?: string; ro?: boolean; browsable?: boolean; purpose?: string };
+export type TNNfsShare = { id: number; path: string; enabled: boolean; comment?: string; networks?: string[]; hosts?: string[]; ro?: boolean };
+export type TNService = { id: number; service: string; enable: boolean; state: string; pids?: number[] };
+
+export const serviceLabel: Record<string, string> = {
+  cifs: "SMB",
+  nfs: "NFS",
+  ssh: "SSH",
+  ups: "UPS",
+  snmp: "SNMP",
+  ftp: "FTP",
+  iscsitarget: "iSCSI",
+  nvmet: "NVMe-oF",
+  rsync: "Rsync",
+  smartd: "S.M.A.R.T.",
+  webshare: "WebShare",
+};

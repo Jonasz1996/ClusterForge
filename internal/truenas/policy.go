@@ -77,6 +77,12 @@ var rules = map[string]rule{
 	"replication.run":          {job: true, args: taskID("replicatie %d nu uitvoeren")},
 	"replication.update":       {args: taskEnable("replicatie")},
 
+	// --- Shares en diensten (M3) ---------------------------------------
+	"sharing.smb.update": {args: taskEnable("SMB-share")},
+	"sharing.nfs.update": {args: taskEnable("NFS-share")},
+	"service.control":    {job: true, args: serviceControl},
+	"service.update":     {args: serviceAutostart},
+
 	// --- Meldingen ----------------------------------------------------
 	"alert.dismiss": {args: func(a []json.RawMessage) (string, string, error) {
 		if err := count(a, 1); err != nil {
@@ -321,4 +327,78 @@ func taskEnable(what string) func(a []json.RawMessage) (string, string, error) {
 		}
 		return fmt.Sprintf("%s %d uitzetten", what, id), "", nil
 	}
+}
+
+var (
+	serviceName = regexp.MustCompile(`^[a-z][a-z0-9_]{1,30}$`)
+	verbWord    = map[string]string{"START": "starten", "STOP": "stoppen", "RESTART": "herstarten", "RELOAD": "herladen"}
+)
+
+// serviceControl: service.control(verb, dienst, opties) van 24.10+.
+// Stoppen van de middleware of ssh zou ClusterForge of Jonas buitensluiten;
+// middlewared is daarom geen dienst die hier mag.
+func serviceControl(a []json.RawMessage) (string, string, error) {
+	if len(a) < 2 || len(a) > 3 {
+		return "", "", fmt.Errorf("2 of 3 argumenten verwacht")
+	}
+	verb, err := str(a, 0)
+	if err != nil || verbWord[verb] == "" {
+		return "", "", fmt.Errorf("actie is START, STOP, RESTART of RELOAD")
+	}
+	svc, err := str(a, 1)
+	if err != nil || !serviceName.MatchString(svc) || svc == "middlewared" {
+		return "", "", fmt.Errorf("ongeldige dienst")
+	}
+	if len(a) == 3 {
+		var o map[string]any
+		if json.Unmarshal(a[2], &o) != nil {
+			return "", "", fmt.Errorf("opties zijn geen object")
+		}
+		for k := range o {
+			if k != "ha_propagate" && k != "silent" && k != "timeout" {
+				return "", "", fmt.Errorf("optie %s mag niet", k)
+			}
+		}
+	}
+	confirm := ""
+	if verb == "STOP" && svc == "ssh" {
+		confirm = "ssh"
+	}
+	return "dienst " + svc + " " + verbWord[verb], confirm, nil
+}
+
+// serviceAutostart: service.update(id, {enable}) zet het automatisch
+// starten aan of uit.
+func serviceAutostart(a []json.RawMessage) (string, string, error) {
+	if err := count(a, 2); err != nil {
+		return "", "", err
+	}
+	var id any
+	if json.Unmarshal(a[0], &id) != nil {
+		return "", "", fmt.Errorf("ongeldige dienst")
+	}
+	switch v := id.(type) {
+	case float64:
+		if v <= 0 {
+			return "", "", fmt.Errorf("ongeldige dienst")
+		}
+	case string:
+		if !serviceName.MatchString(v) {
+			return "", "", fmt.Errorf("ongeldige dienst")
+		}
+	default:
+		return "", "", fmt.Errorf("ongeldige dienst")
+	}
+	var in map[string]json.RawMessage
+	if err := json.Unmarshal(a[1], &in); err != nil || len(in) != 1 {
+		return "", "", fmt.Errorf("alleen enable mag veranderen")
+	}
+	var on bool
+	if v, ok := in["enable"]; !ok || json.Unmarshal(v, &on) != nil {
+		return "", "", fmt.Errorf("alleen enable mag veranderen")
+	}
+	if on {
+		return fmt.Sprintf("dienst %v automatisch laten starten", id), "", nil
+	}
+	return fmt.Sprintf("dienst %v niet meer automatisch starten", id), "", nil
 }
