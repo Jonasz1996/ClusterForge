@@ -4443,6 +4443,101 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /zabbix/items/latest:
+    get:
+      operationId: getZabbixLatest
+      summary: Laatste waarde van losse Zabbix-items
+      description: |
+        Voor de getal- en meterpanelen van eigen dashboards. Items van hosts die ClusterForge niet kent, of die weg
+        zijn, ontbreken in het antwoord. Hoogstens 200 items; 30 s gecachet.
+      parameters:
+        - name: itemids
+          in: query
+          required: true
+          description: Item-id's, met komma's gescheiden
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ZabbixLatestItem" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /zabbix/dashboards:
+    get:
+      operationId: listZabbixDashboards
+      summary: Eigen Zabbix-dashboards
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ZabbixDashboard" } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createZabbixDashboard
+      summary: Een eigen dashboard bewaren (admin); ook voor een import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixDashboardInput" }
+      responses:
+        "201":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixDashboard" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /zabbix/dashboards/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getZabbixDashboard
+      summary: Eén eigen dashboard
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixDashboard" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateZabbixDashboard
+      summary: Een eigen dashboard vervangen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixDashboardInput" }
+      responses:
+        "200":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixDashboard" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteZabbixDashboard
+      summary: Een eigen dashboard weggooien (admin)
+      responses:
+        "204": { description: Weg }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/link:
     parameters:
       - name: hostid
@@ -14844,6 +14939,65 @@ components:
       properties:
         jobs: { type: array, items: { type: string, format: uuid } }
         skipped: { type: array, items: { type: string } }
+    ZabbixLatestItem:
+      type: object
+      required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error, hostid, host_name]
+      properties:
+        itemid: { type: string }
+        name: { type: string }
+        key: { type: string }
+        numeric: { type: boolean }
+        units: { type: string }
+        last_value: { type: string }
+        prev_value: { type: string }
+        last_clock: { type: string, format: date-time, nullable: true }
+        component: { type: string }
+        error: { type: string }
+        hostid: { type: string }
+        host_name: { type: string }
+    ZabbixBoardItem:
+      type: object
+      required: [itemid, label]
+      properties:
+        itemid: { type: string }
+        label: { type: string, description: Eigen naam in de legende; leeg is de naam uit Zabbix }
+    ZabbixPanel:
+      type: object
+      required: [id, type, title, w, h, items, range, warn, crit, max, min_severity, hostid, text]
+      properties:
+        id: { type: string, description: Leeg bij een nieuw paneel; de server geeft er een }
+        type: { type: string, description: "Een van: graph, stat, gauge, problems, text" }
+        title: { type: string }
+        w: { type: integer, description: Breedte in kolommen, 1-4 }
+        h: { type: integer, description: Hoogte, 1-3 }
+        items: { type: array, items: { $ref: "#/components/schemas/ZabbixBoardItem" }, description: "graph: 1-6; stat en gauge: 1" }
+        range: { type: string, description: "graph: 1h, 6h, 24h, 7d of 30d" }
+        warn: { type: number, nullable: true, description: "stat en gauge: vanaf hier oranje" }
+        crit: { type: number, nullable: true, description: "stat en gauge: vanaf hier rood" }
+        max: { type: number, nullable: true, description: "gauge: de volle meter (leeg: 100)" }
+        min_severity: { type: integer, description: "problems: vanaf deze ernst (0-5)" }
+        hostid: { type: string, description: "problems: alleen deze host; leeg is alle" }
+        text: { type: string, description: "text: de tekst" }
+    ZabbixDashboardInput:
+      type: object
+      required: [name, description, refresh, panels]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        refresh: { type: integer, description: "Verversen in seconden: 0, 30, 60, 300 of 900" }
+        panels: { type: array, items: { $ref: "#/components/schemas/ZabbixPanel" } }
+    ZabbixDashboard:
+      type: object
+      required: [id, name, description, refresh, panels, created_at, updated_at, updated_by]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        refresh: { type: integer }
+        panels: { type: array, items: { $ref: "#/components/schemas/ZabbixPanel" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string, nullable: true }
     ZabbixItem:
       type: object
       required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error]

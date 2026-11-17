@@ -440,6 +440,7 @@ const refreshOptions = [
   { v: 30, label: "30 s" },
   { v: 60, label: "1 min" },
   { v: 300, label: "5 min" },
+  { v: 900, label: "15 min" },
 ];
 
 export function useAutoRefresh(seconds: number) {
@@ -448,7 +449,7 @@ export function useAutoRefresh(seconds: number) {
     if (!seconds) return;
     const t = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      for (const k of ["zabbix-overview", "zabbix-metrics", "zabbix-events", "zabbix-series"]) void qc.invalidateQueries({ queryKey: [k] });
+      for (const k of ["zabbix-overview", "zabbix-metrics", "zabbix-events", "zabbix-series", "zabbix-latest"]) void qc.invalidateQueries({ queryKey: [k] });
     }, seconds * 1000);
     return () => clearInterval(t);
   }, [seconds, qc]);

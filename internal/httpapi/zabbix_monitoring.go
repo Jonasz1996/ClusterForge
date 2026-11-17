@@ -170,3 +170,96 @@ func (s *Server) GetZabbixEvents(w http.ResponseWriter, r *http.Request, params 
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+func (s *Server) GetZabbixLatest(w http.ResponseWriter, r *http.Request, params gen.GetZabbixLatestParams) {
+	out, err := s.zabbixMon.Latest(r.Context(), strings.Split(params.Itemids, ","))
+	if err != nil {
+		var fe *zabbixmon.FieldError
+		if errors.As(err, &fe) {
+			writeError(w, http.StatusBadRequest, "invalid", fe.Msg)
+			return
+		}
+		s.zabbixReadError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- eigen dashboards (M4) ---
+
+func (s *Server) zabbixBoardError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, zabbixmon.ErrBoardExists):
+		writeError(w, http.StatusConflict, "exists", err.Error())
+	case errors.Is(err, zabbixmon.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "dashboard niet gevonden")
+	default:
+		s.zabbixMonError(w, r, err)
+	}
+}
+
+func (s *Server) ListZabbixDashboards(w http.ResponseWriter, r *http.Request) {
+	out, err := s.zabbixMon.Boards(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) GetZabbixDashboard(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	b, err := s.zabbixMon.Board(r.Context(), id)
+	if err != nil {
+		s.zabbixBoardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+func (s *Server) CreateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in zabbixmon.BoardInput
+	if !decode(w, r, &in) {
+		return
+	}
+	uid := p.User.ID
+	b, err := s.zabbixMon.CreateBoard(r.Context(), events.User(uid), &uid, in)
+	if err != nil {
+		s.zabbixBoardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, b)
+}
+
+func (s *Server) UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in zabbixmon.BoardInput
+	if !decode(w, r, &in) {
+		return
+	}
+	uid := p.User.ID
+	b, err := s.zabbixMon.UpdateBoard(r.Context(), events.User(uid), &uid, id, in)
+	if err != nil {
+		s.zabbixBoardError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+func (s *Server) DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if err := s.zabbixMon.DeleteBoard(r.Context(), events.User(p.User.ID), id); err != nil {
+		s.zabbixBoardError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

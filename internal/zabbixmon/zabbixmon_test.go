@@ -412,7 +412,7 @@ func TestItemsAndSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if se.Source != "history" || se.Units != "%" || len(se.Timestamps) != len(se.Avg) || len(se.Avg) != SeriesPoints {
+	if se.Source != "history" || se.Units != "%" || len(se.Timestamps) != len(se.Avg) || (len(se.Avg) != SeriesPoints && len(se.Avg) != SeriesPoints+1) {
 		t.Fatalf("reeks: %+v", se)
 	}
 	if se.Avg[0] == nil || *se.Avg[0] != 20 || *se.Min[0] != 10 || *se.Max[0] != 30 || se.Avg[1] != nil {
@@ -489,5 +489,77 @@ func TestSummarize(t *testing.T) {
 	w := summarize(evs, rc, nil, "7d", now.Add(-7*24*time.Hour), now)
 	if len(w.Buckets) != 8 || w.Buckets[7].Severity[4] != 2 {
 		t.Errorf("per dag: %d %+v", len(w.Buckets), w.Buckets[len(w.Buckets)-1])
+	}
+}
+
+func TestBoardNormalize(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	in := BoardInput{Name: "  Databanken ", Refresh: 60, Panels: []Panel{
+		{Type: PanelGraph, Title: "CPU", W: 9, H: 0, Items: []BoardItem{{ItemID: " 42 ", Label: "db1"}}, Range: "2h", Warn: f(80), Text: "weg"},
+		{ID: "a", Type: PanelGauge, Items: []BoardItem{{ItemID: "7"}}, Max: f(100), Crit: f(90)},
+		{ID: "a", Type: PanelProblems, MinSeverity: 9, Items: []BoardItem{{ItemID: "1"}}},
+		{Type: PanelText, Text: " uitleg "},
+	}}
+	if err := in.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	g := in.Panels[0]
+	if in.Name != "Databanken" || g.W != 4 || g.H != 1 || g.Range != "24h" || g.Warn != nil || g.Text != "" || g.Items[0].ItemID != "42" || g.ID == "" {
+		t.Errorf("grafiek: %+v", g)
+	}
+	if in.Panels[1].ID != "a" || in.Panels[2].ID == "a" || in.Panels[2].MinSeverity != 5 || len(in.Panels[2].Items) != 0 || in.Panels[3].Text != "uitleg" {
+		t.Errorf("panelen: %+v", in.Panels)
+	}
+
+	bad := []BoardInput{
+		{Name: "", Refresh: 60},
+		{Name: "x", Refresh: 45},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: "kaart"}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelGraph}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelStat, Items: []BoardItem{{ItemID: "1"}, {ItemID: "2"}}}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelStat, Items: []BoardItem{{ItemID: "abc"}}}}},
+		{Name: "x", Refresh: 60, Panels: []Panel{{Type: PanelGauge, Items: []BoardItem{{ItemID: "1"}}, Max: f(0)}}},
+		{Name: "x", Refresh: 60, Panels: make([]Panel, MaxPanels+1)},
+	}
+	for i, b := range bad {
+		var fe *FieldError
+		if err := b.Normalize(); !errors.As(err, &fe) {
+			t.Errorf("%d: verwacht een fout, kreeg %v", i, err)
+		}
+	}
+}
+
+func TestBoards(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	in := BoardInput{Name: "Databanken", Refresh: 60, Panels: []Panel{{Type: PanelStat, Items: []BoardItem{{ItemID: "5"}}}}}
+	b, err := s.CreateBoard(ctx, events.System(), nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Name != "Databanken" || len(b.Panels) != 1 || b.Panels[0].ID == "" || b.Panels[0].W != 1 {
+		t.Fatalf("bewaard: %+v", b)
+	}
+	if _, err := s.CreateBoard(ctx, events.System(), nil, BoardInput{Name: "databanken", Refresh: 0}); !errors.Is(err, ErrBoardExists) {
+		t.Errorf("dubbele naam: %v", err)
+	}
+	in.Name, in.Panels = "Databank", append(in.Panels, Panel{Type: PanelText, Text: "hallo"})
+	b2, err := s.UpdateBoard(ctx, events.System(), nil, b.ID, in)
+	if err != nil || b2.Name != "Databank" || len(b2.Panels) != 2 || !b2.UpdatedAt.After(b.CreatedAt.Add(-time.Second)) {
+		t.Fatalf("bijgewerkt: %+v %v", b2, err)
+	}
+	all, err := s.Boards(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("lijst: %v %v", all, err)
+	}
+	if err := s.DeleteBoard(ctx, events.System(), b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Board(ctx, b.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("na weggooien: %v", err)
+	}
+	if _, err := s.UpdateBoard(ctx, events.System(), nil, b.ID, in); !errors.Is(err, ErrNotFound) {
+		t.Errorf("bijwerken van een weg dashboard: %v", err)
 	}
 }

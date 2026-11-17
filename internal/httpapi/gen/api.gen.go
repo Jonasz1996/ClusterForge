@@ -14092,6 +14092,14 @@ type ZabbixAgentsOverview struct {
 	Settings ZabbixAgentSettings `json:"settings"`
 }
 
+// ZabbixBoardItem defines model for ZabbixBoardItem.
+type ZabbixBoardItem struct {
+	Itemid string `json:"itemid"`
+
+	// Label Eigen naam in de legende; leeg is de naam uit Zabbix
+	Label string `json:"label"`
+}
+
 // ZabbixCounts defines model for ZabbixCounts.
 type ZabbixCounts struct {
 	Average          int `json:"average"`
@@ -14114,6 +14122,28 @@ type ZabbixCounts struct {
 
 	// Watched Daarvan met een Zabbix-host
 	Watched int `json:"watched"`
+}
+
+// ZabbixDashboard defines model for ZabbixDashboard.
+type ZabbixDashboard struct {
+	CreatedAt   time.Time                 `json:"created_at"`
+	Description string                    `json:"description"`
+	Id          openapi_types.UUID        `json:"id"`
+	Name        string                    `json:"name"`
+	Panels      []ZabbixPanel             `json:"panels"`
+	Refresh     int                       `json:"refresh"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
+	UpdatedBy   nullable.Nullable[string] `json:"updated_by"`
+}
+
+// ZabbixDashboardInput defines model for ZabbixDashboardInput.
+type ZabbixDashboardInput struct {
+	Description string        `json:"description"`
+	Name        string        `json:"name"`
+	Panels      []ZabbixPanel `json:"panels"`
+
+	// Refresh Verversen in seconden: 0, 30, 60, 300 of 900
+	Refresh int `json:"refresh"`
 }
 
 // ZabbixEvents defines model for ZabbixEvents.
@@ -14267,6 +14297,22 @@ type ZabbixItem struct {
 	Units     string `json:"units"`
 }
 
+// ZabbixLatestItem defines model for ZabbixLatestItem.
+type ZabbixLatestItem struct {
+	Component string                       `json:"component"`
+	Error     string                       `json:"error"`
+	HostName  string                       `json:"host_name"`
+	Hostid    string                       `json:"hostid"`
+	Itemid    string                       `json:"itemid"`
+	Key       string                       `json:"key"`
+	LastClock nullable.Nullable[time.Time] `json:"last_clock"`
+	LastValue string                       `json:"last_value"`
+	Name      string                       `json:"name"`
+	Numeric   bool                         `json:"numeric"`
+	PrevValue string                       `json:"prev_value"`
+	Units     string                       `json:"units"`
+}
+
 // ZabbixMetrics defines model for ZabbixMetrics.
 type ZabbixMetrics struct {
 	At    time.Time           `json:"at"`
@@ -14316,6 +14362,46 @@ type ZabbixOverview struct {
 
 	// Window Een van: 24h, 7d, 30d
 	Window string `json:"window"`
+}
+
+// ZabbixPanel defines model for ZabbixPanel.
+type ZabbixPanel struct {
+	// Crit stat en gauge: vanaf hier rood
+	Crit nullable.Nullable[float32] `json:"crit"`
+
+	// H Hoogte
+	H int `json:"h"`
+
+	// Hostid problems: alleen deze host; leeg is alle
+	Hostid string `json:"hostid"`
+
+	// Id Leeg bij een nieuw paneel; de server geeft er een
+	Id string `json:"id"`
+
+	// Items graph: 1-6; stat en gauge: 1
+	Items []ZabbixBoardItem `json:"items"`
+
+	// Max gauge: de volle meter (leeg: 100)
+	Max nullable.Nullable[float32] `json:"max"`
+
+	// MinSeverity problems: vanaf deze ernst (0-5)
+	MinSeverity int `json:"min_severity"`
+
+	// Range graph: 1h, 6h, 24h, 7d of 30d
+	Range string `json:"range"`
+
+	// Text text: de tekst
+	Text  string `json:"text"`
+	Title string `json:"title"`
+
+	// Type Een van: graph, stat, gauge, problems, text
+	Type string `json:"type"`
+
+	// W Breedte in kolommen
+	W int `json:"w"`
+
+	// Warn stat en gauge: vanaf hier oranje
+	Warn nullable.Nullable[float32] `json:"warn"`
 }
 
 // ZabbixProblem defines model for ZabbixProblem.
@@ -15155,6 +15241,12 @@ type GetZabbixEventsParams struct {
 // GetZabbixEventsParamsWindow defines parameters for GetZabbixEvents.
 type GetZabbixEventsParamsWindow string
 
+// GetZabbixLatestParams defines parameters for GetZabbixLatest.
+type GetZabbixLatestParams struct {
+	// Itemids Item-id's, met komma's gescheiden
+	Itemids string `form:"itemids" json:"itemids"`
+}
+
 // GetZabbixItemSeriesParams defines parameters for GetZabbixItemSeries.
 type GetZabbixItemSeriesParams struct {
 	Range *GetZabbixItemSeriesParamsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -15632,6 +15724,12 @@ type SetZabbixAgentNodesJSONRequestBody = ZabbixAgentNodesInput
 
 // UpdateZabbixAgentSettingsJSONRequestBody defines body for UpdateZabbixAgentSettings for application/json ContentType.
 type UpdateZabbixAgentSettingsJSONRequestBody = ZabbixAgentSettingsInput
+
+// CreateZabbixDashboardJSONRequestBody defines body for CreateZabbixDashboard for application/json ContentType.
+type CreateZabbixDashboardJSONRequestBody = ZabbixDashboardInput
+
+// UpdateZabbixDashboardJSONRequestBody defines body for UpdateZabbixDashboard for application/json ContentType.
+type UpdateZabbixDashboardJSONRequestBody = ZabbixDashboardInput
 
 // SetZabbixHostLinkJSONRequestBody defines body for SetZabbixHostLink for application/json ContentType.
 type SetZabbixHostLinkJSONRequestBody = ZabbixHostLinkInput
@@ -16799,6 +16897,21 @@ type ServerInterface interface {
 	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
 	// (POST /zabbix-agents/test)
 	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
+	// ListZabbixDashboards Eigen Zabbix-dashboards
+	// (GET /zabbix/dashboards)
+	ListZabbixDashboards(w http.ResponseWriter, r *http.Request)
+	// CreateZabbixDashboard Een eigen dashboard bewaren (admin); ook voor een import
+	// (POST /zabbix/dashboards)
+	CreateZabbixDashboard(w http.ResponseWriter, r *http.Request)
+	// DeleteZabbixDashboard Een eigen dashboard weggooien (admin)
+	// (DELETE /zabbix/dashboards/{id})
+	DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetZabbixDashboard Eén eigen dashboard
+	// (GET /zabbix/dashboards/{id})
+	GetZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateZabbixDashboard Een eigen dashboard vervangen (admin)
+	// (PUT /zabbix/dashboards/{id})
+	UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// GetZabbixEvents Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
 	// (GET /zabbix/events)
 	GetZabbixEvents(w http.ResponseWriter, r *http.Request, params GetZabbixEventsParams)
@@ -16811,6 +16924,9 @@ type ServerInterface interface {
 	// SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
 	// (PUT /zabbix/hosts/{hostid}/link)
 	SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string)
+	// GetZabbixLatest Laatste waarde van losse Zabbix-items
+	// (GET /zabbix/items/latest)
+	GetZabbixLatest(w http.ResponseWriter, r *http.Request, params GetZabbixLatestParams)
 	// GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
 	// (GET /zabbix/items/{itemid}/series)
 	GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams)
@@ -19151,6 +19267,36 @@ func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListZabbixDashboards Eigen Zabbix-dashboards
+// (GET /zabbix/dashboards)
+func (_ Unimplemented) ListZabbixDashboards(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateZabbixDashboard Een eigen dashboard bewaren (admin); ook voor een import
+// (POST /zabbix/dashboards)
+func (_ Unimplemented) CreateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteZabbixDashboard Een eigen dashboard weggooien (admin)
+// (DELETE /zabbix/dashboards/{id})
+func (_ Unimplemented) DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixDashboard Eén eigen dashboard
+// (GET /zabbix/dashboards/{id})
+func (_ Unimplemented) GetZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateZabbixDashboard Een eigen dashboard vervangen (admin)
+// (PUT /zabbix/dashboards/{id})
+func (_ Unimplemented) UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetZabbixEvents Problemen van een venster samengevat (aantal per ernst over tijd, MTTR, top-triggers en -hosts)
 // (GET /zabbix/events)
 func (_ Unimplemented) GetZabbixEvents(w http.ResponseWriter, r *http.Request, params GetZabbixEventsParams) {
@@ -19172,6 +19318,12 @@ func (_ Unimplemented) DeleteZabbixHostLink(w http.ResponseWriter, r *http.Reque
 // SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
 // (PUT /zabbix/hosts/{hostid}/link)
 func (_ Unimplemented) SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixLatest Laatste waarde van losse Zabbix-items
+// (GET /zabbix/items/latest)
+func (_ Unimplemented) GetZabbixLatest(w http.ResponseWriter, r *http.Request, params GetZabbixLatestParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -30067,6 +30219,112 @@ func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListZabbixDashboards operation middleware
+func (siw *ServerInterfaceWrapper) ListZabbixDashboards(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListZabbixDashboards(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) CreateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateZabbixDashboard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) DeleteZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteZabbixDashboard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixDashboard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateZabbixDashboard operation middleware
+func (siw *ServerInterfaceWrapper) UpdateZabbixDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateZabbixDashboard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetZabbixEvents operation middleware
 func (siw *ServerInterfaceWrapper) GetZabbixEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -30169,6 +30427,39 @@ func (siw *ServerInterfaceWrapper) SetZabbixHostLink(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetZabbixHostLink(w, r, hostid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixLatest operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixLatest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetZabbixLatestParams
+
+	// ------------- Required query parameter "itemids" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "itemids", r.URL.Query(), &params.Itemids, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "itemids"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemids", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixLatest(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -31119,6 +31410,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/zabbix/items/{itemid}/series", wrapper.GetZabbixItemSeries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/items/latest", wrapper.GetZabbixLatest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/dashboards", wrapper.ListZabbixDashboards)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix/dashboards", wrapper.CreateZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.DeleteZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.GetZabbixDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix/dashboards/{id}", wrapper.UpdateZabbixDashboard)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.DeleteZabbixHostLink)
