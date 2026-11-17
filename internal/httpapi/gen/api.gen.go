@@ -3030,6 +3030,30 @@ func (e NodeConnOutDest) Valid() bool {
 	}
 }
 
+// Defines values for NodeDiskLevel.
+const (
+	NodeDiskLevelCrit    NodeDiskLevel = "crit"
+	NodeDiskLevelOk      NodeDiskLevel = "ok"
+	NodeDiskLevelUnknown NodeDiskLevel = "unknown"
+	NodeDiskLevelWarn    NodeDiskLevel = "warn"
+)
+
+// Valid indicates whether the value is a known member of the NodeDiskLevel enum.
+func (e NodeDiskLevel) Valid() bool {
+	switch e {
+	case NodeDiskLevelCrit:
+		return true
+	case NodeDiskLevelOk:
+		return true
+	case NodeDiskLevelUnknown:
+		return true
+	case NodeDiskLevelWarn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeLifecycle.
 const (
 	NodeLifecycleActive         NodeLifecycle = "active"
@@ -4905,6 +4929,9 @@ type AttentionItem struct {
 
 	// Detail De betrokken clusters of nodes, kort
 	Detail string `json:"detail"`
+
+	// Help Wat kun je doen, in gewone taal (fase 41)
+	Help *string `json:"help,omitempty"`
 
 	// Href Pagina waar je het oplost
 	Href string `json:"href"`
@@ -8553,6 +8580,58 @@ type DisasterVIPResult struct {
 	Segments []TestRunSegment `json:"segments"`
 }
 
+// DiskScan defines model for DiskScan.
+type DiskScan struct {
+	// Cleaned Wat de laatste opruimbeurt opruimde
+	Cleaned   *[]string  `json:"cleaned,omitempty"`
+	CleanedAt *time.Time `json:"cleaned_at,omitempty"`
+	Dirs      []struct {
+		Bytes int64  `json:"bytes"`
+		Path  string `json:"path"`
+	} `json:"dirs"`
+
+	// Freed Hoeveel de laatste opruimbeurt vrijmaakte
+	Freed  *int64             `json:"freed,omitempty"`
+	Items  []DiskScanItem     `json:"items"`
+	JobId  openapi_types.UUID `json:"job_id"`
+	Mounts []struct {
+		Avail int64  `json:"avail"`
+		Mount string `json:"mount"`
+		Size  int64  `json:"size"`
+		Used  int64  `json:"used"`
+	} `json:"mounts"`
+	ScannedAt time.Time `json:"scanned_at"`
+}
+
+// DiskScanItem defines model for DiskScanItem.
+type DiskScanItem struct {
+	// Bytes Hoeveel opruimen ongeveer vrijmaakt
+	Bytes int64 `json:"bytes"`
+
+	// Default Staat standaard aangevinkt
+	Default bool `json:"default"`
+
+	// Explain Wat het is en wat opruimen doet, in gewone taal
+	Explain string `json:"explain"`
+	Id      string `json:"id"`
+
+	// Safe Opruimen raakt niets dat een dienst nodig heeft
+	Safe  bool   `json:"safe"`
+	Title string `json:"title"`
+}
+
+// DiskWatchSettings defines model for DiskWatchSettings.
+type DiskWatchSettings struct {
+	// CritPct Vanaf deze bezetting: ernstig (rood)
+	CritPct int `json:"crit_pct"`
+
+	// IgnoreMounts Mounts die niet meetellen, zoals /mnt/backup
+	IgnoreMounts []string `json:"ignore_mounts"`
+
+	// WarnPct Vanaf deze bezetting: let op (oranje)
+	WarnPct int `json:"warn_pct"`
+}
+
 // Doc defines model for Doc.
 type Doc struct {
 	Cause string `json:"cause"`
@@ -11908,6 +11987,25 @@ type NodeConnections struct {
 	Supported bool `json:"supported"`
 }
 
+// NodeDisk defines model for NodeDisk.
+type NodeDisk struct {
+	CritPct      int                 `json:"crit_pct"`
+	Hostname     string              `json:"hostname"`
+	Level        NodeDiskLevel       `json:"level"`
+	Mount        string              `json:"mount"`
+	NodeId       openapi_types.UUID  `json:"node_id"`
+	Online       bool                `json:"online"`
+	RunningJobId *openapi_types.UUID `json:"running_job_id,omitempty"`
+	Scan         *DiskScan           `json:"scan,omitempty"`
+
+	// UsedRatio Bezetting van de volste schijf, 0-1
+	UsedRatio float32 `json:"used_ratio"`
+	WarnPct   int     `json:"warn_pct"`
+}
+
+// NodeDiskLevel defines model for NodeDisk.Level.
+type NodeDiskLevel string
+
 // NodeInput defines model for NodeInput.
 type NodeInput struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
@@ -15260,6 +15358,12 @@ type ToggleNodeCronJSONBody struct {
 	Enabled bool    `json:"enabled"`
 }
 
+// CleanupNodeDiskJSONBody defines parameters for CleanupNodeDisk.
+type CleanupNodeDiskJSONBody struct {
+	// Items Ids uit DiskScanItem
+	Items []string `json:"items"`
+}
+
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
 type GetNodeMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -15681,6 +15785,9 @@ type UpdateDisasterScenarioJSONRequestBody = DisasterScenarioInput
 // RunDisasterScenarioJSONRequestBody defines body for RunDisasterScenario for application/json ContentType.
 type RunDisasterScenarioJSONRequestBody = DisasterRunInput
 
+// SetDiskWatchSettingsJSONRequestBody defines body for SetDiskWatchSettings for application/json ContentType.
+type SetDiskWatchSettingsJSONRequestBody = DiskWatchSettings
+
 // CallDockerApiJSONRequestBody defines body for CallDockerApi for application/json ContentType.
 type CallDockerApiJSONRequestBody = DockerCallInput
 
@@ -15780,8 +15887,17 @@ type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
 // ToggleNodeCronJSONRequestBody defines body for ToggleNodeCron for application/json ContentType.
 type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
 
+// CleanupNodeDiskJSONRequestBody defines body for CleanupNodeDisk for application/json ContentType.
+type CleanupNodeDiskJSONRequestBody CleanupNodeDiskJSONBody
+
 // DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
 type DownloadOpnsenseBackupJSONRequestBody = PveObject
+
+// ApplyOpnsenseAdviceJSONRequestBody defines body for ApplyOpnsenseAdvice for application/json ContentType.
+type ApplyOpnsenseAdviceJSONRequestBody = PveObject
+
+// IgnoreOpnsenseAdviceJSONRequestBody defines body for IgnoreOpnsenseAdvice for application/json ContentType.
+type IgnoreOpnsenseAdviceJSONRequestBody = PveObject
 
 // SetOpnsenseAutoJSONRequestBody defines body for SetOpnsenseAuto for application/json ContentType.
 type SetOpnsenseAutoJSONRequestBody = PveObject
@@ -16436,6 +16552,12 @@ type ServerInterface interface {
 	// RunDisasterScenario Rampoefening starten (admin)
 	// (POST /disaster-scenarios/{scenarioId}/run)
 	RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// GetDiskWatchSettings De drempels van de schijfbewaking (fase 41)
+	// (GET /disk/settings)
+	GetDiskWatchSettings(w http.ResponseWriter, r *http.Request)
+	// SetDiskWatchSettings De drempels van de schijfbewaking aanpassen (admin)
+	// (PUT /disk/settings)
+	SetDiskWatchSettings(w http.ResponseWriter, r *http.Request)
 	// GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
 	// (GET /docker/all)
 	GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams)
@@ -16787,6 +16909,15 @@ type ServerInterface interface {
 	// ToggleNodeCron Een gevonden cronregel op een node uit- of weer aanzetten (admin)
 	// (POST /nodes/{nodeId}/crons/{key}/toggle)
 	ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, key string)
+	// GetNodeDisk Schijfbezetting van een node met de laatste meting van wat ruimte inneemt (fase 41)
+	// (GET /nodes/{nodeId}/disk)
+	GetNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// CleanupNodeDisk De gekozen onderdelen opruimen en opnieuw meten, als taak disk.cleanup (admin)
+	// (POST /nodes/{nodeId}/disk/cleanup)
+	CleanupNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ScanNodeDisk Meten wat er ruimte inneemt, als taak disk.scan (admin)
+	// (POST /nodes/{nodeId}/disk/scan)
+	ScanNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -16811,6 +16942,15 @@ type ServerInterface interface {
 	// ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
 	// (GET /opnsense/clusters)
 	ListOpnsenseClusters(w http.ResponseWriter, r *http.Request)
+	// GetOpnsenseAdvice Regeladvies (fase 40) - regels voor geblokkeerd verkeer naar luisterende poorten, dubbele, overschaduwde en ongebruikte regels
+	// (GET /opnsense/firewalls/{nodeId}/advice)
+	GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ApplyOpnsenseAdvice Gekozen regeladvies toepassen als taak opnsense.change (admin; naam van het cluster overtikken, op prod met code of wachtwoord)
+	// (POST /opnsense/firewalls/{nodeId}/advice/apply)
+	ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// IgnoreOpnsenseAdvice Een voorstel van het regeladvies negeren of weer tonen (admin)
+	// (POST /opnsense/firewalls/{nodeId}/advice/ignore)
+	IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
 	// (GET /opnsense/firewalls/{nodeId}/api)
 	GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams)
@@ -16862,6 +17002,9 @@ type ServerInterface interface {
 	// SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
 	// (POST /opnsense/firewalls/{nodeId}/sync)
 	SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetOpnsenseSystem Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4)
+	// (GET /opnsense/firewalls/{nodeId}/system)
+	GetOpnsenseSystem(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
 	// (GET /pbs/coverage)
 	GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams)
@@ -18233,6 +18376,18 @@ func (_ Unimplemented) RunDisasterScenario(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetDiskWatchSettings De drempels van de schijfbewaking (fase 41)
+// (GET /disk/settings)
+func (_ Unimplemented) GetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetDiskWatchSettings De drempels van de schijfbewaking aanpassen (admin)
+// (PUT /disk/settings)
+func (_ Unimplemented) SetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
 // (GET /docker/all)
 func (_ Unimplemented) GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams) {
@@ -18935,6 +19090,24 @@ func (_ Unimplemented) ToggleNodeCron(w http.ResponseWriter, r *http.Request, no
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetNodeDisk Schijfbezetting van een node met de laatste meting van wat ruimte inneemt (fase 41)
+// (GET /nodes/{nodeId}/disk)
+func (_ Unimplemented) GetNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CleanupNodeDisk De gekozen onderdelen opruimen en opnieuw meten, als taak disk.cleanup (admin)
+// (POST /nodes/{nodeId}/disk/cleanup)
+func (_ Unimplemented) CleanupNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScanNodeDisk Meten wat er ruimte inneemt, als taak disk.scan (admin)
+// (POST /nodes/{nodeId}/disk/scan)
+func (_ Unimplemented) ScanNodeDisk(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetNodeDrift Drift van één node
 // (GET /nodes/{nodeId}/drift)
 func (_ Unimplemented) GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
@@ -18980,6 +19153,24 @@ func (_ Unimplemented) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Req
 // ListOpnsenseClusters De OPNsense-firewalls met een agent, per HA-paar, met CARP-toestand en problemen (fase 34)
 // (GET /opnsense/clusters)
 func (_ Unimplemented) ListOpnsenseClusters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseAdvice Regeladvies (fase 40) - regels voor geblokkeerd verkeer naar luisterende poorten, dubbele, overschaduwde en ongebruikte regels
+// (GET /opnsense/firewalls/{nodeId}/advice)
+func (_ Unimplemented) GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyOpnsenseAdvice Gekozen regeladvies toepassen als taak opnsense.change (admin; naam van het cluster overtikken, op prod met code of wachtwoord)
+// (POST /opnsense/firewalls/{nodeId}/advice/apply)
+func (_ Unimplemented) ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// IgnoreOpnsenseAdvice Een voorstel van het regeladvies negeren of weer tonen (admin)
+// (POST /opnsense/firewalls/{nodeId}/advice/ignore)
+func (_ Unimplemented) IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19082,6 +19273,12 @@ func (_ Unimplemented) ListOpnsenseRevisions(w http.ResponseWriter, r *http.Requ
 // SyncOpnsense De configuratie van de master naar de backup synchroniseren (admin)
 // (POST /opnsense/firewalls/{nodeId}/sync)
 func (_ Unimplemented) SyncOpnsense(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseSystem Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4)
+// (GET /opnsense/firewalls/{nodeId}/system)
+func (_ Unimplemented) GetOpnsenseSystem(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -24333,6 +24530,34 @@ func (siw *ServerInterfaceWrapper) RunDisasterScenario(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetDiskWatchSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDiskWatchSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetDiskWatchSettings operation middleware
+func (siw *ServerInterfaceWrapper) SetDiskWatchSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDiskWatchSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetDockerAll operation middleware
 func (siw *ServerInterfaceWrapper) GetDockerAll(w http.ResponseWriter, r *http.Request) {
 
@@ -28089,6 +28314,84 @@ func (siw *ServerInterfaceWrapper) ToggleNodeCron(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetNodeDisk operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeDisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeDisk(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CleanupNodeDisk operation middleware
+func (siw *ServerInterfaceWrapper) CleanupNodeDisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CleanupNodeDisk(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScanNodeDisk operation middleware
+func (siw *ServerInterfaceWrapper) ScanNodeDisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScanNodeDisk(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -28373,6 +28676,84 @@ func (siw *ServerInterfaceWrapper) ListOpnsenseClusters(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListOpnsenseClusters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseAdvice operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseAdvice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseAdvice(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyOpnsenseAdvice operation middleware
+func (siw *ServerInterfaceWrapper) ApplyOpnsenseAdvice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyOpnsenseAdvice(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IgnoreOpnsenseAdvice operation middleware
+func (siw *ServerInterfaceWrapper) IgnoreOpnsenseAdvice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IgnoreOpnsenseAdvice(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -28944,6 +29325,32 @@ func (siw *ServerInterfaceWrapper) SyncOpnsense(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SyncOpnsense(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseSystem operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseSystem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseSystem(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -32140,6 +32547,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/attention", wrapper.GetAttention)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/disk/settings", wrapper.GetDiskWatchSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/disk/settings", wrapper.SetDiskWatchSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/disk", wrapper.GetNodeDisk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/disk/scan", wrapper.ScanNodeDisk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/disk/cleanup", wrapper.CleanupNodeDisk)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/totp/setup", wrapper.BeginTotpSetup)
 	})
 	r.Group(func(r chi.Router) {
@@ -33005,6 +33427,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto/apply", wrapper.ApplyOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice", wrapper.GetOpnsenseAdvice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice/apply", wrapper.ApplyOpnsenseAdvice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/advice/ignore", wrapper.IgnoreOpnsenseAdvice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/system", wrapper.GetOpnsenseSystem)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)

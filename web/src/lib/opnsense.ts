@@ -264,11 +264,11 @@ export async function opnDiff(id: string, from: string, to: string, other?: stri
   ) as unknown as OpnDiff;
 }
 
-export async function opnPlan(id: string, calls: OpnCall[], restore?: string): Promise<OpnPlan> {
+export async function opnPlan(id: string, calls: OpnCall[], restore?: string, legacy?: OpnLegacyEdit[], node?: string): Promise<OpnPlan> {
   return unwrap(
     await api.POST("/opnsense/firewalls/{nodeId}/plan", {
       params: { path: { nodeId: id } },
-      body: { calls, restore },
+      body: { calls, restore, legacy, node },
     }),
   ) as unknown as OpnPlan;
 }
@@ -283,8 +283,13 @@ function useAfterJob() {
   };
 }
 
+export type OpnLegacyEdit = { section: "interfaces" | "system"; key?: string; field: string; value?: string; delete?: boolean };
+
 export type OpnChangeInput = {
   calls: OpnCall[];
+  // legacy zijn velden zonder API (interfaces, systeem), op firewall node.
+  legacy?: OpnLegacyEdit[];
+  node?: string;
   // restore zet een revisie uit /conf/backup terug in plaats van calls.
   restore?: string;
   confirm_within?: number;
@@ -586,5 +591,110 @@ export function useOpnAutoApply(id: string) {
         }),
       ) as unknown as Job,
     onSuccess: after,
+  });
+}
+
+// --- Regeladvies (fase 40 M3) ------------------------------------------------
+
+export type OpnAdviceItem = {
+  key: string;
+  kind: "open" | "dup" | "shadow" | "unused" | "wan";
+  op: "add" | "set" | "del" | "conflict";
+  title: string;
+  detail?: string;
+  ignored: boolean;
+  manual?: boolean;
+};
+
+export type OpnAdvice = {
+  cluster: string;
+  firewall: string;
+  items: OpnAdviceItem[];
+  notes: string[];
+  since?: string;
+  confirm: string;
+};
+
+export function useOpnAdvice(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "advice", id],
+    queryFn: async () =>
+      unwrap(await api.GET("/opnsense/firewalls/{nodeId}/advice", { params: { path: { nodeId: id! } } })) as unknown as OpnAdvice,
+    enabled: !!id,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
+export function useOpnAdviceApply(id: string) {
+  const after = useAfterJob();
+  return useMutation({
+    mutationFn: async (b: { keys: string[] } & OpnConfirm) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/advice/apply", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ) as unknown as Job,
+    onSuccess: after,
+  });
+}
+
+export function useOpnAdviceIgnore(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (b: { key: string; ignore: boolean }) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/advice/ignore", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["opnsense", "advice"] }),
+  });
+}
+
+// --- Interfaces en systeem (fase 40 M4) -------------------------------------
+
+export type OpnSysIface = {
+  key: string;
+  device: string;
+  descr?: string;
+  enabled: boolean;
+  ipaddr?: string;
+  subnet?: string;
+  ipaddrv6?: string;
+  subnetv6?: string;
+  gateway?: string;
+  blockpriv: boolean;
+  blockbogons: boolean;
+  mtu?: string;
+};
+
+export type OpnSysNode = {
+  node_id: string;
+  hostname: string;
+  role: string;
+  host: string;
+  domain: string;
+  dns: string[];
+  ntp?: string;
+  timezone?: string;
+  dns_override: boolean;
+  interfaces: OpnSysIface[];
+  free: string[];
+  next_key: string;
+  legacy: boolean;
+  error?: string;
+};
+
+export function useOpnSystem(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "system", id],
+    queryFn: async () =>
+      unwrap(await api.GET("/opnsense/firewalls/{nodeId}/system", { params: { path: { nodeId: id! } } })) as unknown as {
+        cluster: string;
+        nodes: OpnSysNode[];
+      },
+    enabled: !!id,
   });
 }

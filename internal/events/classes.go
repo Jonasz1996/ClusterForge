@@ -51,6 +51,7 @@ var classes = map[string]Class{
 	"security.scan_done": ClassChange, "security.scan_failed": ClassSymptom, "security.scanner_linked": ClassChange,
 	"crowdsec.console_key_changed": ClassChange, "crowdsec.console_enrolled": ClassChange, "crowdsec.console_enroll_failed": ClassSymptom,
 	"node.software_updated": ClassChange, "node.software_update_failed": ClassInfo, "node.command_ran": ClassChange,
+	"disk.settings_updated": ClassChange, "disk.cleaned": ClassChange,
 	"settings.update_policy": ClassChange, "cluster.update_policy": ClassChange, "cluster.auto_update_skipped": ClassInfo,
 	"cluster.secret_revealed":      ClassInfo,
 	"cluster.database_move_copied": ClassChange, "cluster.database_move_failed": ClassInfo, "cluster.database_moved": ClassChange,

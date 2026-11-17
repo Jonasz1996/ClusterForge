@@ -45,6 +45,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/disaster"
+	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
 	"github.com/Jonasz1996/clusterforge/internal/dockerhost"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
@@ -236,6 +237,8 @@ func serve() error {
 	// Fase 14: CrowdSec op de nodes, via agentprotocol 28 en runs.
 	csec := crowdsec.NewService(pool, ev, runner, bus, log)
 	csec.Box = box
+	// Fase 41: schijfbewaking en veilig opruimen, via scripttaken.
+	dsk := diskwatch.NewService(pool, ev, runner, bus, log)
 	// Zabbix-agents: zabbix-agent2 met een eigen PSK per node, via runs en de Zabbix API.
 	zba := zabbixagent.NewService(pool, ev, runner, bus, log)
 	zbm := zabbixmon.NewService(pool, ev, zba, log)
@@ -497,7 +500,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

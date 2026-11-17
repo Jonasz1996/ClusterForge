@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -26,13 +27,16 @@ type dashboardOpnsense struct {
 	// Online: bereikbare firewalls van het totaal, bv. "2/2".
 	Online string `json:"online"`
 	// Master is de MASTER van het eerste cluster (of "geen").
-	Master      string                     `json:"master"`
-	VIPs        int                        `json:"vips"`
-	Problems    int                        `json:"problems"`
-	Maintenance int                        `json:"maintenance"`
-	Version     string                     `json:"version"`
-	Rows        []dashboardOpnsenseCluster `json:"rows"`
-	URL         string                     `json:"url"`
+	Master      string `json:"master"`
+	VIPs        int    `json:"vips"`
+	Problems    int    `json:"problems"`
+	Maintenance int    `json:"maintenance"`
+	Version     string `json:"version"`
+	// Blocked24h en Passed24h komen uit het filterlog (fase 40).
+	Blocked24h int64                      `json:"blocked_24h"`
+	Passed24h  int64                      `json:"passed_24h"`
+	Rows       []dashboardOpnsenseCluster `json:"rows"`
+	URL        string                     `json:"url"`
 }
 
 type dashboardOpnsenseCluster struct {
@@ -61,6 +65,16 @@ func (s *Server) dashboardOpnsenseHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	d := dashboardOpnsenseFrom(cs, t.ClusterIds)
+	var ids []uuid.UUID
+	for _, c := range cs {
+		if len(t.ClusterIds) > 0 && (c.ClusterID == nil || !slices.Contains(t.ClusterIds, *c.ClusterID)) {
+			continue
+		}
+		for _, n := range c.Nodes {
+			ids = append(ids, n.NodeID)
+		}
+	}
+	d.Blocked24h, d.Passed24h = s.opnsense.FlowTotals(r.Context(), ids, 24*time.Hour)
 	d.URL = baseURL(r, s.cfg.TrustProxyHeaders) + "/opnsense"
 	code := http.StatusOK
 	if r.URL.Query().Get("strict") == "1" && !d.OK {

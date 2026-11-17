@@ -143,6 +143,20 @@ var netRules = slices.Concat(
 	items("unbound/settings", "DomainOverride", "domain", "domein-override", "unbound/service/reconfigure", LevelNormal),
 	items("kea/dhcpv4", "Reservation", "reservation", "DHCP-reservatie", "kea/service/reconfigure", LevelNormal),
 	items("dnsmasq/settings", "Host", "host", "Dnsmasq-host", "dnsmasq/service/reconfigure", LevelNormal),
+	// Fase 40 M4: DHCP-bereiken, DNS-doorsturing, syslog en cron.
+	items("kea/dhcpv4", "Subnet", "subnet4", "Kea-subnet", "kea/service/reconfigure", LevelNormal),
+	items("dnsmasq/settings", "Range", "range", "DHCP-bereik", "dnsmasq/service/reconfigure", LevelNormal),
+	items("unbound/settings", "Forward", "dot", "DNS-doorsturing", "unbound/service/reconfigure", LevelNormal),
+	items("syslog/settings", "Destination", "destination", "syslog-bestemming", "syslog/service/reconfigure", LevelNormal),
+	items("cron/settings", "Job", "job", "cronjob", "cron/service/reconfigure", LevelNormal),
+	[]*rule{
+		rl(`kea/dhcpv4/set`, "dhcpv4", `general|lexpire|ha`, "kea/service/reconfigure", LevelNormal,
+			func(map[string]string, map[string]any) string { return "Kea-instellingen wijzigen" }),
+		rl(`dnsmasq/settings/set`, "dnsmasq", ruleKey, "dnsmasq/service/reconfigure", LevelNormal,
+			func(map[string]string, map[string]any) string { return "Dnsmasq-instellingen wijzigen" }),
+		rl(`unbound/settings/set`, "unbound", `general|advanced|acls|dnsbl|forwarding`, "unbound/service/reconfigure", LevelNormal,
+			func(map[string]string, map[string]any) string { return "Unbound-instellingen wijzigen" }),
+	},
 )
 
 var svcWord = map[string]string{"start": "starten", "stop": "stoppen", "restart": "herstarten"}
@@ -173,7 +187,35 @@ var opsRules = slices.Concat(
 	},
 )
 
-var rules = append(append(append(append(append(append(append(append([]*rule{
+// secRules zijn fase 40 M5: certificaten, gebruikers en groepen, IPsec, IDS
+// en de shaper. Gebruikers root en clusterforge raakt ClusterForge nooit
+// (zie protectedCalls).
+var secRules = slices.Concat(
+	items("trust/cert", "", "cert", "certificaat", "", LevelAccess),
+	items("trust/ca", "", "ca", "certificaatautoriteit", "", LevelAccess),
+	items("system/user", "", "user", "gebruiker", "", LevelAccess),
+	items("system/group", "", "group", "groep", "", LevelAccess),
+	items("ipsec/connections", "Connection", "connection", "IPsec-verbinding", "ipsec/service/reconfigure", LevelAccess),
+	items("ipsec/connections", "Local", "local", "IPsec: eigen authenticatie", "ipsec/service/reconfigure", LevelAccess),
+	items("ipsec/connections", "Remote", "remote", "IPsec: authenticatie van de andere kant", "ipsec/service/reconfigure", LevelAccess),
+	items("ipsec/connections", "Child", "child", "IPsec-tunnel (child)", "ipsec/service/reconfigure", LevelAccess),
+	[]*rule{
+		rl(`ipsec/pre_shared_keys/addItem`, "preSharedKey", `ident|remote_ident|keyType|Key|description`, "ipsec/service/reconfigure", LevelAccess,
+			func(map[string]string, map[string]any) string { return "IPsec-sleutel toevoegen" }),
+		rl(`ipsec/pre_shared_keys/setItem/`+segUUID, "preSharedKey", `ident|remote_ident|keyType|Key|description`, "ipsec/service/reconfigure", LevelAccess,
+			func(map[string]string, map[string]any) string { return "IPsec-sleutel wijzigen" }),
+		rl(`ipsec/pre_shared_keys/delItem/`+segUUID, "", "", "ipsec/service/reconfigure", LevelAccess,
+			func(map[string]string, map[string]any) string { return "IPsec-sleutel verwijderen" }),
+		rl(`ids/settings/set`, "ids", `general`, "ids/service/reconfigure", LevelAccess,
+			func(map[string]string, map[string]any) string { return "IDS/IPS-instellingen wijzigen" }),
+	},
+	items("ids/settings", "Policy", "policy", "IDS-beleid", "ids/service/reconfigure", LevelAccess),
+	items("trafficshaper/settings", "Pipe", "pipe", "shaper-pipe", "trafficshaper/service/reconfigure", LevelAccess),
+	items("trafficshaper/settings", "Queue", "queue", "shaper-wachtrij", "trafficshaper/service/reconfigure", LevelAccess),
+	items("trafficshaper/settings", "Rule", "rule", "shaper-regel", "trafficshaper/service/reconfigure", LevelAccess),
+)
+
+var rules = append(append(append(append(append(append(append(append(append([]*rule{
 	rl(`firewall/filter/moveRuleBefore/`+segUUID+`/(?P<before>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`, "", "",
 		"firewall/filter/apply", LevelAccess, func(map[string]string, map[string]any) string { return "firewallregel verplaatsen" }),
 },
@@ -184,6 +226,7 @@ var rules = append(append(append(append(append(append(append(append([]*rule{
 	natRules("npt", "NPT-regel")...),
 	netRules...),
 	opsRules...),
+	secRules...),
 	baseRules...)
 
 var baseRules = []*rule{
@@ -217,7 +260,7 @@ type Plan struct {
 }
 
 // secretFields zijn veldnamen die altijd geheim zijn, in elk onderdeel.
-var secretFields = []string{"password", "psk", "secret", "privkey", "private_key", "pre_shared_key", "presharedkey", "key"}
+var secretFields = []string{"password", "psk", "secret", "privkey", "private_key", "pre_shared_key", "presharedkey", "key", "prv_payload", "apikeys", "otp_seed"}
 
 // secretPaths geeft de geheime velden die in body staan.
 func secretPaths(body map[string]any) []string {
@@ -228,7 +271,7 @@ func secretPaths(body map[string]any) []string {
 			continue
 		}
 		for k := range inner {
-			if slices.Contains(secretFields, k) {
+			if slices.Contains(secretFields, strings.ToLower(k)) {
 				out = append(out, root+"."+k)
 			}
 		}

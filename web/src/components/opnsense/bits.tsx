@@ -14,6 +14,7 @@ import {
   useOpnClusterKey,
   useOpnClusters,
   type OpnCall,
+  type OpnLegacyEdit,
   type OpnCluster,
   type OpnPlan,
 } from "@/lib/opnsense";
@@ -107,6 +108,8 @@ export function ChangeDialog({
   nodeId,
   calls,
   restore,
+  legacy,
+  node,
   before,
   onClose,
   onDone,
@@ -115,6 +118,9 @@ export function ChangeDialog({
   calls: OpnCall[];
   // restore zet een revisie terug in plaats van calls.
   restore?: string;
+  // legacy zijn velden zonder API, alleen op firewall node.
+  legacy?: OpnLegacyEdit[];
+  node?: string;
   // before toont oud → nieuw per veld.
   before?: ReactNode;
   onClose: () => void;
@@ -128,13 +134,13 @@ export function ChangeDialog({
   const change = useOpnChange(nodeId);
   useEffect(() => {
     let live = true;
-    opnPlan(nodeId, calls, restore)
+    opnPlan(nodeId, calls, restore, legacy, node)
       .then((p) => live && setPlan(p))
       .catch((e) => live && setError(e instanceof Error ? e.message : "Voorcontrole mislukt"));
     return () => {
       live = false;
     };
-  }, [nodeId, calls, restore]);
+  }, [nodeId, calls, restore, legacy, node]);
   const start = async () => {
     setError(null);
     try {
@@ -142,6 +148,8 @@ export function ChangeDialog({
       const job = await change.mutateAsync({
         calls,
         restore,
+        legacy,
+        node,
         confirm_within: Number(within),
         confirm: typed || undefined,
         ...auth,

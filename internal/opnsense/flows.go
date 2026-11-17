@@ -428,3 +428,14 @@ func parseRuleIDs(data json.RawMessage) map[string]string {
 	}
 	return out
 }
+
+// FlowTotals telt wat geblokkeerd en doorgelaten werd over het venster
+// (voor de dashboard-API).
+func (s *Service) FlowTotals(ctx context.Context, ids []uuid.UUID, window time.Duration) (blocked, passed int64) {
+	if len(ids) == 0 {
+		return 0, 0
+	}
+	_ = s.pool.QueryRow(ctx, `SELECT coalesce(sum(count) FILTER (WHERE action <> 'pass'), 0)::bigint, coalesce(sum(count) FILTER (WHERE action = 'pass'), 0)::bigint
+		FROM opnsense_flows WHERE node_id = ANY($1) AND hour >= $2`, ids, s.Now().Add(-window).Truncate(time.Hour)).Scan(&blocked, &passed)
+	return blocked, passed
+}

@@ -115,6 +115,14 @@ export function NodeLifecycleCard({
   );
 }
 
+// Fase 41: bij elke actie of je ze kunt terugdraaien.
+const undo: Record<Dialog, string> = {
+  maintenance: "Ja, met 'Onderhoud beëindigen'. Dan zet ClusterForge alles terug zoals het was.",
+  activate: "Ja, je kunt de node later opnieuw in onderhoud zetten.",
+  reboot: "Een herstart kun je niet tegenhouden als hij loopt, maar er gaat niets verloren: diensten starten vanzelf weer op.",
+  shutdown: "Ja, maar niet vanuit ClusterForge: start de machine opnieuw in Proxmox (Gasten → Starten) of met de aanknop, en beëindig daarna het onderhoud.",
+};
+
 const dialogs: Record<Dialog, { title: (h: string) => string; confirm: string; danger?: boolean; impact?: (h: string) => string }> = {
   maintenance: { title: (h) => `${h} in onderhoud zetten`, confirm: "In onderhoud zetten", impact: (h) => `Wat raakt het onderhoud van ${h}?` },
   activate: { title: (h) => `Onderhoud van ${h} beëindigen`, confirm: "Onderhoud beëindigen" },
@@ -194,6 +202,9 @@ function ActionDialog({
         }}
       >
         <p className="text-sm">{text}</p>
+        <p className="text-xs text-slate-500">
+          <strong>Kun je het terugdraaien?</strong> {undo[action]}
+        </p>
         {d.impact && <NodeImpact nodeId={node.id} title={d.impact(host)} />}
         {canDrain && (
           <label className="flex items-start gap-2 text-sm">
@@ -227,10 +238,7 @@ function ActionDialog({
           />
         </Field>
         {error && (
-          <Alert>
-            {error.message.charAt(0).toUpperCase() + error.message.slice(1)}
-            {/[.!?]$/.test(error.message) ? "" : "."}
-          </Alert>
+          <Alert>{error.message.charAt(0).toUpperCase() + error.message.slice(1) + (/[.!?]$/.test(error.message) ? "" : ".")}</Alert>
         )}
         <div className="flex flex-wrap justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>

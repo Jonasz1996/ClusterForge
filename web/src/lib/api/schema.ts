@@ -157,6 +157,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/disk/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De drempels van de schijfbewaking (fase 41) */
+        get: operations["getDiskWatchSettings"];
+        /** De drempels van de schijfbewaking aanpassen (admin) */
+        put: operations["setDiskWatchSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/disk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Schijfbezetting van een node met de laatste meting van wat ruimte inneemt (fase 41) */
+        get: operations["getNodeDisk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/disk/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Meten wat er ruimte inneemt, als taak disk.scan (admin) */
+        post: operations["scanNodeDisk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/disk/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De gekozen onderdelen opruimen en opnieuw meten, als taak disk.cleanup (admin) */
+        post: operations["cleanupNodeDisk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/totp/setup": {
         parameters: {
             query?: never;
@@ -5133,6 +5208,82 @@ export interface paths {
         put?: never;
         /** Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord) */
         post: operations["applyOpnsenseAuto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/advice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Regeladvies (fase 40) - regels voor geblokkeerd verkeer naar luisterende poorten, dubbele, overschaduwde en ongebruikte regels */
+        get: operations["getOpnsenseAdvice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/advice/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Gekozen regeladvies toepassen als taak opnsense.change (admin; naam van het cluster overtikken, op prod met code of wachtwoord) */
+        post: operations["applyOpnsenseAdvice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/advice/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een voorstel van het regeladvies negeren of weer tonen (admin) */
+        post: operations["ignoreOpnsenseAdvice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/opnsense/firewalls/{nodeId}/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Interfaces en systeeminstellingen van elke firewall van het cluster, uit config.xml (fase 40 M4) */
+        get: operations["getOpnsenseSystem"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10652,6 +10803,77 @@ export interface components {
             /** @description Pagina waar je het oplost */
             href: string;
             count: number;
+            /** @description Wat kun je doen, in gewone taal (fase 41) */
+            help?: string;
+        };
+        DiskWatchSettings: {
+            /** @description Vanaf deze bezetting: let op (oranje) */
+            warn_pct: number;
+            /** @description Vanaf deze bezetting: ernstig (rood) */
+            crit_pct: number;
+            /** @description Mounts die niet meetellen, zoals /mnt/backup */
+            ignore_mounts: string[];
+        };
+        NodeDisk: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description Bezetting van de volste schijf, 0-1 */
+            used_ratio: number;
+            mount: string;
+            /** @enum {string} */
+            level: "ok" | "warn" | "crit" | "unknown";
+            warn_pct: number;
+            crit_pct: number;
+            online: boolean;
+            /** Format: uuid */
+            running_job_id?: string;
+            scan?: components["schemas"]["DiskScan"];
+        };
+        DiskScan: {
+            /** Format: date-time */
+            scanned_at: string;
+            /** Format: uuid */
+            job_id: string;
+            mounts: {
+                mount: string;
+                /** Format: int64 */
+                size: number;
+                /** Format: int64 */
+                used: number;
+                /** Format: int64 */
+                avail: number;
+            }[];
+            items: components["schemas"]["DiskScanItem"][];
+            dirs: {
+                path: string;
+                /** Format: int64 */
+                bytes: number;
+            }[];
+            /** Format: date-time */
+            cleaned_at?: string;
+            /**
+             * Format: int64
+             * @description Hoeveel de laatste opruimbeurt vrijmaakte
+             */
+            freed?: number;
+            /** @description Wat de laatste opruimbeurt opruimde */
+            cleaned?: string[];
+        };
+        DiskScanItem: {
+            id: string;
+            title: string;
+            /** @description Wat het is en wat opruimen doet, in gewone taal */
+            explain: string;
+            /**
+             * Format: int64
+             * @description Hoeveel opruimen ongeveer vrijmaakt
+             */
+            bytes: number;
+            /** @description Opruimen raakt niets dat een dienst nodig heeft */
+            safe: boolean;
+            /** @description Staat standaard aangevinkt */
+            default: boolean;
         };
         UserSession: {
             /** @description Kenmerk van de sessie (hash van het token, niet het token) */
@@ -16286,6 +16508,145 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getDiskWatchSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiskWatchSettings"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setDiskWatchSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiskWatchSettings"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiskWatchSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getNodeDisk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeDisk"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    scanNodeDisk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        job_id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    cleanupNodeDisk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ids uit DiskScanItem */
+                    items: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        job_id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     beginTotpSetup: {
@@ -24079,6 +24440,116 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseAdvice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Voorstellen en opmerkingen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    applyOpnsenseAdvice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    ignoreOpnsenseAdvice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getOpnsenseSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per firewall de toegewezen interfaces, vrije apparaten en de systeemvelden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getOpnsenseDrift: {

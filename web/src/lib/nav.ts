@@ -32,6 +32,22 @@ export const navHome: NavItem = {
 
 export const navGroups: NavGroup[] = [
   {
+    id: "hulp",
+    label: "Hulp",
+    items: [
+      {
+        href: "/aan-de-slag",
+        label: "Aan de slag",
+        keywords: "hulp uitleg beginnen wizard stappen hoe leek nieuw help",
+      },
+      {
+        href: "/uitleg",
+        label: "Woordenlijst",
+        keywords: "uitleg begrippen vakterm betekenis wat is vip failover drift quorum",
+      },
+    ],
+  },
+  {
     id: "infra",
     label: "Infrastructuur",
     items: [
@@ -274,6 +290,21 @@ export const navGroups: NavGroup[] = [
             href: "/opnsense/diensten",
             label: "Diensten en plugins",
             keywords: "opnsense dienst service herstarten plugin installeren",
+          },
+          {
+            href: "/opnsense/beveiliging",
+            label: "Gebruikers en VPN",
+            keywords: "opnsense gebruikers groepen certificaten ca ipsec vpn sleutel ids ips suricata shaper",
+          },
+          {
+            href: "/opnsense/systeem",
+            label: "Interfaces en systeem",
+            keywords: "opnsense interfaces toewijzen ip adres gateway hostnaam domein dns ntp tijdzone",
+          },
+          {
+            href: "/opnsense/advies",
+            label: "Regeladvies",
+            keywords: "opnsense regels advies voorstellen dubbel overschaduwd ongebruikt geblokkeerd toelaten opruimen",
           },
           {
             href: "/opnsense/automatisch",

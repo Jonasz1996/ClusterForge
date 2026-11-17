@@ -32,6 +32,10 @@ export function ConfirmDelete({
     <Modal title={title} onClose={onClose}>
       <div className="space-y-4 text-sm">
         <p>{text}</p>
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <strong>Kun je het terugdraaien?</strong> Nee. ClusterForge vergeet {what} en de geschiedenis ervan; de machine zelf blijft wel
+          bestaan in Proxmox. Wil je hem alleen tijdelijk niet zien, zet hem dan in onderhoud.
+        </p>
         <UsedBy clusterId={clusterId} nodeId={nodeId} what={what} />
         {!!error && <Alert>{error instanceof ApiError ? error.message : "Verwijderen mislukt"}</Alert>}
         <div className="flex justify-end gap-2">

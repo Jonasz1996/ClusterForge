@@ -38,7 +38,8 @@ kunnen beheren vanuit clusterforge gui", met overal duidelijke uitleg, en:
   - **Ruimte vrijmaken**: een wizard met per onderdeel wat het is, hoeveel het
     vrijmaakt en of het veilig is. De veilige onderdelen staan aangevinkt.
     Daarna meet hij opnieuw en toont voor en na.
-  - Op prod vraagt opruimen de gewone bevestiging met TOTP.
+  - Opruimen vraagt geen TOTP, ook niet op prod: het raakt alleen caches en
+    oude logs, en de wizard toont vooraf wat er gebeurt.
 
 ### M2: uitleg op elke pagina en een woordenlijst
 - Bovenaan elke pagina een blok **"Wat is dit?"**: wat je ziet, waarom, wat je

@@ -44,10 +44,51 @@ type Change struct {
 	// Restore zet een revisie uit /conf/backup terug (bestandsnaam) in
 	// plaats van Calls; altijd met overtikken, proeven en terugdraaitimer.
 	Restore string `json:"restore,omitempty"`
+	// Legacy zijn velden zonder API (interfaces en systeem, fase 40 M4);
+	// altijd met overtikken.
+	Legacy []protocol.OPNLegacyEdit `json:"legacy,omitempty"`
+	// Node is bij Legacy de firewall waarop de velden gaan: interfaces en
+	// hostnaam zijn per firewall en worden niet gesynchroniseerd.
+	Node *uuid.UUID `json:"node,omitempty"`
+}
+
+// legacyTitle beschrijft een veld voor de taak en de revisie.
+func legacyTitle(e protocol.OPNLegacyEdit) string {
+	what := "systeem: " + e.Field
+	if e.Section == "interfaces" {
+		what = "interface " + e.Key + ": " + e.Field
+	}
+	if e.Delete {
+		return what + " weghalen"
+	}
+	return what + " = " + e.Value
 }
 
 // planFor geeft het plan van een wijziging of een terugzetting.
 func planFor(c Change) (Plan, error) {
+	if len(c.Legacy) > 0 {
+		if c.Restore != "" {
+			return Plan{}, errors.New("terugzetten gaat niet samen met velden")
+		}
+		p := Plan{Level: LevelAccess}
+		if len(c.Calls) > 0 {
+			var err error
+			if p, err = check(c.Calls); err != nil {
+				return p, err
+			}
+			p.Level = LevelAccess
+		}
+		for _, e := range c.Legacy {
+			if err := e.Validate(); err != nil {
+				return Plan{}, err
+			}
+			p.Titles = append(p.Titles, legacyTitle(e))
+		}
+		if p.Each {
+			return Plan{}, errors.New("velden gaan niet samen met plugins")
+		}
+		return p, nil
+	}
 	if c.Restore == "" {
 		return check(c.Calls)
 	}
@@ -155,6 +196,9 @@ type changeParams struct {
 	Each bool `json:"each,omitempty"`
 	// Sealed zijn de geheime velden, versleuteld; sleutel "i|root.veld".
 	Sealed *sealed `json:"sealed,omitempty"`
+	// Only: alleen op deze firewall, zonder sync (velden per firewall).
+	Only     *uuid.UUID `json:"only,omitempty"`
+	OnlyName string     `json:"only_name,omitempty"`
 }
 
 // sealSecrets haalt de geheime velden uit de aanroepen en versleutelt ze.
@@ -236,12 +280,32 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 	if !ck.OK {
 		return store.Job{}, ValidationError{ck.Why}
 	}
+	var only *Firewall
+	if len(c.Legacy) > 0 {
+		if c.Node == nil {
+			return store.Job{}, ValidationError{"kies de firewall waarop de velden gaan"}
+		}
+		for i := range ck.Cluster.Nodes {
+			if ck.Cluster.Nodes[i].NodeID == *c.Node {
+				only = &ck.Cluster.Nodes[i]
+			}
+		}
+		if only == nil {
+			return store.Job{}, ValidationError{"die firewall hoort niet bij dit cluster"}
+		}
+		if only.Protocol < protocol.OPNLegacySince {
+			return store.Job{}, ValidationError{fmt.Sprintf("de agent op %s is te oud voor interfaces en systeem (protocol %d, %d nodig); werk hem bij via Nodes → Agents bijwerken", only.Hostname, only.Protocol, protocol.OPNLegacySince)}
+		}
+	}
+	if err := s.protect(ctx, ck.Master.NodeID, c.Calls); err != nil {
+		return store.Job{}, err
+	}
 	if plan.Level == LevelAccess && strings.TrimSpace(c.Confirm) != ck.Cluster.Name {
 		return store.Job{}, ValidationError{fmt.Sprintf("deze wijziging kan de toegang tot de firewall raken; tik %s over om te bevestigen", ck.Cluster.Name)}
 	}
 	title := plan.Title()
 	ch := protocol.OPNChange{
-		ID: uuid.NewString(), Calls: c.Calls, Apply: plan.Apply, ConfirmWithin: within, Restore: c.Restore,
+		ID: uuid.NewString(), Calls: c.Calls, Apply: plan.Apply, ConfirmWithin: within, Restore: c.Restore, Legacy: c.Legacy,
 		Description: "ClusterForge: " + truncate(title, 180), RequireMaster: ck.Cluster.HA || ck.Master.Role != "",
 	}
 	if err := ch.Validate(); err != nil {
@@ -258,6 +322,12 @@ func (s *Service) StartChange(ctx context.Context, actor events.Actor, id uuid.U
 		p.BackupNames = append(p.BackupNames, b.Hostname)
 	}
 	p.Each = plan.Each
+	if only != nil {
+		p.Only, p.OnlyName = &only.NodeID, only.Hostname
+		if only.NodeID != ck.Master.NodeID {
+			p.Change.RequireMaster = false
+		}
+	}
 	j, err := s.enqueue(ctx, actor, ck.Cluster, KindChange, title+" op "+ck.Cluster.Name, ck.Master.NodeID, p)
 	if err != nil {
 		return store.Job{}, err
@@ -482,6 +552,10 @@ func (s *Service) runChangeSteps(ctx context.Context, j *jobs.Job, p changeParam
 	}
 	j.Done("Voorcontrole", &base)
 
+	if p.Only != nil {
+		// Velden per firewall: alleen daar, geen sync.
+		return s.applyOn(ctx, j, *p.Only, p.OnlyName, ch, p, base, "")
+	}
 	if err := s.applyOn(ctx, j, p.MasterID, p.Master, ch, p, base, ""); err != nil {
 		return err
 	}
@@ -847,6 +921,13 @@ func (s *Service) PlanChange(ctx context.Context, id uuid.UUID, c Change) (PlanV
 	}
 	if plan.Level == LevelAccess {
 		v.Confirm = ck.Cluster.Name
+	}
+	if c.Node != nil {
+		for _, n := range ck.Cluster.Nodes {
+			if n.NodeID == *c.Node {
+				v.Master, v.Backups = n.Hostname, []string{}
+			}
+		}
 	}
 	return v, nil
 }
