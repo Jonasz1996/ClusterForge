@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -331,3 +332,118 @@ func TestService(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// paramFake geeft antwoorden op basis van methode en parameters.
+type paramFake struct {
+	mu    sync.Mutex
+	calls []string
+	fn    func(method string, params map[string]any) string
+}
+
+func (f *paramFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Method string         `json:"method"`
+		Params map[string]any `json:"params"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	f.mu.Lock()
+	f.calls = append(f.calls, req.Method)
+	f.mu.Unlock()
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + f.fn(req.Method, req.Params) + `,"id":1}`))
+}
+
+func TestItemsAndSeries(t *testing.T) {
+	now := time.Unix(1763350000, 0)
+	var histParams map[string]any
+	f := &paramFake{fn: func(m string, p map[string]any) string {
+		switch m {
+		case "item.get":
+			if _, ok := p["itemids"]; ok {
+				id := p["itemids"].([]any)[0].(string)
+				switch id {
+				case "1":
+					return `[{"itemid":"1","hostid":"10101","name":"CPU utilization","key_":"system.cpu.util","value_type":"0","units":"%"}]`
+				case "2":
+					return `[{"itemid":"2","hostid":"10101","name":"OS","key_":"system.sw.os","value_type":"4","units":""}]`
+				case "3":
+					return `[{"itemid":"3","hostid":"99999","name":"vreemd","key_":"x","value_type":"0","units":""}]`
+				}
+				return `[]`
+			}
+			return `[
+				{"itemid":"1","hostid":"10101","name":"CPU utilization","key_":"system.cpu.util","value_type":"0","units":"%","lastvalue":"12.5","prevvalue":"11","lastclock":"1763349990","state":"0","error":"","tags":[{"tag":"component","value":"cpu"}]},
+				{"itemid":"2","hostid":"10101","name":"OS","key_":"system.sw.os","value_type":"4","units":"","lastvalue":"Debian 13","prevvalue":"","lastclock":"1763349000","state":"0","error":"","tags":[]},
+				{"itemid":"4","hostid":"10101","name":"Kapot","key_":"x.y","value_type":"3","units":"","lastvalue":"","prevvalue":"","lastclock":"0","state":"1","error":"Unsupported item key.","tags":[]}
+			]`
+		case "history.get":
+			histParams = p
+			// Drie metingen in het eerste stukje, één in het laatste.
+			s := now.Add(-time.Hour).Unix()
+			return `[{"clock":"` + strconv.FormatInt(s+1, 10) + `","value":"10"},{"clock":"` + strconv.FormatInt(s+2, 10) + `","value":"20"},{"clock":"` + strconv.FormatInt(s+3, 10) + `","value":"30"},{"clock":"` + strconv.FormatInt(now.Unix()-1, 10) + `","value":"5"}]`
+		case "trend.get":
+			return `[{"clock":"` + strconv.FormatInt(now.Add(-48*time.Hour).Unix(), 10) + `","value_min":"1","value_avg":"2","value_max":"9"}]`
+		}
+		return `[]`
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	s := &Service{Now: func() time.Time { return now }}
+	s.Client = func(context.Context) (API, string, error) {
+		return &zabbixagent.Client{URL: srv.URL, Token: "t"}, srv.URL, nil
+	}
+	s.snap = &Snapshot{Hosts: []Host{{HostID: "10101"}}}
+
+	if _, err := s.Items(context.Background(), "555"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("onbekende host: %v", err)
+	}
+	hi, err := s.Items(context.Background(), "10101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hi.Items) != 3 || !hi.Items[0].Numeric || hi.Items[0].Component != "cpu" || hi.Items[1].Numeric || hi.Items[2].Error != "Unsupported item key." || hi.Items[2].LastClock != nil {
+		t.Errorf("items: %+v", hi.Items)
+	}
+	n := len(f.calls)
+	if _, err := s.Items(context.Background(), "10101"); err != nil || len(f.calls) != n {
+		t.Error("tweede vraag binnen 30 s moet uit de cache komen")
+	}
+
+	se, err := s.ItemSeries(context.Background(), "1", "1h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if se.Source != "history" || se.Units != "%" || len(se.Timestamps) != len(se.Avg) || len(se.Avg) != SeriesPoints {
+		t.Fatalf("reeks: %+v", se)
+	}
+	if se.Avg[0] == nil || *se.Avg[0] != 20 || *se.Min[0] != 10 || *se.Max[0] != 30 || se.Avg[1] != nil {
+		t.Errorf("eerste stukje: %v %v %v, tweede %v", se.Avg[0], se.Min[0], se.Max[0], se.Avg[1])
+	}
+	if last := se.Avg[len(se.Avg)-1]; last == nil || *last != 5 {
+		t.Errorf("laatste stukje: %v", last)
+	}
+	if histParams["history"].(float64) != 0 {
+		t.Errorf("history-type: %v", histParams["history"])
+	}
+	se, err = s.ItemSeries(context.Background(), "1", "7d")
+	if err != nil || se.Source != "trends" {
+		t.Fatalf("trends: %+v %v", se, err)
+	}
+	found := false
+	for i := range se.Avg {
+		if se.Avg[i] != nil && *se.Avg[i] == 2 && *se.Max[i] == 9 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("trendpunt niet gevonden")
+	}
+	if _, err := s.ItemSeries(context.Background(), "2", "1h"); !errors.Is(err, ErrNotNumeric) {
+		t.Errorf("tekst: %v", err)
+	}
+	if _, err := s.ItemSeries(context.Background(), "3", "1h"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("item van een onbekende host: %v", err)
+	}
+	if _, err := s.ItemSeries(context.Background(), "1;drop", "1h"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ongeldig itemid: %v", err)
+	}
+}

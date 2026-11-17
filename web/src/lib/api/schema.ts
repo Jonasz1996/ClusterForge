@@ -4122,6 +4122,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/hosts/{hostid}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Laatste waarden van een Zabbix-host (latest data)
+         * @description Alleen voor hosts uit de laatste ronde; 30 s gecachet. Ook voor viewers.
+         */
+        get: operations["getZabbixHostItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix/items/{itemid}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Grafiek van een numeriek Zabbix-item
+         * @description Tot 24 uur uit history, langer uit trends (min, gemiddelde en max per uur); uitgedund tot ongeveer 240 punten.
+         *     Alleen voor items van hosts uit de laatste ronde; 30 s gecachet.
+         */
+        get: operations["getZabbixItemSeries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/zabbix/hosts/{hostid}/link": {
         parameters: {
             query?: never;
@@ -14142,6 +14183,42 @@ export interface components {
             jobs: string[];
             skipped: string[];
         };
+        ZabbixItem: {
+            itemid: string;
+            name: string;
+            key: string;
+            /** @description Getallen (float of unsigned); alleen daarvan is er een grafiek */
+            numeric: boolean;
+            units: string;
+            last_value: string;
+            prev_value: string;
+            /** Format: date-time */
+            last_clock: string | null;
+            /** @description De tag component; leeg zonder */
+            component: string;
+            /** @description Niet ondersteund en waarom; leeg als het item werkt */
+            error: string;
+        };
+        ZabbixHostItems: {
+            hostid: string;
+            items: components["schemas"]["ZabbixItem"][];
+            truncated: boolean;
+        };
+        ZabbixSeries: {
+            itemid: string;
+            hostid: string;
+            name: string;
+            key: string;
+            units: string;
+            range: string;
+            /** @description history of trends */
+            source: string;
+            /** @description Unix-seconden */
+            timestamps: number[];
+            avg: (number | null)[];
+            min: (number | null)[];
+            max: (number | null)[];
+        };
         ZabbixHostLinkInput: {
             /** Format: uuid */
             node_id: string | null;
@@ -21550,6 +21627,59 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getZabbixHostItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixHostItems"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getZabbixItemSeries: {
+        parameters: {
+            query?: {
+                range?: "1h" | "6h" | "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path: {
+                itemid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixSeries"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     setZabbixHostLink: {

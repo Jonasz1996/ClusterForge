@@ -39,6 +39,7 @@ type Service struct {
 	lastOK     time.Time
 	lastRun    time.Time
 	lastSaved  time.Time
+	cache      itemCache
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, agents *zabbixagent.Service, log *slog.Logger) *Service {

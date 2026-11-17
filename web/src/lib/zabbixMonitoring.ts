@@ -128,3 +128,118 @@ export function since(iso: string, now = Date.now()) {
   if (m > 0) return `${m} min`;
   return `${s} s`;
 }
+
+// --- items en grafieken (M2) ---------------------------------------------------------------
+
+export type ZabbixItem = components["schemas"]["ZabbixItem"];
+export type ZabbixSeries = components["schemas"]["ZabbixSeries"];
+export type ZabbixRange = "1h" | "6h" | "24h" | "7d" | "30d";
+export const rangeLabel: Record<ZabbixRange, string> = { "1h": "1 u", "6h": "6 u", "24h": "24 u", "7d": "7 d", "30d": "30 d" };
+
+export function useZabbixHostItems(hostid: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["zabbix-items", hostid],
+    queryFn: async () => unwrap(await api.GET("/zabbix/hosts/{hostid}/items", { params: { path: { hostid: hostid! } } })),
+    enabled: !!hostid && enabled,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useZabbixItemSeries(itemid: string | undefined, range: ZabbixRange) {
+  return useQuery({
+    queryKey: ["zabbix-series", itemid, range],
+    queryFn: async () => unwrap(await api.GET("/zabbix/items/{itemid}/series", { params: { path: { itemid: itemid! }, query: { range } } })),
+    enabled: !!itemid,
+    refetchInterval: range === "1h" || range === "6h" ? 60_000 : 300_000,
+  });
+}
+
+const numFmt = (max: number) => new Intl.NumberFormat("nl-BE", { maximumFractionDigits: max });
+
+function scaled(v: number, base: number, units: string[]) {
+  let i = 0;
+  let x = Math.abs(v);
+  while (x >= base && i < units.length - 1) {
+    x /= base;
+    i++;
+  }
+  const n = Math.sign(v) * x;
+  return `${numFmt(Math.abs(n) < 10 ? 2 : Math.abs(n) < 100 ? 1 : 0).format(n)} ${units[i]}`.trim();
+}
+
+function duration(s: number) {
+  const neg = s < 0;
+  let x = Math.abs(s);
+  if (x < 1) return `${numFmt(0).format(x * 1000)} ms`;
+  const parts: string[] = [];
+  for (const [n, l] of [
+    [86400, "d"],
+    [3600, "u"],
+    [60, "min"],
+  ] as const) {
+    if (x >= n) {
+      parts.push(`${Math.floor(x / n)} ${l}`);
+      x %= n;
+    }
+    if (parts.length === 2) break;
+  }
+  if (parts.length < 2 && x >= 1) parts.push(`${numFmt(parts.length ? 0 : 1).format(x)} s`);
+  return (neg ? "-" : "") + parts.join(" ");
+}
+
+// formatZabbix toont een waarde met de eenheid zoals Zabbix het doet: B en
+// Bps met 1024, bps en andere eenheden met 1000 (K, M, G), s en uptime als
+// duur, unixtime als datum. Een ! voor de eenheid betekent: niet omrekenen.
+export function formatZabbix(v: number, units: string): string {
+  const u = units.trim();
+  if (u.startsWith("!")) return `${numFmt(2).format(v)} ${u.slice(1)}`.trim();
+  switch (u) {
+    case "":
+      return numFmt(Math.abs(v) < 10 ? 2 : 1).format(v);
+    case "%":
+      return `${numFmt(Math.abs(v) < 10 ? 1 : 0).format(v)} %`;
+    case "B":
+      return scaled(v, 1024, ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]);
+    case "Bps":
+      return scaled(v, 1024, ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]);
+    case "bps":
+      return scaled(v, 1000, ["bps", "Kbps", "Mbps", "Gbps", "Tbps"]);
+    case "s":
+    case "uptime":
+      return duration(v);
+    case "unixtime":
+      return v > 0 ? new Date(v * 1000).toLocaleString("nl-BE") : "—";
+    case "rpm":
+    case "RPM":
+    case "°C":
+    case "C":
+      return `${numFmt(1).format(v)} ${u}`;
+  }
+  return scaled(v, 1000, ["", "K", "M", "G", "T"].map((p) => `${p}${u}`));
+}
+
+// formatItem toont de laatste waarde van een item.
+export function formatItem(it: ZabbixItem) {
+  if (!it.numeric) return it.last_value;
+  const v = Number(it.last_value);
+  return Number.isFinite(v) && it.last_value !== "" ? formatZabbix(v, it.units) : it.last_value;
+}
+
+// Belangrijkste grafieken van een Linux-host (template Linux by Zabbix agent).
+const keyItems: { label: string; match: (k: string) => boolean }[] = [
+  { label: "CPU", match: (k) => k === "system.cpu.util" || k === "system.cpu.util[,,avg1]" },
+  { label: "Geheugen", match: (k) => k === "vm.memory.utilization" },
+  { label: "Load", match: (k) => k === "system.cpu.load[all,avg1]" },
+  { label: "Schijf /", match: (k) => k === "vfs.fs.dependent.size[/,pused]" || k === "vfs.fs.size[/,pused]" },
+  { label: "Netwerk in", match: (k) => /^net\.if\.in\[("?)(eth0|ens\d+|enp\S+|vmbr0)\1(,|\])/.test(k) },
+  { label: "Netwerk uit", match: (k) => /^net\.if\.out\[("?)(eth0|ens\d+|enp\S+|vmbr0)\1(,|\])/.test(k) },
+];
+
+export function pickKeyItems(items: ZabbixItem[]) {
+  const out: { label: string; item: ZabbixItem }[] = [];
+  for (const k of keyItems) {
+    const it = items.find((i) => i.numeric && !i.error && k.match(i.key));
+    if (it) out.push({ label: k.label, item: it });
+  }
+  return out;
+}

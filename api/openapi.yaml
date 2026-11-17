@@ -4367,6 +4367,50 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ZabbixOverview" }
         "401": { $ref: "#/components/responses/Error" }
+  /zabbix/hosts/{hostid}/items:
+    get:
+      operationId: getZabbixHostItems
+      summary: Laatste waarden van een Zabbix-host (latest data)
+      description: Alleen voor hosts uit de laatste ronde; 30 s gecachet. Ook voor viewers.
+      parameters:
+        - name: hostid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixHostItems" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /zabbix/items/{itemid}/series:
+    get:
+      operationId: getZabbixItemSeries
+      summary: Grafiek van een numeriek Zabbix-item
+      description: |
+        Tot 24 uur uit history, langer uit trends (min, gemiddelde en max per uur); uitgedund tot ongeveer 240 punten.
+        Alleen voor items van hosts uit de laatste ronde; 30 s gecachet.
+      parameters:
+        - name: itemid
+          in: path
+          required: true
+          schema: { type: string }
+        - name: range
+          in: query
+          schema: { type: string, enum: ["1h", "6h", "24h", "7d", "30d"], default: "24h" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixSeries" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /zabbix/hosts/{hostid}/link:
     parameters:
       - name: hostid
@@ -14768,6 +14812,42 @@ components:
       properties:
         jobs: { type: array, items: { type: string, format: uuid } }
         skipped: { type: array, items: { type: string } }
+    ZabbixItem:
+      type: object
+      required: [itemid, name, key, numeric, units, last_value, prev_value, last_clock, component, error]
+      properties:
+        itemid: { type: string }
+        name: { type: string }
+        key: { type: string }
+        numeric: { type: boolean, description: Getallen (float of unsigned); alleen daarvan is er een grafiek }
+        units: { type: string }
+        last_value: { type: string }
+        prev_value: { type: string }
+        last_clock: { type: string, format: date-time, nullable: true }
+        component: { type: string, description: De tag component; leeg zonder }
+        error: { type: string, description: Niet ondersteund en waarom; leeg als het item werkt }
+    ZabbixHostItems:
+      type: object
+      required: [hostid, items, truncated]
+      properties:
+        hostid: { type: string }
+        items: { type: array, items: { $ref: "#/components/schemas/ZabbixItem" } }
+        truncated: { type: boolean }
+    ZabbixSeries:
+      type: object
+      required: [itemid, hostid, name, key, units, range, source, timestamps, avg, min, max]
+      properties:
+        itemid: { type: string }
+        hostid: { type: string }
+        name: { type: string }
+        key: { type: string }
+        units: { type: string }
+        range: { type: string }
+        source: { type: string, description: "history of trends" }
+        timestamps: { type: array, items: { type: integer, format: int64 }, description: Unix-seconden }
+        avg: { type: array, items: { type: number, nullable: true } }
+        min: { type: array, items: { type: number, nullable: true } }
+        max: { type: array, items: { type: number, nullable: true } }
     ZabbixHostLinkInput:
       type: object
       required: [node_id]

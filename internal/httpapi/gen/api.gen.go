@@ -4341,6 +4341,33 @@ func (e GetSocParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for GetZabbixItemSeriesParamsRange.
+const (
+	GetZabbixItemSeriesParamsRangeN1h  GetZabbixItemSeriesParamsRange = "1h"
+	GetZabbixItemSeriesParamsRangeN24h GetZabbixItemSeriesParamsRange = "24h"
+	GetZabbixItemSeriesParamsRangeN30d GetZabbixItemSeriesParamsRange = "30d"
+	GetZabbixItemSeriesParamsRangeN6h  GetZabbixItemSeriesParamsRange = "6h"
+	GetZabbixItemSeriesParamsRangeN7d  GetZabbixItemSeriesParamsRange = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetZabbixItemSeriesParamsRange enum.
+func (e GetZabbixItemSeriesParamsRange) Valid() bool {
+	switch e {
+	case GetZabbixItemSeriesParamsRangeN1h:
+		return true
+	case GetZabbixItemSeriesParamsRangeN24h:
+		return true
+	case GetZabbixItemSeriesParamsRangeN30d:
+		return true
+	case GetZabbixItemSeriesParamsRangeN6h:
+		return true
+	case GetZabbixItemSeriesParamsRangeN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetZabbixOverviewParamsWindow.
 const (
 	GetZabbixOverviewParamsWindowN24h GetZabbixOverviewParamsWindow = "24h"
@@ -14143,9 +14170,35 @@ type ZabbixHost struct {
 	Worst int `json:"worst"`
 }
 
+// ZabbixHostItems defines model for ZabbixHostItems.
+type ZabbixHostItems struct {
+	Hostid    string       `json:"hostid"`
+	Items     []ZabbixItem `json:"items"`
+	Truncated bool         `json:"truncated"`
+}
+
 // ZabbixHostLinkInput defines model for ZabbixHostLinkInput.
 type ZabbixHostLinkInput struct {
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+}
+
+// ZabbixItem defines model for ZabbixItem.
+type ZabbixItem struct {
+	// Component De tag component; leeg zonder
+	Component string `json:"component"`
+
+	// Error Niet ondersteund en waarom; leeg als het item werkt
+	Error     string                       `json:"error"`
+	Itemid    string                       `json:"itemid"`
+	Key       string                       `json:"key"`
+	LastClock nullable.Nullable[time.Time] `json:"last_clock"`
+	LastValue string                       `json:"last_value"`
+	Name      string                       `json:"name"`
+
+	// Numeric Getallen (float of unsigned); alleen daarvan is er een grafiek
+	Numeric   bool   `json:"numeric"`
+	PrevValue string `json:"prev_value"`
+	Units     string `json:"units"`
 }
 
 // ZabbixNodeLink defines model for ZabbixNodeLink.
@@ -14233,6 +14286,25 @@ type ZabbixProxy struct {
 	// State Een van: online, offline, unknown of leeg
 	State   string `json:"state"`
 	Version string `json:"version"`
+}
+
+// ZabbixSeries defines model for ZabbixSeries.
+type ZabbixSeries struct {
+	Avg    []nullable.Nullable[float32] `json:"avg"`
+	Hostid string                       `json:"hostid"`
+	Itemid string                       `json:"itemid"`
+	Key    string                       `json:"key"`
+	Max    []nullable.Nullable[float32] `json:"max"`
+	Min    []nullable.Nullable[float32] `json:"min"`
+	Name   string                       `json:"name"`
+	Range  string                       `json:"range"`
+
+	// Source history of trends
+	Source string `json:"source"`
+
+	// Timestamps Unix-seconden
+	Timestamps []int64 `json:"timestamps"`
+	Units      string  `json:"units"`
 }
 
 // ZabbixState defines model for ZabbixState.
@@ -14993,6 +15065,14 @@ type ListTestRunsParams struct {
 	Result    *TestRunResult      `form:"result,omitempty" json:"result,omitempty"`
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GetZabbixItemSeriesParams defines parameters for GetZabbixItemSeries.
+type GetZabbixItemSeriesParams struct {
+	Range *GetZabbixItemSeriesParamsRange `form:"range,omitempty" json:"range,omitempty"`
+}
+
+// GetZabbixItemSeriesParamsRange defines parameters for GetZabbixItemSeries.
+type GetZabbixItemSeriesParamsRange string
 
 // GetZabbixOverviewParams defines parameters for GetZabbixOverview.
 type GetZabbixOverviewParams struct {
@@ -16630,12 +16710,18 @@ type ServerInterface interface {
 	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
 	// (POST /zabbix-agents/test)
 	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
+	// GetZabbixHostItems Laatste waarden van een Zabbix-host (latest data)
+	// (GET /zabbix/hosts/{hostid}/items)
+	GetZabbixHostItems(w http.ResponseWriter, r *http.Request, hostid string)
 	// DeleteZabbixHostLink De handmatige koppeling weghalen (admin)
 	// (DELETE /zabbix/hosts/{hostid}/link)
 	DeleteZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string)
 	// SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
 	// (PUT /zabbix/hosts/{hostid}/link)
 	SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string)
+	// GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
+	// (GET /zabbix/items/{itemid}/series)
+	GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams)
 	// GetZabbixOverview Zabbix-monitoring (fase 33)
 	// (GET /zabbix/overview)
 	GetZabbixOverview(w http.ResponseWriter, r *http.Request, params GetZabbixOverviewParams)
@@ -18970,6 +19056,12 @@ func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetZabbixHostItems Laatste waarden van een Zabbix-host (latest data)
+// (GET /zabbix/hosts/{hostid}/items)
+func (_ Unimplemented) GetZabbixHostItems(w http.ResponseWriter, r *http.Request, hostid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // DeleteZabbixHostLink De handmatige koppeling weghalen (admin)
 // (DELETE /zabbix/hosts/{hostid}/link)
 func (_ Unimplemented) DeleteZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string) {
@@ -18979,6 +19071,12 @@ func (_ Unimplemented) DeleteZabbixHostLink(w http.ResponseWriter, r *http.Reque
 // SetZabbixHostLink Een Zabbix-host met de hand aan een node koppelen (admin)
 // (PUT /zabbix/hosts/{hostid}/link)
 func (_ Unimplemented) SetZabbixHostLink(w http.ResponseWriter, r *http.Request, hostid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetZabbixItemSeries Grafiek van een numeriek Zabbix-item
+// (GET /zabbix/items/{itemid}/series)
+func (_ Unimplemented) GetZabbixItemSeries(w http.ResponseWriter, r *http.Request, itemid string, params GetZabbixItemSeriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -29862,6 +29960,32 @@ func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixHostItems operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixHostItems(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostid" -------------
+	var hostid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostid", chi.URLParam(r, "hostid"), &hostid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixHostItems(w, r, hostid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteZabbixHostLink operation middleware
 func (siw *ServerInterfaceWrapper) DeleteZabbixHostLink(w http.ResponseWriter, r *http.Request) {
 
@@ -29905,6 +30029,48 @@ func (siw *ServerInterfaceWrapper) SetZabbixHostLink(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetZabbixHostLink(w, r, hostid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZabbixItemSeries operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixItemSeries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "itemid" -------------
+	var itemid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "itemid", chi.URLParam(r, "itemid"), &itemid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemid", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetZabbixItemSeriesParams
+
+	// ------------- Optional query parameter "range" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "range", r.URL.Query(), &params.Range, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "range"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "range", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixItemSeries(w, r, itemid, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -30787,6 +30953,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/zabbix/refresh", wrapper.RefreshZabbix)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/hosts/{hostid}/items", wrapper.GetZabbixHostItems)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix/items/{itemid}/series", wrapper.GetZabbixItemSeries)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/zabbix/hosts/{hostid}/link", wrapper.DeleteZabbixHostLink)
