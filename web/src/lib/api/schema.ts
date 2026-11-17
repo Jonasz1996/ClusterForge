@@ -5349,8 +5349,7 @@ export interface paths {
          * @description node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
          *     prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
          *     nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
-         *     Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
-         *     slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+         *     Op prod vraagt het geen code of bevestiging meer (totp_code en confirm worden genegeerd). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
          *     (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
          *     cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
          */
@@ -5393,8 +5392,8 @@ export interface paths {
         /**
          * Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
          * @description Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
-         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
-         *     tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aan- en uitzetten
+         *     vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
          */
         put: operations["setAgentUpgradeProdAuto"];
         post?: never;
@@ -12947,9 +12946,9 @@ export interface components {
             all?: boolean;
             /** @description Met all: ook de agents op prod, één prodcluster na het andere */
             include_prod?: boolean;
-            /** @description Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik */
+            /** @description Wordt genegeerd: agents op prod bijwerken vraagt geen code meer */
             totp_code?: string;
-            /** @description De slug van het prodcluster */
+            /** @description Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer */
             confirm?: string;
         };
         AgentEndpointsOverview: {
@@ -23103,6 +23102,7 @@ export interface operations {
             content: {
                 "application/json": {
                     enabled: boolean;
+                    /** @description Wordt genegeerd */
                     totp_code?: string;
                 };
             };

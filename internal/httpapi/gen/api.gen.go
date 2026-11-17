@@ -4421,14 +4421,14 @@ type AgentUpgradeInput struct {
 	All       *bool               `json:"all,omitempty"`
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
 
-	// Confirm De slug van het prodcluster
+	// Confirm Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer
 	Confirm *string `json:"confirm,omitempty"`
 
 	// IncludeProd Met all: ook de agents op prod, één prodcluster na het andere
 	IncludeProd *bool                 `json:"include_prod,omitempty"`
 	NodeIds     *[]openapi_types.UUID `json:"node_ids,omitempty"`
 
-	// TotpCode Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik
+	// TotpCode Wordt genegeerd: agents op prod bijwerken vraagt geen code meer
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
@@ -13995,7 +13995,9 @@ type SetAgentUpgradeAutoJSONBody struct {
 
 // SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
 type SetAgentUpgradeProdAutoJSONBody struct {
-	Enabled  bool    `json:"enabled"`
+	Enabled bool `json:"enabled"`
+
+	// TotpCode Wordt genegeerd
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
