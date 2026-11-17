@@ -20,6 +20,7 @@ import {
   type BackupSandbox,
   type BackupVerification,
 } from "@/lib/verify";
+import { agentServerURL } from "@/lib/agentEndpoints";
 
 const linkClass = "text-brand-600 hover:underline dark:text-brand-500";
 const dateFmt = new Intl.DateTimeFormat("nl-BE", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -38,7 +39,7 @@ export function deepProblem(run: TestRun | undefined) {
 }
 
 function origin() {
-  return typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
+  return agentServerURL();
 }
 
 // AgentSteps zijn de drie stappen als de back-up geen cf-agent met verify

@@ -120,6 +120,16 @@ type Agent struct {
 	RollbackAfter time.Duration
 	// Restart herstart de agent na een update; nil is systemctl restart.
 	Restart func()
+	// ConfigPath is agent.json; leeg is DefaultConfigPath. Herconfigureren
+	// schrijft het.
+	ConfigPath string
+	// ReconfigRollbackAfter is hoe lang de agent na een herconfiguratie
+	// heeft om met de server te praten; nul is
+	// protocol.ReconfigureRollbackAfter.
+	ReconfigRollbackAfter time.Duration
+	// TestNATS test een nieuw NATS-adres voor een herconfiguratie; nil
+	// verbindt echt. Tests vervangen het.
+	TestNATS func(ctx context.Context, c Config) error
 
 	nc    *nats.Conn
 	conns ConnTracker
@@ -148,6 +158,11 @@ type Agent struct {
 	rolledBack  atomic.Value
 	confirmed   atomic.Bool
 	unconfirmed atomic.Bool
+	// reconfRolledBack is het NATS-adres van een herconfiguratie die
+	// teruggezet werd; reconfConfirmed of deze agent zijn herconfiguratie
+	// al bevestigde.
+	reconfRolledBack atomic.Value
+	reconfConfirmed  atomic.Bool
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -294,6 +309,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	a.resumeUpgrade(ctx)
+	a.resumeReconfigure(ctx)
 	a.firewallResume(ctx)
 	a.firewallMonitor(ctx)
 	a.releaseHolds(ctx)
@@ -365,6 +381,10 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 	}
 	hb.Arch = runtime.GOARCH
 	hb.UpgradeRolledBack, _ = a.rolledBack.Load().(string)
+	hb.ReconfigureRolledBack, _ = a.reconfRolledBack.Load().(string)
+	if a.Config != nil {
+		hb.ServerURL, hb.NatsURL = a.Config.ServerURL, a.Config.NatsURL
+	}
 	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {
 		a.Log.Warn("heartbeat sturen mislukt", "err", err)
 		return
@@ -536,6 +556,7 @@ func (a *Agent) sendFacts(ctx context.Context) error {
 	}
 	// De server nam iets van deze agent aan: een nieuwe agent werkt.
 	a.confirmUpgrade(ctx)
+	a.confirmReconfigure(ctx)
 	return nil
 }
 

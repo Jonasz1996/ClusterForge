@@ -155,7 +155,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_SESSION_MAX_AGE` | `720h` | Sessie verloopt hoogstens zo lang na het inloggen, ook als ze steeds gebruikt wordt; je actieve sessies zie en beëindig je bij Instellingen → Sessies |
 | `CF_LOG_LEVEL` | `info` | `debug`, `info`, `warn` of `error` |
 | `CF_NATS_LISTEN` | `:4222` | Adres waarop agents met NATS verbinden |
-| `CF_NATS_ADVERTISE` | (leeg) | `host[:poort]` waarmee agents NATS bereiken; leeg betekent de hostnaam waarmee de agent zich aanmeldt |
+| `CF_NATS_ADVERTISE` | (leeg) | `host[:poort]` waarmee agents NATS bereiken; leeg betekent de hostnaam waarmee de agent zich aanmeldt. Is het gezet, dan gebruiken het installcommando en nieuwe agents standaard `http://<host>:8080` (behalve als `CF_BIND` 127.0.0.1 is); anders instellen bij Instellingen → Adres voor agents |
 | `CF_AGENT_DIR` | `/usr/share/clusterforge/agents` | Map met de `cf-agent`-binaries die de server aanbiedt om te downloaden |
 | `CF_VICTORIAMETRICS_URL` | (leeg) | VictoriaMetrics voor de metrics, bijvoorbeeld `http://victoriametrics:8428`; leeg zet de grafieken uit |
 | `CF_GRAFANA_NODE_URL` | (leeg) | Link naar Grafana bij elke node, met `{hostname}`, `{node_id}`, `{cluster}`, `{cluster_id}` en `{env}` |
