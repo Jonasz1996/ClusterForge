@@ -381,3 +381,28 @@ export function useAckZabbixProblem() {
     },
   });
 }
+
+// Onderhoud naar Zabbix (M6): staat een node in onderhoud, dan zet
+// ClusterForge in Zabbix een onderhoud op zijn host.
+export type ZabbixMaintenance = components["schemas"]["ZabbixMaintenance"];
+
+const maintKey = ["zabbix-maintenance"] as const;
+
+export function useZabbixMaintenance() {
+  return useQuery({
+    queryKey: maintKey,
+    queryFn: async () => unwrap(await api.GET("/zabbix/maintenance")),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useSetZabbixMaintenance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sync: boolean) => unwrap(await api.PUT("/zabbix/maintenance", { body: { sync } })),
+    onSuccess: (m) => {
+      qc.setQueryData(maintKey, m);
+      void qc.invalidateQueries({ queryKey: key });
+    },
+  });
+}

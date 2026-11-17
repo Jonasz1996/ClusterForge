@@ -37,8 +37,18 @@ plan; de rest van het document is het oorspronkelijke plan.
   en `zabbix.problem_resolved` in het logboek, en daarmee in de tijdlijn, What
   Broke en de assistent. Een incident openen vanuit een Zabbix-probleem is nog
   niet gebouwd.
-- **Migraties**: 00100 (`zabbix_snapshots`, `zabbix_host_links`) en 00101
-  (`zabbix_dashboards`). Fase 32 (PBS) gebruikt geen migraties. Goose draait
+- **Schrijven (M6)**: problemen bevestigen (bericht, ernst, sluiten) via
+  `event.acknowledge`, met wachtwoord of TOTP voor prod-nodes en een regel in
+  het logboek per node. Onderhoud naar Zabbix staat standaard uit (Zabbix →
+  Overzicht → Onderhoud naar Zabbix); aan zet ClusterForge per node in
+  onderhoud een onderhoud "met dataverzameling" van 7 dagen op zijn host,
+  verlengt het met `maintenance.update` als er minder dan 2 dagen over is, en
+  haalt alleen zijn eigen onderhouden weer weg. Een onderhoud met de naam van
+  ClusterForge dat hij kwijt was, neemt hij over. Het API-token heeft daarvoor
+  schrijfrechten nodig; anders staat de uitleg op de kaart.
+- **Migraties**: 00100 (`zabbix_snapshots`, `zabbix_host_links`), 00101
+  (`zabbix_dashboards`) en 00102 (`zabbix_monitor_settings`,
+  `zabbix_maintenances`). Fase 32 (PBS) gebruikt geen migraties. Goose draait
   sinds fase 33 met `WithAllowOutofOrder`, zodat parallelle fases elkaar niet
   blokkeren.
 

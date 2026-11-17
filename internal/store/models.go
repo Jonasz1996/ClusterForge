@@ -2005,6 +2005,21 @@ type ZabbixHostLink struct {
 	UpdatedBy *uuid.UUID
 }
 
+type ZabbixMaintenance struct {
+	NodeID        uuid.UUID
+	Hostid        string
+	Maintenanceid string
+	ActiveTill    time.Time
+	CreatedAt     time.Time
+}
+
+type ZabbixMonitorSetting struct {
+	ID              bool
+	MaintenanceSync bool
+	UpdatedAt       time.Time
+	UpdatedBy       *uuid.UUID
+}
+
 type ZabbixSnapshot struct {
 	At           time.Time
 	Disaster     int32

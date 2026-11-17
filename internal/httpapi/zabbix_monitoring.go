@@ -315,3 +315,36 @@ func (s *Server) AcknowledgeZabbixProblem(w http.ResponseWriter, r *http.Request
 	s.kickZabbixMon()
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (s *Server) GetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+	m, err := s.zabbixMon.Maintenance(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) SetZabbixMaintenance(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ZabbixMaintenanceInput
+	if !decode(w, r, &in) {
+		return
+	}
+	uid := p.User.ID
+	if err := s.zabbixMon.SetMaintenanceSync(r.Context(), events.User(uid), &uid, in.Sync); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	// Meteen een ronde, zodat het onderhoud er nu staat (of weg is).
+	_ = s.zabbixMon.Refresh(r.Context())
+	m, err := s.zabbixMon.Maintenance(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}

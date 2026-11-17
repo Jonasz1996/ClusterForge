@@ -4285,6 +4285,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Onderhoud naar Zabbix: instelling en de onderhouden die ClusterForge zette */
+        get: operations["getZabbixMaintenance"];
+        /**
+         * Onderhoud naar Zabbix aan- of uitzetten (admin)
+         * @description Aan zet een onderhoud (met dataverzameling) in Zabbix voor elke node die in ClusterForge in onderhoud staat; uit haalt de onderhouden van ClusterForge weer weg.
+         */
+        put: operations["setZabbixMaintenance"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/zabbix/hosts/{hostid}/link": {
         parameters: {
             query?: never;
@@ -14381,6 +14402,28 @@ export interface components {
             totp_code?: string;
             password?: string;
         };
+        ZabbixMaintenanceInput: {
+            sync: boolean;
+        };
+        ZabbixMaintenance: {
+            sync: boolean;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string | null;
+            /** @description De laatste fout bij het doorzetten; leeg als het lukte */
+            error: string;
+            active: {
+                /** Format: uuid */
+                node_id: string;
+                hostname: string;
+                hostid: string;
+                maintenanceid: string;
+                /** Format: date-time */
+                active_till: string;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+        };
         ZabbixItem: {
             itemid: string;
             name: string;
@@ -22161,6 +22204,54 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    getZabbixMaintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMaintenance"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setZabbixMaintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixMaintenanceInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixMaintenance"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     setZabbixHostLink: {

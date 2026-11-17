@@ -44,6 +44,8 @@ type Service struct {
 	// logged: de problemen die al als event in het logboek staan (alleen
 	// onder run).
 	logged map[string]loggedProblem
+	// maintErr: de laatste fout van het onderhoud naar Zabbix.
+	maintErr string
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, agents *zabbixagent.Service, log *slog.Logger) *Service {
@@ -129,6 +131,14 @@ func (s *Service) Tick(ctx context.Context) error {
 					s.mu.Unlock()
 					s.save(ctx, &snap, now)
 					s.logProblems(ctx, &snap, now)
+					merr := ""
+					if err := s.syncMaintenance(ctx, api, nodes, &snap, now); err != nil {
+						merr = err.Error()
+						s.log.Warn("Zabbix-monitoring: onderhoud", "err", err)
+					}
+					s.mu.Lock()
+					s.maintErr = merr
+					s.mu.Unlock()
 					if s.Changed != nil {
 						s.Changed()
 					}

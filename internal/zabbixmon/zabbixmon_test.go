@@ -733,3 +733,124 @@ func TestAcknowledge(t *testing.T) {
 		t.Errorf("niet te sluiten: %v", err)
 	}
 }
+
+func TestSyncMaintenance(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	var nodeID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, primary_ip) VALUES ('db1', '192.168.10.191') RETURNING id`).Scan(&nodeID); err != nil {
+		t.Fatal(err)
+	}
+	type call struct {
+		method string
+		params any
+	}
+	var calls []call
+	deleteGone, createExists := false, false
+	f := &paramFake{fn: func(m string, p map[string]any) string {
+		calls = append(calls, call{m, p})
+		switch m {
+		case "maintenance.create":
+			if createExists {
+				return `ERR:Maintenance "ClusterForge: db1" already exists.`
+			}
+			return `{"maintenanceids":["31"]}`
+		case "maintenance.update":
+			return `{"maintenanceids":["` + p["maintenanceid"].(string) + `"]}`
+		case "maintenance.get":
+			return `[{"maintenanceid":"77"}]`
+		case "maintenance.delete":
+			if deleteGone {
+				return `ERR:No permissions to referred object or it does not exist!`
+			}
+			return `{"maintenanceids":["31"]}`
+		}
+		return `[]`
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	s := NewService(pool, events.NewWriter(store.New(pool), nil), nil, nil)
+	api := &zabbixagent.Client{URL: srv.URL, Token: "t"}
+	now := time.Unix(1763350000, 0)
+	node := CFNode{ID: nodeID, Hostname: "db1", Lifecycle: "maintenance"}
+	snap := &Snapshot{Hosts: []Host{{HostID: "10101", Enabled: true, Node: &NodeLink{NodeID: nodeID, Hostname: "db1"}}}}
+	sync := func(n CFNode, at time.Time) {
+		t.Helper()
+		calls = nil
+		if err := s.syncMaintenance(ctx, api, []CFNode{n}, snap, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(action string) int {
+		var c int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE action = $1`, action).Scan(&c)
+		return c
+	}
+
+	// Uit: niets.
+	sync(node, now)
+	if len(calls) != 0 {
+		t.Fatalf("uit maar toch: %v", calls)
+	}
+	if err := s.SetMaintenanceSync(ctx, events.System(), nil, true); err != nil {
+		t.Fatal(err)
+	}
+	// Aan: een onderhoud op de host, één keer.
+	sync(node, now)
+	if len(calls) != 1 || calls[0].method != "maintenance.create" {
+		t.Fatalf("create: %v", calls)
+	}
+	p := calls[0].params.(map[string]any)
+	if p["name"] != "ClusterForge: db1 ("+nodeID.String()[:8]+")" || p["active_till"].(float64) != float64(now.Truncate(time.Minute).Add(MaintenanceFor).Unix()) {
+		t.Errorf("parameters: %v", p)
+	}
+	sync(node, now.Add(time.Hour))
+	if len(calls) != 0 {
+		t.Errorf("tweede ronde moet niets doen: %v", calls)
+	}
+	m, err := s.Maintenance(ctx)
+	if err != nil || !m.Sync || len(m.Active) != 1 || m.Active[0].MaintenanceID != "31" || m.Active[0].Hostname != "db1" {
+		t.Fatalf("overzicht: %+v %v", m, err)
+	}
+	// Bijna verlopen: verlengen met update, geen nieuw begin.
+	later := now.Add(MaintenanceFor - MaintenanceRenew + time.Hour)
+	sync(node, later)
+	if len(calls) != 1 || calls[0].method != "maintenance.update" {
+		t.Fatalf("verlengen: %v", calls)
+	}
+	if m, _ := s.Maintenance(ctx); !m.Active[0].ActiveTill.Equal(later.Truncate(time.Minute).Add(MaintenanceFor)) {
+		t.Errorf("nieuwe einddatum: %v", m.Active[0].ActiveTill)
+	}
+	if count("zabbix.maintenance_started") != 1 {
+		t.Error("verlengen is geen nieuw begin")
+	}
+	// Uit onderhoud: weg, ook als iemand het in Zabbix al weghaalde.
+	deleteGone = true
+	node.Lifecycle = "active"
+	sync(node, later)
+	if len(calls) != 1 || calls[0].method != "maintenance.delete" {
+		t.Fatalf("delete: %v", calls)
+	}
+	if m, _ := s.Maintenance(ctx); len(m.Active) != 0 || count("zabbix.maintenance_ended") != 1 {
+		t.Errorf("na het einde: %+v", m.Active)
+	}
+	// Een onderhoud met dezelfde naam dat ClusterForge kwijt was: overnemen.
+	createExists = true
+	node.Lifecycle = "maintenance"
+	sync(node, later)
+	if len(calls) != 3 || calls[1].method != "maintenance.get" || calls[2].method != "maintenance.update" {
+		t.Fatalf("overnemen: %v", calls)
+	}
+	if m, _ := s.Maintenance(ctx); len(m.Active) != 1 || m.Active[0].MaintenanceID != "77" {
+		t.Errorf("overgenomen: %+v", m.Active)
+	}
+	// Doorzetten uit: alles weg.
+	deleteGone = false
+	if err := s.SetMaintenanceSync(ctx, events.System(), nil, false); err != nil {
+		t.Fatal(err)
+	}
+	sync(node, later)
+	if m, _ := s.Maintenance(ctx); len(m.Active) != 0 || m.Sync {
+		t.Errorf("uitgezet: %+v", m)
+	}
+}
