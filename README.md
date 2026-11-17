@@ -1441,6 +1441,26 @@ van de agent of de server breekt de run niet af, en de taak leest daarna
 verder. Spec, uitvoer en stand staan in `/var/lib/clusterforge/runs/<id>`;
 de laatste twintig runs blijven bewaard.
 
+## Zabbix-agents
+
+Op de pagina **Zabbix-agents** (onder Monitoring) zet ClusterForge zabbix-agent2 op de nodes met een
+ClusterForge-agent, zonder installscript per node:
+
+- **Eigen PSK per node.** Elke node krijgt een eigen sleutel van 256 bit (identiteit `cf-<hostnaam>`), versleuteld
+  bewaard met de masterkey. Toepassen zet de sleutel eerst op de node en meteen daarna via de Zabbix API bij de host,
+  zodat de host hooguit enkele seconden onbereikbaar is. Bestaat de host nog niet, dan maakt ClusterForge hem aan
+  (groep, templates, eventueel een proxy; nodes met Docker krijgen de Docker-template erbij). **Nieuwe sleutel**
+  roteert de PSK van een node.
+- **Installatie.** De repository van Zabbix (versie instelbaar, standaard 8.0) voor Debian of Ubuntu, `zabbix-agent2`,
+  een beheerde `zabbix_agent2.conf` (Server, ServerActive, Hostname, HostMetadata, TLS met PSK). Een vorige config
+  blijft staan als `zabbix_agent2.conf.voor-clusterforge`; eigen instellingen horen in `zabbix_agent2.d/`. Waar Docker
+  draait, komen de Docker-plugin en de groep `docker` voor de gebruiker zabbix erbij. De oude `zabbix-agent` gaat uit.
+- **Automatisch.** Met de instelling aan krijgt elke node met een agent zabbix-agent2, ook nieuwe nodes, en opnieuw na
+  een gewijzigde instelling of een nieuwe sleutel. Prod alleen met **Ook productie** (één keer TOTP); handmatig
+  toepassen op prod vraagt een code.
+- **Zabbix API.** Een API-token (Zabbix: Users → API tokens) van een gebruiker die hosts mag aanmaken en aanpassen,
+  versleuteld bewaard en nooit teruggegeven; **Zabbix API testen** probeert het.
+
 ## CrowdSec
 
 ClusterForge installeert en beheert [CrowdSec](https://www.crowdsec.net/) op de nodes, met een eigen pagina
