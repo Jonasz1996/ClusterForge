@@ -16,6 +16,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentdist"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
+	"github.com/Jonasz1996/clusterforge/internal/aiverslag"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
@@ -50,6 +51,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
@@ -60,6 +62,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
@@ -116,7 +119,10 @@ type Server struct {
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
 	pbs          *pbs.Service
+	truenas      *truenas.Service
+	aiverslag    *aiverslag.Service
 	opnsense     *opnsense.Service
+	publish      *publish.Service
 	docker       *dockerhost.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
@@ -133,6 +139,9 @@ type Server struct {
 	throttle *events.Throttle
 	// dashCache houdt de cijfers van de dashboard-API even bij.
 	dashCache dashboardCache
+	// homeCache houdt de apps van de homepage-API v2 even bij (fase 36).
+	homeCache homeAppsCache
+	homeStats appStatsCache
 }
 
 var _ gen.ServerInterface = (*Server)(nil)
@@ -216,8 +225,14 @@ type Deps struct {
 	PVEHosts *pvehost.Service
 	// PBS beheert de Proxmox Backup Servers (fase 32).
 	PBS *pbs.Service
+	// TrueNAS beheert TrueNAS SCALE (fase 37).
+	TrueNAS *truenas.Service
+	// AIVerslag koppelt met AI-verslag (fase 38).
+	AIVerslag *aiverslag.Service
 	// OPNsense beheert de OPNsense-firewalls (fase 34).
 	OPNsense *opnsense.Service
+	// Publish beheert NPM en Authentik (fase 35).
+	Publish *publish.Service
 	// Docker is Docker zoals Portainer (fase 28).
 	Docker  *dockerhost.Service
 	Version string
@@ -266,7 +281,10 @@ func New(d Deps) *Server {
 		security:     d.Security,
 		pvehosts:     d.PVEHosts,
 		pbs:          d.PBS,
+		truenas:      d.TrueNAS,
+		aiverslag:    d.AIVerslag,
 		opnsense:     d.OPNsense,
+		publish:      d.Publish,
 		docker:       d.Docker,
 		recipes:      recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
@@ -305,6 +323,22 @@ func (s *Server) Handler() http.Handler {
 		api.Use(middleware.NoCache)
 		// De console (fase 26 M7) is een websocket, buiten de OpenAPI.
 		api.With(s.requireSession).Get("/pve/console/{session}", s.pveConsoleSocket)
+		// Homepage-apps (fase 36), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/home-apps", s.listHomeApps)
+		api.With(s.requireSession).Post("/home-apps/override", s.saveHomeAppOverride)
+		api.With(s.requireSession).Post("/home-apps/doubt", s.decideHomeAppDoubt)
+		// TrueNAS (fase 37), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/truenas", s.listTrueNAS)
+		api.With(s.requireSession).Get("/truenas/{node}/overview", s.trueNASOverview)
+		api.With(s.requireSession).Get("/truenas/{node}/api", s.trueNASGet)
+		api.With(s.requireSession).Post("/truenas/{node}/call", s.trueNASCall)
+		// AI-verslag (fase 38), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/aiverslag", s.listAIV)
+		api.With(s.requireSession).Get("/aiverslag/summary", s.aivSummary)
+		api.With(s.requireSession).Get("/aiverslag/{node}/overview", s.aivOverview)
+		api.With(s.requireSession).Get("/aiverslag/{node}/api", s.aivGet)
+		api.With(s.requireSession).Post("/aiverslag/{node}/call", s.aivCall)
+		api.With(s.requireSession).Post("/aiverslag/{node}/install", s.aivInstall)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},
@@ -322,6 +356,12 @@ func (s *Server) Handler() http.Handler {
 	r.Route(dashboardBase, func(api chi.Router) {
 		api.Use(middleware.NoCache)
 		s.dashboardRoutes(api)
+	})
+	// Zonder middleware.NoCache: die wist If-None-Match, en de homepage
+	// vraagt de indeling met een ETag. Cache-Control: no-store zet
+	// requireAPIToken zelf.
+	r.Route(dashboardV2Base, func(api chi.Router) {
+		s.dashboardV2Routes(api)
 	})
 	r.Get("/install/agent.sh", agentdist.InstallScript)
 	r.Get("/install/golden-image.sh", agentdist.GoldenImageScript)

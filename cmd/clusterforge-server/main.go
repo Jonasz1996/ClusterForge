@@ -32,6 +32,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentconf"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
+	"github.com/Jonasz1996/clusterforge/internal/aiverslag"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
@@ -67,6 +68,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
@@ -79,6 +81,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
@@ -273,6 +276,11 @@ func serve() error {
 	pbsSvc := pbs.NewService(pool, ev, log, runner, bus)
 	pbsSvc.Box, pbsSvc.Hosts = box, pvh
 	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
+	tnSvc := truenas.NewService(pool, ev, log, runner, bus)
+	aivSvc := aiverslag.NewService(pool, ev, log, runner, bus)
+	aivSvc.Version = version
+	pub := publish.NewService(pool, ev, log, runner, bus, box)
+	pub.Sync = crons
 	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
@@ -460,12 +468,18 @@ func serve() error {
 	goLoop(ctx, log, "crowdsec", csec.Loop)
 	goLoop(ctx, log, "zabbixagent", zba.Loop)
 	goLoop(ctx, log, "opnsense", opnSvc.Loop)
+	goLoop(ctx, log, "opnflows", opnSvc.FlowsLoop)
+	goLoop(ctx, log, "opnauto", opnSvc.AutoLoop)
+	goLoop(ctx, log, "publish", pub.Loop)
+	goLoop(ctx, log, "publish-feeds", pub.FeedLoop)
 	goLoop(ctx, log, "zabbixmon", zbm.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)
 	goLoop(ctx, log, "soc", socs.Run)
 	goLoop(ctx, log, "docker", dkr.Loop)
 	goLoop(ctx, log, "pbs", pbsSvc.Watch)
+	goLoop(ctx, log, "truenas", tnSvc.Watch)
+	goLoop(ctx, log, "aiverslag", aivSvc.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -483,7 +497,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, OPNsense: opnSvc, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

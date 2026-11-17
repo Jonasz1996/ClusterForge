@@ -317,3 +317,87 @@ func (s *Server) DownloadOpnsenseBackup(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
 }
+
+func (s *Server) GetOpnsenseFlows(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID, params gen.GetOpnsenseFlowsParams) {
+	q := opnsense.FlowQuery{}
+	if params.Window != nil {
+		q.Window = string(*params.Window)
+	}
+	if params.Action != nil {
+		q.Action = string(*params.Action)
+	}
+	if params.Q != nil {
+		q.Q = *params.Q
+	}
+	v, err := s.opnsense.Flows(r.Context(), nodeId, q)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) GetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	v, err := s.opnsense.Auto(r.Context(), nodeId)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) SetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		opnsense.AutoSettings
+		opnConfirmInput
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	toManaged, err := s.opnsense.AutoChangesToManaged(r.Context(), nodeId, in.AutoSettings)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	if toManaged && !s.opnConfirm(w, r, p, nodeId, in.Password, in.TotpCode, "opnsense_auto", false) {
+		return
+	}
+	id := p.User.ID
+	st, err := s.opnsense.SetAuto(r.Context(), events.User(p.User.ID), &id, nodeId, in.AutoSettings)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Keys []string `json:"keys"`
+		opnConfirmInput
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Keys) > 200 {
+		writeError(w, http.StatusBadRequest, "invalid_input", "te veel voorstellen tegelijk")
+		return
+	}
+	if !s.opnConfirm(w, r, p, nodeId, in.Password, in.TotpCode, "opnsense_auto_apply", false) {
+		return
+	}
+	j, err := s.opnsense.ApplyAuto(r.Context(), events.User(p.User.ID), nodeId, in.Keys)
+	if err != nil {
+		s.opnError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}

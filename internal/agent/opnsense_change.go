@@ -508,6 +508,11 @@ func (a *Agent) handleOPN(ctx context.Context, req protocol.PVERequest) protocol
 		data, err = c.opnRevision(req.Path)
 	case protocol.OPNOpFacts:
 		data, err = json.Marshal(c.opnsense(ctx))
+	case protocol.OPNOpFilterLog:
+		var res *protocol.FilterLogResult
+		if res, err = c.opnFilterLog(); err == nil {
+			data, err = json.Marshal(res)
+		}
 	case protocol.OPNOpBackup:
 		var b []byte
 		if b, err = os.ReadFile(c.path(opnConfigXML)); err == nil {

@@ -99,6 +99,27 @@ export function homepageYaml(
       `            - field: available`,
       `              label: Bereikbaar`,
     );
+    // AI-verslag (fase 38): dreigingsniveau en netwerkscore van de AI.
+    lines.push(
+      `    - AI-verslag:`,
+      `        icon: mdi-robot`,
+      `        href: ${origin}/aiverslag`,
+      `        description: AI-verslag via ClusterForge`,
+      `        widget:`,
+      `          type: customapi`,
+      `          url: ${origin}${base}/aiverslag`,
+      `          token: ${token}`,
+      `          refreshInterval: 60000`,
+      `          mappings:`,
+      `            - field: level_label`,
+      `              label: Niveau`,
+      `            - field: score`,
+      `              label: Score`,
+      `            - field: incidents`,
+      `              label: Incidenten`,
+      `            - field: unseen_alarms`,
+      `              label: Alarmen`,
+    );
   }
   for (const c of clusters) {
     lines.push(

@@ -65,6 +65,15 @@ type Agent struct {
 	// Dial verbindt met de oude MariaDB bij een verhuizing; nil is
 	// net.Dialer.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// WebDial verbindt voor de publicatie (fase 35): lokale API's, de
+	// ontdekking en de controle van een adres; nil is net.Dialer. Tests
+	// sturen het naar een testserver.
+	WebDial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// NPMSnapshotDir en NPMContainer: waar de kopieën van NPM staan (leeg is
+	// /var/lib/cf-npm/cf-snapshots) en welke container NPM is (leeg: de
+	// container met image nginx-proxy-manager, cf-npm eerst). Voor tests.
+	NPMSnapshotDir string
+	NPMContainer   string
 	// DumpDir is de map met de dumps van de databases; leeg is
 	// protocol.DBDumpDir. Tests gebruiken een map.
 	DumpDir string
@@ -260,6 +269,9 @@ func (a *Agent) Connect() error {
 		return err
 	}
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDocker), a.onDocker); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectWeb), a.onWeb); err != nil {
 		return err
 	}
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectPVE), a.onPVE); err != nil {

@@ -244,6 +244,18 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		s.pbsAttention(add)
 	}
 
+	// TrueNAS (fase 37): pools, schijven, mislukte taken en updates, uit
+	// de laatste achtergrondronde.
+	if s.truenas != nil {
+		s.trueNASAttention(add)
+	}
+
+	// AI-verslag (fase 38): dreigingsniveau, ongeziene alarmen, diensten,
+	// oude analyse en schijf, uit de laatste achtergrondronde.
+	if s.aiverslag != nil {
+		s.aivAttention(add)
+	}
+
 	// Zabbix-monitoring (fase 33): API, proxy, HA, problemen die niemand
 	// bevestigt en nodes die Zabbix niet ziet.
 	if s.zabbixMon != nil {
@@ -275,6 +287,25 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 			}
 		} else {
 			s.log.Warn("OPNsense-aandacht", "err", err)
+		}
+	}
+
+	// Publicatie (fase 35): NPM of Authentik onbereikbaar, drift, hosts
+	// met een fout of zonder VIP.
+	if s.publish != nil {
+		if ns, err := s.publish.Notices(ctx); err == nil {
+			for _, n := range ns {
+				tone, detail := amber, n.Detail
+				if n.Red {
+					tone = red
+				}
+				if len(n.Names) > 0 {
+					detail = names(n.Names)
+				}
+				add(n.ID, tone, n.Title, detail, n.Href, n.Count)
+			}
+		} else {
+			s.log.Warn("Publicatie-aandacht", "err", err)
 		}
 	}
 

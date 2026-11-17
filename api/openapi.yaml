@@ -5395,6 +5395,79 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/flows:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseFlows
+      summary: Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40)
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ["1h", "24h", "7d", "30d"] } }
+        - { name: action, in: query, required: false, schema: { type: string, enum: ["block", "pass"] } }
+        - { name: q, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Stromen, regels met hun treffers en de stand van het lezen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/auto:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOpnsenseAuto
+      summary: Automatisch beheer van het cluster (fase 40) - de stand per soort en de voorstellen voor aliassen, DNS-overrides en DHCP-reservaties
+      responses:
+        "200":
+          description: Stand, voorstellen, conflicten en wat al klopt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setOpnsenseAuto
+      summary: De stand per soort (uit, voorbeeld, beheerd), het domein en de genegeerde voorstellen (admin; beheerd aanzetten op prod met code of wachtwoord)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: De bewaarde stand
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /opnsense/firewalls/{nodeId}/auto/apply:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: applyOpnsenseAuto
+      summary: Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /opnsense/firewalls/{nodeId}/drift:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5460,6 +5533,180 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /publish/settings:
+    get:
+      operationId: getPublishSettings
+      summary: Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: savePublishSettings
+      summary: Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/test/{what}:
+    parameters:
+      - { name: what, in: path, required: true, schema: { type: string, enum: [npm, authentik] } }
+    post:
+      operationId: testPublishLink
+      summary: De koppeling met NPM of Authentik proberen via de agent (admin)
+      responses:
+        "200":
+          description: Wat de agent zag
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /publish/overview:
+    get:
+      operationId: getPublishOverview
+      summary: Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/traffic:
+    get:
+      operationId: getPublishTraffic
+      summary: Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ["1h", "24h", "7d"] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/logins:
+    get:
+      operationId: getPublishLogins
+      summary: Logins en mislukte logins in Authentik, per gebruiker, IP en app (fase 39)
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ["1h", "24h", "7d"] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/refresh:
+    post:
+      operationId: refreshPublish
+      summary: Diensten, NPM en Authentik nu opnieuw lezen (admin)
+      responses:
+        "200":
+          description: Het nieuwe overzicht
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/plan:
+    post:
+      operationId: planPublish
+      summary: Wat een actie zou doen, zonder iets te veranderen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/actions:
+    post:
+      operationId: startPublish
+      summary: Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: Taak aangemaakt, met het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /publish/adopt:
+    post:
+      operationId: adoptPublishHosts
+      summary: Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: Aantal overgenomen hosts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/hosts/{hostId}/accept:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: acceptPublishDrift
+      summary: Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+      responses:
+        "204": { description: Aanvaard }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/hosts/{hostId}/release:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: releasePublishHost
+      summary: Een host niet langer beheren; hij blijft in NPM staan (admin)
+      responses:
+        "204": { description: Losgelaten }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters

@@ -4296,6 +4296,90 @@ func (e GetMapParamsLayer) Valid() bool {
 	}
 }
 
+// Defines values for GetOpnsenseFlowsParamsWindow.
+const (
+	GetOpnsenseFlowsParamsWindowN1h  GetOpnsenseFlowsParamsWindow = "1h"
+	GetOpnsenseFlowsParamsWindowN24h GetOpnsenseFlowsParamsWindow = "24h"
+	GetOpnsenseFlowsParamsWindowN30d GetOpnsenseFlowsParamsWindow = "30d"
+	GetOpnsenseFlowsParamsWindowN7d  GetOpnsenseFlowsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetOpnsenseFlowsParamsWindow enum.
+func (e GetOpnsenseFlowsParamsWindow) Valid() bool {
+	switch e {
+	case GetOpnsenseFlowsParamsWindowN1h:
+		return true
+	case GetOpnsenseFlowsParamsWindowN24h:
+		return true
+	case GetOpnsenseFlowsParamsWindowN30d:
+		return true
+	case GetOpnsenseFlowsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOpnsenseFlowsParamsAction.
+const (
+	GetOpnsenseFlowsParamsActionBlock GetOpnsenseFlowsParamsAction = "block"
+	GetOpnsenseFlowsParamsActionPass  GetOpnsenseFlowsParamsAction = "pass"
+)
+
+// Valid indicates whether the value is a known member of the GetOpnsenseFlowsParamsAction enum.
+func (e GetOpnsenseFlowsParamsAction) Valid() bool {
+	switch e {
+	case GetOpnsenseFlowsParamsActionBlock:
+		return true
+	case GetOpnsenseFlowsParamsActionPass:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPublishLoginsParamsWindow.
+const (
+	GetPublishLoginsParamsWindowN1h  GetPublishLoginsParamsWindow = "1h"
+	GetPublishLoginsParamsWindowN24h GetPublishLoginsParamsWindow = "24h"
+	GetPublishLoginsParamsWindowN7d  GetPublishLoginsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetPublishLoginsParamsWindow enum.
+func (e GetPublishLoginsParamsWindow) Valid() bool {
+	switch e {
+	case GetPublishLoginsParamsWindowN1h:
+		return true
+	case GetPublishLoginsParamsWindowN24h:
+		return true
+	case GetPublishLoginsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPublishTrafficParamsWindow.
+const (
+	GetPublishTrafficParamsWindowN1h  GetPublishTrafficParamsWindow = "1h"
+	GetPublishTrafficParamsWindowN24h GetPublishTrafficParamsWindow = "24h"
+	GetPublishTrafficParamsWindowN7d  GetPublishTrafficParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetPublishTrafficParamsWindow enum.
+func (e GetPublishTrafficParamsWindow) Valid() bool {
+	switch e {
+	case GetPublishTrafficParamsWindowN1h:
+		return true
+	case GetPublishTrafficParamsWindowN24h:
+		return true
+	case GetPublishTrafficParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListSecurityFindingsParamsStatus.
 const (
 	ListSecurityFindingsParamsStatusAanvaard ListSecurityFindingsParamsStatus = "aanvaard"
@@ -15220,6 +15304,19 @@ type GetOpnsenseDiffParams struct {
 	Other *openapi_types.UUID `form:"other,omitempty" json:"other,omitempty"`
 }
 
+// GetOpnsenseFlowsParams defines parameters for GetOpnsenseFlows.
+type GetOpnsenseFlowsParams struct {
+	Window *GetOpnsenseFlowsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+	Action *GetOpnsenseFlowsParamsAction `form:"action,omitempty" json:"action,omitempty"`
+	Q      *string                       `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// GetOpnsenseFlowsParamsWindow defines parameters for GetOpnsenseFlows.
+type GetOpnsenseFlowsParamsWindow string
+
+// GetOpnsenseFlowsParamsAction defines parameters for GetOpnsenseFlows.
+type GetOpnsenseFlowsParamsAction string
+
 // GetPbsCoverageParams defines parameters for GetPbsCoverage.
 type GetPbsCoverageParams struct {
 	// Fresh 1 leest alle PBS'en opnieuw in plaats van de laatste ronde
@@ -15238,6 +15335,22 @@ type GetPbsApiParams struct {
 type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
+
+// GetPublishLoginsParams defines parameters for GetPublishLogins.
+type GetPublishLoginsParams struct {
+	Window *GetPublishLoginsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetPublishLoginsParamsWindow defines parameters for GetPublishLogins.
+type GetPublishLoginsParamsWindow string
+
+// GetPublishTrafficParams defines parameters for GetPublishTraffic.
+type GetPublishTrafficParams struct {
+	Window *GetPublishTrafficParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetPublishTrafficParamsWindow defines parameters for GetPublishTraffic.
+type GetPublishTrafficParamsWindow string
 
 // GetPveApiParams defines parameters for GetPveApi.
 type GetPveApiParams struct {
@@ -15670,6 +15783,12 @@ type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
 // DownloadOpnsenseBackupJSONRequestBody defines body for DownloadOpnsenseBackup for application/json ContentType.
 type DownloadOpnsenseBackupJSONRequestBody = PveObject
 
+// SetOpnsenseAutoJSONRequestBody defines body for SetOpnsenseAuto for application/json ContentType.
+type SetOpnsenseAutoJSONRequestBody = PveObject
+
+// ApplyOpnsenseAutoJSONRequestBody defines body for ApplyOpnsenseAuto for application/json ContentType.
+type ApplyOpnsenseAutoJSONRequestBody = PveObject
+
 // StartOpnsenseCarpJSONRequestBody defines body for StartOpnsenseCarp for application/json ContentType.
 type StartOpnsenseCarpJSONRequestBody = PveObject
 
@@ -15708,6 +15827,18 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
+
+// StartPublishJSONRequestBody defines body for StartPublish for application/json ContentType.
+type StartPublishJSONRequestBody = PveObject
+
+// AdoptPublishHostsJSONRequestBody defines body for AdoptPublishHosts for application/json ContentType.
+type AdoptPublishHostsJSONRequestBody = PveObject
+
+// PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
+type PlanPublishJSONRequestBody = PveObject
+
+// SavePublishSettingsJSONRequestBody defines body for SavePublishSettings for application/json ContentType.
+type SavePublishSettingsJSONRequestBody = PveObject
 
 // StartPveHostActionJSONRequestBody defines body for StartPveHostAction for application/json ContentType.
 type StartPveHostActionJSONRequestBody = PveActionInput
@@ -16683,6 +16814,15 @@ type ServerInterface interface {
 	// GetOpnsenseApi Een pad van de lokale OPNsense-API lezen via de agent (GET, of POST voor search*)
 	// (GET /opnsense/firewalls/{nodeId}/api)
 	GetOpnsenseApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseApiParams)
+	// GetOpnsenseAuto Automatisch beheer van het cluster (fase 40) - de stand per soort en de voorstellen voor aliassen, DNS-overrides en DHCP-reservaties
+	// (GET /opnsense/firewalls/{nodeId}/auto)
+	GetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SetOpnsenseAuto De stand per soort (uit, voorbeeld, beheerd), het domein en de genegeerde voorstellen (admin; beheerd aanzetten op prod met code of wachtwoord)
+	// (PUT /opnsense/firewalls/{nodeId}/auto)
+	SetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ApplyOpnsenseAuto Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord)
+	// (POST /opnsense/firewalls/{nodeId}/auto/apply)
+	ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
 	// (GET /opnsense/firewalls/{nodeId}/backups)
 	ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -16707,6 +16847,9 @@ type ServerInterface interface {
 	// StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
 	// (POST /opnsense/firewalls/{nodeId}/firmware)
 	StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetOpnsenseFlows Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40)
+	// (GET /opnsense/firewalls/{nodeId}/flows)
+	GetOpnsenseFlows(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseFlowsParams)
 	// SetOpnsenseKey Een met de hand gemaakte API-sleutel op de firewall zetten (admin), als de agent er zelf geen kan maken
 	// (POST /opnsense/firewalls/{nodeId}/key)
 	SetOpnsenseKey(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -16776,6 +16919,42 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// StartPublish Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+	// (POST /publish/actions)
+	StartPublish(w http.ResponseWriter, r *http.Request)
+	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+	// (POST /publish/adopt)
+	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+	// (POST /publish/hosts/{hostId}/accept)
+	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
+	// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
+	// (POST /publish/hosts/{hostId}/release)
+	ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int)
+	// GetPublishLogins Logins en mislukte logins in Authentik, per gebruiker, IP en app (fase 39)
+	// (GET /publish/logins)
+	GetPublishLogins(w http.ResponseWriter, r *http.Request, params GetPublishLoginsParams)
+	// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+	// (GET /publish/overview)
+	GetPublishOverview(w http.ResponseWriter, r *http.Request)
+	// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
+	// (POST /publish/plan)
+	PlanPublish(w http.ResponseWriter, r *http.Request)
+	// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
+	// (POST /publish/refresh)
+	RefreshPublish(w http.ResponseWriter, r *http.Request)
+	// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+	// (GET /publish/settings)
+	GetPublishSettings(w http.ResponseWriter, r *http.Request)
+	// SavePublishSettings Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+	// (PUT /publish/settings)
+	SavePublishSettings(w http.ResponseWriter, r *http.Request)
+	// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
+	// (POST /publish/test/{what})
+	TestPublishLink(w http.ResponseWriter, r *http.Request, what string)
+	// GetPublishTraffic Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
+	// (GET /publish/traffic)
+	GetPublishTraffic(w http.ResponseWriter, r *http.Request, params GetPublishTrafficParams)
 	// ListPveHosts Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
 	// (GET /pve-hosts)
 	ListPveHosts(w http.ResponseWriter, r *http.Request)
@@ -18810,6 +18989,24 @@ func (_ Unimplemented) GetOpnsenseApi(w http.ResponseWriter, r *http.Request, no
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetOpnsenseAuto Automatisch beheer van het cluster (fase 40) - de stand per soort en de voorstellen voor aliassen, DNS-overrides en DHCP-reservaties
+// (GET /opnsense/firewalls/{nodeId}/auto)
+func (_ Unimplemented) GetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetOpnsenseAuto De stand per soort (uit, voorbeeld, beheerd), het domein en de genegeerde voorstellen (admin; beheerd aanzetten op prod met code of wachtwoord)
+// (PUT /opnsense/firewalls/{nodeId}/auto)
+func (_ Unimplemented) SetOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyOpnsenseAuto Voorstellen toepassen (de gekozen sleutels, of alles wat niet genegeerd is) als taak opnsense.change (admin; op prod met code of wachtwoord)
+// (POST /opnsense/firewalls/{nodeId}/auto/apply)
+func (_ Unimplemented) ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListOpnsenseBackups De back-ups van de configuratie in ClusterForge, nieuwste eerst (zonder inhoud)
 // (GET /opnsense/firewalls/{nodeId}/backups)
 func (_ Unimplemented) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
@@ -18855,6 +19052,12 @@ func (_ Unimplemented) GetOpnsenseDrift(w http.ResponseWriter, r *http.Request, 
 // StartOpnsenseFirmware Zoeken naar updates, of het cluster bijwerken (eerst de backup, dan de master in onderhoudsmodus), als taak opnsense.firmware (admin)
 // (POST /opnsense/firewalls/{nodeId}/firmware)
 func (_ Unimplemented) StartOpnsenseFirmware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOpnsenseFlows Het verkeer uit het filterlog van het cluster, per stroom, met namen (fase 40)
+// (GET /opnsense/firewalls/{nodeId}/flows)
+func (_ Unimplemented) GetOpnsenseFlows(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetOpnsenseFlowsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18993,6 +19196,78 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPublish Een actie uitvoeren als taak publish.apply (admin); kopie van NPM vooraf, vijf controles erna, terugdraaien bij een fout
+// (POST /publish/actions)
+func (_ Unimplemented) StartPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
+// (POST /publish/adopt)
+func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
+// (POST /publish/hosts/{hostId}/accept)
+func (_ Unimplemented) AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReleasePublishHost Een host niet langer beheren; hij blijft in NPM staan (admin)
+// (POST /publish/hosts/{hostId}/release)
+func (_ Unimplemented) ReleasePublishHost(w http.ResponseWriter, r *http.Request, hostId int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishLogins Logins en mislukte logins in Authentik, per gebruiker, IP en app (fase 39)
+// (GET /publish/logins)
+func (_ Unimplemented) GetPublishLogins(w http.ResponseWriter, r *http.Request, params GetPublishLoginsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
+// (GET /publish/overview)
+func (_ Unimplemented) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
+// (POST /publish/plan)
+func (_ Unimplemented) PlanPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
+// (POST /publish/refresh)
+func (_ Unimplemented) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
+// (GET /publish/settings)
+func (_ Unimplemented) GetPublishSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishSettings Hoofddomein, standaarden en koppeling bewaren (admin); een leeg geheim laat het bestaande staan
+// (PUT /publish/settings)
+func (_ Unimplemented) SavePublishSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
+// (POST /publish/test/{what})
+func (_ Unimplemented) TestPublishLink(w http.ResponseWriter, r *http.Request, what string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishTraffic Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
+// (GET /publish/traffic)
+func (_ Unimplemented) GetPublishTraffic(w http.ResponseWriter, r *http.Request, params GetPublishTrafficParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -28162,6 +28437,84 @@ func (siw *ServerInterfaceWrapper) GetOpnsenseApi(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpnsenseAuto operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseAuto(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOpnsenseAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetOpnsenseAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOpnsenseAuto(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyOpnsenseAuto operation middleware
+func (siw *ServerInterfaceWrapper) ApplyOpnsenseAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyOpnsenseAuto(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOpnsenseBackups operation middleware
 func (siw *ServerInterfaceWrapper) ListOpnsenseBackups(w http.ResponseWriter, r *http.Request) {
 
@@ -28419,6 +28772,74 @@ func (siw *ServerInterfaceWrapper) StartOpnsenseFirmware(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartOpnsenseFirmware(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOpnsenseFlows operation middleware
+func (siw *ServerInterfaceWrapper) GetOpnsenseFlows(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOpnsenseFlowsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpnsenseFlows(w, r, nodeId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -29023,6 +29444,248 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListVmSnapshots(w, r, proxmoxId, vmid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartPublish operation middleware
+func (siw *ServerInterfaceWrapper) StartPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdoptPublishHosts operation middleware
+func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdoptPublishHosts(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptPublishDrift operation middleware
+func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptPublishDrift(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleasePublishHost operation middleware
+func (siw *ServerInterfaceWrapper) ReleasePublishHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleasePublishHost(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishLogins operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishLogins(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishLoginsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishLogins(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishOverview(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishOverview(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanPublish operation middleware
+func (siw *ServerInterfaceWrapper) PlanPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshPublish operation middleware
+func (siw *ServerInterfaceWrapper) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishSettings operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestPublishLink operation middleware
+func (siw *ServerInterfaceWrapper) TestPublishLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "what" -------------
+	var what string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "what", chi.URLParam(r, "what"), &what, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "what", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestPublishLink(w, r, what)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishTraffic operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishTraffic(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishTrafficParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishTraffic(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -32332,6 +32995,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/firmware", wrapper.StartOpnsenseFirmware)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/flows", wrapper.GetOpnsenseFlows)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto", wrapper.GetOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto", wrapper.SetOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/opnsense/firewalls/{nodeId}/auto/apply", wrapper.ApplyOpnsenseAuto)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/opnsense/firewalls/{nodeId}/drift", wrapper.GetOpnsenseDrift)
 	})
 	r.Group(func(r chi.Router) {
@@ -32342,6 +33017,42 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/opnsense/backups/{backupId}/download", wrapper.DownloadOpnsenseBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/settings", wrapper.GetPublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/settings", wrapper.SavePublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/test/{what}", wrapper.TestPublishLink)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/overview", wrapper.GetPublishOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/traffic", wrapper.GetPublishTraffic)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/logins", wrapper.GetPublishLogins)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/refresh", wrapper.RefreshPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/plan", wrapper.PlanPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/actions", wrapper.StartPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/adopt", wrapper.AdoptPublishHosts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/hosts/{hostId}/accept", wrapper.AcceptPublishDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/hosts/{hostId}/release", wrapper.ReleasePublishHost)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

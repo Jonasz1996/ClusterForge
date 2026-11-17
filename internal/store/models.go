@@ -1174,6 +1174,25 @@ type HealAuto struct {
 	UpdatedBy    *uuid.UUID
 }
 
+type HomeApp struct {
+	Key         string
+	Name        string
+	Grp         string
+	Icon        string
+	ClusterName string
+	FirstSeen   time.Time
+	LastSeen    time.Time
+	Override    []byte
+	UpdatedAt   time.Time
+}
+
+type HomeAppDoubt struct {
+	ServiceKey string
+	Decision   string
+	Name       string
+	DecidedAt  time.Time
+}
+
 type Incident struct {
 	ID               uuid.UUID
 	Number           int32
@@ -1504,6 +1523,20 @@ type ObservedConnectionHour struct {
 	Samples   int64
 }
 
+type OpnsenseAuto struct {
+	ClusterKey string
+	Aliases    string
+	Dns        string
+	Dhcp       string
+	Domain     string
+	Ignored    []string
+	LastRun    *time.Time
+	LastError  string
+	LastJob    *uuid.UUID
+	UpdatedAt  time.Time
+	UpdatedBy  *uuid.UUID
+}
+
 type OpnsenseBackup struct {
 	ID      uuid.UUID
 	NodeID  uuid.UUID
@@ -1515,6 +1548,29 @@ type OpnsenseBackup struct {
 	KeyID   string
 	Nonce   string
 	Data    []byte
+}
+
+type OpnsenseFlow struct {
+	NodeID uuid.UUID
+	Hour   time.Time
+	Action string
+	Iface  string
+	Dir    string
+	Proto  string
+	Src    string
+	Dst    string
+	Port   int32
+	Rule   string
+	Count  int64
+}
+
+type OpnsenseFlowRead struct {
+	NodeID  uuid.UUID
+	ReadAt  time.Time
+	Lines   int64
+	Skipped int64
+	Dropped int64
+	Error   string
 }
 
 type ProxmoxBackup struct {
@@ -1611,6 +1667,109 @@ type ProxmoxTask struct {
 	Exitstatus   string
 	StartedAt    time.Time
 	EndedAt      *time.Time
+}
+
+type PublishAuthEvent struct {
+	Pk       string
+	Created  time.Time
+	Action   string
+	Username string
+	ClientIp string
+	App      string
+	Country  string
+	City     string
+	Reason   string
+}
+
+type PublishConnection struct {
+	NodeID      uuid.UUID
+	At          time.Time
+	Connections int32
+}
+
+type PublishFeedState struct {
+	Source string
+	At     time.Time
+	OkAt   *time.Time
+	Cursor string
+	Error  string
+	Lines  int64
+}
+
+type PublishHost struct {
+	ID           uuid.UUID
+	NpmHostID    int32
+	Domain       string
+	Desired      []byte
+	ClusterID    *uuid.UUID
+	NodeID       *uuid.UUID
+	ServicePort  *int32
+	CreatedByCf  bool
+	AkProviderPk *int32
+	AkAppSlug    *string
+	AkCreated    bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	UpdatedBy    *uuid.UUID
+}
+
+type PublishRead struct {
+	Kind   string
+	Data   []byte
+	Error  string
+	ReadAt time.Time
+}
+
+type PublishService struct {
+	NodeID    uuid.UUID
+	Services  []byte
+	Error     string
+	CheckedAt time.Time
+}
+
+type PublishSetting struct {
+	ID                 bool
+	Domain             string
+	Defaults           []byte
+	NpmClusterID       *uuid.UUID
+	NpmNodeID          *uuid.UUID
+	NpmPort            int32
+	NpmIdentity        string
+	NpmSecretEnc       []byte
+	NpmKeyID           string
+	AuthentikClusterID *uuid.UUID
+	AuthentikNodeID    *uuid.UUID
+	AuthentikPort      int32
+	AuthentikTokenEnc  []byte
+	AuthentikKeyID     string
+	AuthentikOutpost   string
+	UpdatedAt          time.Time
+	UpdatedBy          *uuid.UUID
+}
+
+type PublishTraffic struct {
+	NodeID   uuid.UUID
+	HostID   int32
+	Bucket   time.Time
+	Requests int32
+	S2xx     int32
+	S3xx     int32
+	S4xx     int32
+	S5xx     int32
+	Bytes    int64
+}
+
+type PublishTrafficIp struct {
+	HostID   int32
+	Hour     time.Time
+	Ip       string
+	Requests int32
+	S4xx     int32
+	S5xx     int32
+	Denied   int32
+	Bytes    int64
+	FirstAt  time.Time
+	LastAt   time.Time
 }
 
 type RecipeVersion struct {

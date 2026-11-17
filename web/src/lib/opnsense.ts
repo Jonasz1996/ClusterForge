@@ -471,3 +471,120 @@ export async function downloadOpnBackup(id: string, code: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5_000);
 }
+
+// --- Verkeer uit het filterlog (fase 40) ----------------------------------------
+
+export type OpnFlowRow = {
+  action: string;
+  interface: string;
+  iface_name?: string;
+  dir: string;
+  proto: string;
+  src: string;
+  src_name?: string;
+  dst: string;
+  dst_name?: string;
+  port?: number;
+  rule?: string;
+  rule_name?: string;
+  count: number;
+  first: string;
+  last: string;
+};
+
+export type OpnFlows = {
+  window: string;
+  rows: OpnFlowRow[];
+  rules: { rule: string; rule_name?: string; action: string; count: number; last: string }[];
+  reads: { node_id: string; hostname: string; read_at?: string; error?: string; why?: string }[];
+  blocked: number;
+  passed: number;
+};
+
+export function useOpnFlows(id: string | undefined, window: "1h" | "24h" | "7d" | "30d", action: "" | "block" | "pass", q: string) {
+  return useQuery({
+    queryKey: ["opnsense", "flows", id, window, action, q],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/opnsense/firewalls/{nodeId}/flows", {
+          params: { path: { nodeId: id! }, query: { window, action: action || undefined, q: q || undefined } },
+        }),
+      ) as unknown as OpnFlows,
+    enabled: !!id,
+    refetchInterval: 60_000,
+  });
+}
+
+// --- Automatisch beheer (fase 40 M2) ---------------------------------------
+
+export type OpnAutoMode = "uit" | "voorbeeld" | "beheerd";
+
+export type OpnAutoSettings = {
+  aliases: OpnAutoMode;
+  dns: OpnAutoMode;
+  dhcp: OpnAutoMode;
+  domain: string;
+  ignored: string[];
+};
+
+export type OpnAutoItem = {
+  key: string;
+  kind: "alias" | "dns" | "dhcp";
+  op: "add" | "set" | "del" | "conflict";
+  title: string;
+  detail?: string;
+  ignored: boolean;
+  manual?: boolean;
+};
+
+export type OpnAuto = {
+  cluster: string;
+  firewall: string;
+  settings: OpnAutoSettings;
+  domain: string;
+  items: OpnAutoItem[];
+  in_order: Record<string, number>;
+  notes: string[];
+  pending: number;
+  last_run?: string;
+  last_error?: string;
+  last_job?: string;
+};
+
+export function useOpnAuto(id: string | undefined) {
+  return useQuery({
+    queryKey: ["opnsense", "auto", id],
+    queryFn: async () =>
+      unwrap(await api.GET("/opnsense/firewalls/{nodeId}/auto", { params: { path: { nodeId: id! } } })) as unknown as OpnAuto,
+    enabled: !!id,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useOpnAutoSave(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (b: OpnAutoSettings & OpnConfirm) =>
+      unwrap(
+        await api.PUT("/opnsense/firewalls/{nodeId}/auto", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ) as unknown as OpnAutoSettings,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["opnsense", "auto"] }),
+  });
+}
+
+export function useOpnAutoApply(id: string) {
+  const after = useAfterJob();
+  return useMutation({
+    mutationFn: async (b: { keys: string[] } & OpnConfirm) =>
+      unwrap(
+        await api.POST("/opnsense/firewalls/{nodeId}/auto/apply", {
+          params: { path: { nodeId: id } },
+          body: b,
+        }),
+      ) as unknown as Job,
+    onSuccess: after,
+  });
+}

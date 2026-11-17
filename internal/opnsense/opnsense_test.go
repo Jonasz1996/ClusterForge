@@ -261,12 +261,29 @@ func (f *fakeFW) PVE(_ context.Context, id uuid.UUID, req protocol.PVERequest) (
 	case protocol.OPNOpConfigctl:
 		b, _ := json.Marshal([]map[string]string{{"name": "WAN", "status": f.down}})
 		return protocol.PVEResponse{Data: b}, nil
+	case protocol.OPNOpFilterLog:
+		h := time.Now().UTC().Truncate(time.Hour)
+		b, _ := json.Marshal(protocol.FilterLogResult{Lines: 7, Flows: []protocol.FilterFlow{
+			{Hour: h, Action: "block", Interface: "vtnet1", Dir: "in", Proto: "tcp", Src: "192.168.90.20", Dst: "192.168.10.50", Port: 445, Rule: "r1", Count: 5},
+			{Hour: h, Action: "pass", Interface: "vtnet1", Dir: "in", Proto: "tcp", Src: "192.168.10.2", Dst: "192.168.10.1", Port: 443, Rule: "r2", Count: 2},
+		}})
+		return protocol.PVEResponse{Data: b}, nil
 	case protocol.OPNOpGet:
+		if req.Path == "diagnostics/firewall/list_rule_ids" {
+			return protocol.PVEResponse{Data: json.RawMessage(`{"r1":"Standaard blokkeren","r2":"LAN naar alles"}`)}, nil
+		}
 		switch req.Path {
 		case "core/firmware/upgradestatus":
 			return protocol.PVEResponse{Data: json.RawMessage(`{"status":"done"}`)}, nil
 		case "core/firmware/status":
 			return protocol.PVEResponse{Data: json.RawMessage(`{"status":"update","status_msg":"Er zijn 3 updates."}`)}, nil
+		}
+	case protocol.OPNOpPost:
+		switch req.Path {
+		case "firewall/alias/searchItem", "unbound/settings/searchHostOverride", "kea/dhcpv4/searchReservation":
+			return protocol.PVEResponse{Data: json.RawMessage(`{"rows":[]}`)}, nil
+		case "kea/dhcpv4/searchSubnet":
+			return protocol.PVEResponse{Data: json.RawMessage(`{"rows":[{"uuid":"55555555-5555-4555-8555-555555555555","subnet":"192.168.10.0/24"}]}`)}, nil
 		}
 	case protocol.OPNOpBackup, protocol.OPNOpRevision:
 		b, _ := json.Marshal(f.config(id))
@@ -505,6 +522,59 @@ func TestChangeFlow(t *testing.T) {
 		if strings.HasPrefix(n.ID, "opnsense-backup-") {
 			t.Fatalf("back-up gemeld als oud: %+v", n)
 		}
+	}
+
+	// Fase 40: het filterlog, twee keer gelezen, telt op en krijgt namen.
+	for range 2 {
+		if err := s.CollectFlows(ctx, ida); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fv, err := s.Flows(ctx, idb, FlowQuery{Action: "block"})
+	if err != nil || len(fv.Rows) != 1 || fv.Rows[0].Count != 10 || fv.Rows[0].RuleName != "Standaard blokkeren" || fv.Rows[0].DstName != "lan-net" || fv.Blocked != 10 || fv.Passed != 0 {
+		t.Fatalf("stromen: %v %+v", err, fv)
+	}
+	if fv, _ = s.Flows(ctx, ida, FlowQuery{Q: "fw1"}); len(fv.Rows) != 1 || fv.Rows[0].Port != 443 || fv.Rows[0].SrcName == "" || len(fv.Rules) != 2 {
+		t.Fatalf("zoeken: %+v", fv)
+	}
+
+	// Fase 40 M2: automatisch beheer van aliassen, DNS en DHCP.
+	var db1 uuid.UUID
+	nf, _ := json.Marshal(protocol.Facts{Hostname: "db1", Interfaces: []protocol.Interface{{Name: "eth0", MAC: "BC:24:11:AA:BB:01", Addresses: []string{"192.168.10.191/24"}}}})
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, cluster_id, primary_ip) VALUES ('db1', $1, '192.168.10.191') RETURNING id`, cl).Scan(&db1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO node_facts (node_id, hash, facts, collected_at) VALUES ($1, 'y', $2, now())`, db1, nf); err != nil {
+		t.Fatal(err)
+	}
+	av, err := s.Auto(ctx, ida)
+	if err != nil || av.Settings.DNS != ModePreview || av.Domain != "lan.jbogaert.be" || av.Pending != 4 {
+		t.Fatalf("automatisch: %v %+v", err, av)
+	}
+	if _, err := s.SetAuto(ctx, events.System(), nil, ida, AutoSettings{Aliases: ModeOff, DNS: ModeOff, DHCP: ModeManaged, Domain: "lan.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if to, _ := s.AutoChangesToManaged(ctx, ida, AutoSettings{Aliases: ModeOff, DNS: ModeOff, DHCP: ModeManaged}); to {
+		t.Fatal("DHCP was al beheerd")
+	}
+	bus.mu.Lock()
+	bus.gotBody = nil
+	bus.mu.Unlock()
+	s.RunAuto(ctx)
+	var lastJob *uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT last_job FROM opnsense_auto`).Scan(&lastJob); err != nil || lastJob == nil {
+		t.Fatalf("geen automatische wijziging: %v", err)
+	}
+	if j := wait(*lastJob); j.Status != store.JobStatusSucceeded {
+		t.Fatalf("automatisch toepassen: %s %s", j.Status, j.Error)
+	}
+	bus.mu.Lock()
+	if len(bus.gotBody) != 1 || fmt.Sprint(bus.gotBody[0]["reservation"]) != "map[description:cf: node db1 hostname:db1 hw_address:bc:24:11:aa:bb:01 ip_address:192.168.10.191 subnet:55555555-5555-4555-8555-555555555555]" {
+		t.Fatalf("lichaam: %v", bus.gotBody)
+	}
+	bus.mu.Unlock()
+	if _, err := pool.Exec(ctx, `DELETE FROM nodes WHERE id = $1`, db1); err != nil {
+		t.Fatal(err)
 	}
 
 	// Drift: de backup heeft een NAT-regel meer; hostnaam, skew en Hasync
