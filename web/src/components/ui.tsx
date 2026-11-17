@@ -1,6 +1,7 @@
 "use client";
 
 import { TileButton, TileReset, useTile } from "@/components/Tiles";
+import { glossary } from "@/lib/help";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -146,8 +147,14 @@ const tones: Record<Tone, string> = {
 };
 
 export function Badge({ tone = "slate", children }: { tone?: Tone; children: ReactNode }) {
+  // Een label dat een vakterm is (VIP, Drift, ...), toont de uitleg uit de
+  // woordenlijst als je erover gaat (fase 41).
+  const term = typeof children === "string" ? glossary[children.toLowerCase()] : undefined;
   return (
-    <span className={cx("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap", tones[tone])}>
+    <span
+      title={term ? `${term.term}: ${term.uitleg}` : undefined}
+      className={cx("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap", term && "cursor-help", tones[tone])}
+    >
       {children}
     </span>
   );
