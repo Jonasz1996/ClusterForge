@@ -516,6 +516,15 @@ func (a *Agent) handlePVE(data []byte) protocol.PVEResponse {
 			return protocol.PVEResponse{Error: err.Error()}
 		}
 		return protocol.PVEResponse{Data: data}
+	case protocol.PBSOpGet:
+		if err := req.ValidatePBSGet(); err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		data, err := h.pbsGet(ctx, req.Path, req.Params)
+		if err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		return protocol.PVEResponse{Data: data}
 	case protocol.PVEOpHardware:
 		hw, err := h.hardware(ctx)
 		if err != nil {

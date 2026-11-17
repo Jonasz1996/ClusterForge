@@ -14680,6 +14680,20 @@ type GetNodeTimelineParams struct {
 	Limit *TimelineLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetPbsCoverageParams defines parameters for GetPbsCoverage.
+type GetPbsCoverageParams struct {
+	// Fresh 1 leest alle PBS'en opnieuw in plaats van de laatste ronde
+	Fresh *string `form:"fresh,omitempty" json:"fresh,omitempty"`
+}
+
+// GetPbsApiParams defines parameters for GetPbsApi.
+type GetPbsApiParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Params JSON-object met velden, zoals {"ns":"pve"}
+	Params *string `form:"params,omitempty" json:"params,omitempty"`
+}
+
 // ProbeProxmoxJSONBody defines parameters for ProbeProxmox.
 type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
@@ -15082,6 +15096,15 @@ type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
 
 // ToggleNodeCronJSONRequestBody defines body for ToggleNodeCron for application/json ContentType.
 type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
+
+// CallPbsApiJSONRequestBody defines body for CallPbsApi for application/json ContentType.
+type CallPbsApiJSONRequestBody = PveCallInput
+
+// LinkPbsJSONRequestBody defines body for LinkPbs for application/json ContentType.
+type LinkPbsJSONRequestBody = PveObject
+
+// CreatePbsTokenJSONRequestBody defines body for CreatePbsToken for application/json ContentType.
+type CreatePbsTokenJSONRequestBody = PveObject
 
 // CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
 type CreateProxmoxJSONRequestBody = ProxmoxInput
@@ -16048,6 +16071,27 @@ type ServerInterface interface {
 	// GetNodeTimeline De tijdlijn van een node, oudste eerst
 	// (GET /nodes/{nodeId}/timeline)
 	GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams)
+	// GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
+	// (GET /pbs/coverage)
+	GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams)
+	// ListPbsServers De Proxmox Backup Servers met een agent (fase 32)
+	// (GET /pbs/servers)
+	ListPbsServers(w http.ResponseWriter, r *http.Request)
+	// GetPbsApi Een pad van de PBS-API lezen via de agent (proxmox-backup-debug api get)
+	// (GET /pbs/servers/{nodeId}/api)
+	GetPbsApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetPbsApiParams)
+	// CallPbsApi Iets veranderen via de PBS-API, als taak pbs.action (admin)
+	// (POST /pbs/servers/{nodeId}/api)
+	CallPbsApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// LinkPbs De PBS als storage aan een Proxmox-cluster koppelen (admin) - eigen gebruiker en token, rechten op de datastore, storage met fingerprint
+	// (POST /pbs/servers/{nodeId}/link)
+	LinkPbs(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetPbsOverview Overzicht van een PBS - machine, datastores, jobs, mislukte taken en waarschuwingen
+	// (GET /pbs/servers/{nodeId}/overview)
+	GetPbsOverview(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// CreatePbsToken Een API-token op de PBS maken of vernieuwen (admin); de waarde komt één keer terug en wordt nergens bewaard
+	// (POST /pbs/servers/{nodeId}/tokens)
+	CreatePbsToken(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// ListProxmox Gekoppelde Proxmox-omgevingen
 	// (GET /proxmox)
 	ListProxmox(w http.ResponseWriter, r *http.Request)
@@ -18046,6 +18090,48 @@ func (_ Unimplemented) GetNodeMetrics(w http.ResponseWriter, r *http.Request, no
 // GetNodeTimeline De tijdlijn van een node, oudste eerst
 // (GET /nodes/{nodeId}/timeline)
 func (_ Unimplemented) GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPbsCoverage Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
+// (GET /pbs/coverage)
+func (_ Unimplemented) GetPbsCoverage(w http.ResponseWriter, r *http.Request, params GetPbsCoverageParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListPbsServers De Proxmox Backup Servers met een agent (fase 32)
+// (GET /pbs/servers)
+func (_ Unimplemented) ListPbsServers(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPbsApi Een pad van de PBS-API lezen via de agent (proxmox-backup-debug api get)
+// (GET /pbs/servers/{nodeId}/api)
+func (_ Unimplemented) GetPbsApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetPbsApiParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CallPbsApi Iets veranderen via de PBS-API, als taak pbs.action (admin)
+// (POST /pbs/servers/{nodeId}/api)
+func (_ Unimplemented) CallPbsApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// LinkPbs De PBS als storage aan een Proxmox-cluster koppelen (admin) - eigen gebruiker en token, rechten op de datastore, storage met fingerprint
+// (POST /pbs/servers/{nodeId}/link)
+func (_ Unimplemented) LinkPbs(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPbsOverview Overzicht van een PBS - machine, datastores, jobs, mislukte taken en waarschuwingen
+// (GET /pbs/servers/{nodeId}/overview)
+func (_ Unimplemented) GetPbsOverview(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreatePbsToken Een API-token op de PBS maken of vernieuwen (admin); de waarde komt één keer terug en wordt nergens bewaard
+// (POST /pbs/servers/{nodeId}/tokens)
+func (_ Unimplemented) CreatePbsToken(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27090,6 +27176,212 @@ func (siw *ServerInterfaceWrapper) GetNodeTimeline(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetPbsCoverage operation middleware
+func (siw *ServerInterfaceWrapper) GetPbsCoverage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPbsCoverageParams
+
+	// ------------- Optional query parameter "fresh" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "fresh", r.URL.Query(), &params.Fresh, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "fresh"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fresh", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPbsCoverage(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPbsServers operation middleware
+func (siw *ServerInterfaceWrapper) ListPbsServers(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPbsServers(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPbsApi operation middleware
+func (siw *ServerInterfaceWrapper) GetPbsApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPbsApiParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "params" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "params", r.URL.Query(), &params.Params, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "params"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "params", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPbsApi(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CallPbsApi operation middleware
+func (siw *ServerInterfaceWrapper) CallPbsApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CallPbsApi(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LinkPbs operation middleware
+func (siw *ServerInterfaceWrapper) LinkPbs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LinkPbs(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPbsOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetPbsOverview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPbsOverview(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePbsToken operation middleware
+func (siw *ServerInterfaceWrapper) CreatePbsToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePbsToken(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProxmox operation middleware
 func (siw *ServerInterfaceWrapper) ListProxmox(w http.ResponseWriter, r *http.Request) {
 
@@ -30170,6 +30462,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/docker/nodes/{nodeId}/console", wrapper.OpenDockerConsole)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pbs/servers", wrapper.ListPbsServers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pbs/servers/{nodeId}/overview", wrapper.GetPbsOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pbs/servers/{nodeId}/api", wrapper.GetPbsApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/api", wrapper.CallPbsApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/tokens", wrapper.CreatePbsToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pbs/coverage", wrapper.GetPbsCoverage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pbs/servers/{nodeId}/link", wrapper.LinkPbs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

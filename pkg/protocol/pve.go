@@ -473,7 +473,7 @@ func (p PVERun) Validate() error {
 		if t.Match != "" && !pveMatch.MatchString(t.Match) {
 			return fmt.Errorf("ongeldig begin van een naam %q", t.Match)
 		}
-	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance:
+	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance, PBSAPI:
 		return p.validateHost()
 	case PVEBootstrap:
 		b := p.Bootstrap
@@ -561,7 +561,7 @@ func (c *PVECreate) validate() error {
 // PVETimeout is de tijdslimiet van een run pve.
 func (p PVERun) Timeout() time.Duration {
 	switch p.Action {
-	case PVEMigrate, PVETemplate, PVEAPI:
+	case PVEMigrate, PVETemplate, PVEAPI, PBSAPI:
 		// Een aanroep kan een back-up, terugzetten of verhuizen zijn.
 		return 4 * time.Hour
 	case PVEPassthrough:
