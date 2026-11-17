@@ -666,23 +666,25 @@ overnemen() {
     { cat "$dir/pg_dump.log" >&2; back "back-up (pg_dump)"; }
   pg_restore --list "$f" > "$dir/lijst" || back "pg_restore leest de back-up niet"
   (umask 077 && cp "$OUD_ENV" "$OUD_BACKUPS/cf-overname-$t.env")
-  echo "  $f ($(du -h "$f" | cut -f1)), sha256 $(sha256sum "$f" | cut -c1-16)"
+  echo "  $f ($(stat -c %s "$f") bytes, $(grep -c ' TABLE DATA ' "$dir/lijst") tabellen met data), sha256 $(sha256sum "$f" | cut -c1-16)"
 
   say "Terugzetten in de database van het cluster"
+  # De back-up is van root (0600); pg_restore draait als postgres en leest
+  # hem daarom via stdin.
   if [ -n "$TS" ]; then
     # Zoals homepage-terugzetten: eerst de extensie in dezelfde versie en
     # timescaledb_pre_restore(), dan pg_restore, dan post_restore(). Welke
     # fouten tellen, zegt deploy/herstelfouten.sh van de homepage.
     supg -d "$db" -c "CREATE EXTENSION IF NOT EXISTS timescaledb VERSION '$TS'" -c "SELECT timescaledb_pre_restore()" > /dev/null ||
       back "TimescaleDB $TS in de database van het cluster"
-    runpg pg_restore -p "$SU_PORT" -d "$db" --no-tablespaces "$f" 2> "$dir/pg_restore.log"
+    runpg pg_restore -p "$SU_PORT" -d "$db" --no-tablespaces < "$f" 2> "$dir/pg_restore.log"
     if ! sh "$CODE/deploy/herstelfouten.sh" "$dir/pg_restore.log" > "$dir/fouten" 2>&1; then
       sed 's/^/  /' "$dir/fouten" >&2
       back "terugzetten (pg_restore, zie $dir/pg_restore.log)"
     fi
     supg -d "$db" -c "SELECT timescaledb_post_restore()" > /dev/null || back "timescaledb_post_restore()"
   else
-    runpg pg_restore -p "$SU_PORT" -d "$db" --no-tablespaces --single-transaction --exit-on-error "$f" 2> "$dir/pg_restore.log" ||
+    runpg pg_restore -p "$SU_PORT" -d "$db" --no-tablespaces --single-transaction --exit-on-error < "$f" 2> "$dir/pg_restore.log" ||
       { sed 's/^/  /' "$dir/pg_restore.log" >&2; back "terugzetten (pg_restore)"; }
   fi
   supg -d "$db" -c "ANALYZE" > /dev/null 2>&1
