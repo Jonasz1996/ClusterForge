@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { ActionModal } from "@/components/publish/ActionModal";
-import { Button, Field, Input, Select } from "@/components/ui";
-import type { PublishAction, PublishHost, PublishOverview } from "@/lib/publish";
+import { Alert, Button, Field, Input, Select } from "@/components/ui";
+import { useSetHostCss, type PublishAction, type PublishHost, type PublishOverview } from "@/lib/publish";
 
 // HostEditor: een proxy host toevoegen of volledig bewerken (fase 42): namen,
 // doel, certificaat, SSL-opties en de eigen Advanced. Het blok van
@@ -24,6 +24,7 @@ type Form = {
   blockExploits: boolean;
   advanced: string;
   authentik: boolean;
+  theme: boolean;
 };
 
 function initial(h: PublishHost | null, ov: PublishOverview): Form {
@@ -42,6 +43,7 @@ function initial(h: PublishHost | null, ov: PublishOverview): Form {
       blockExploits: d.block_exploits,
       advanced: "",
       authentik: d.authentik,
+      theme: true,
     };
   }
   return {
@@ -57,6 +59,7 @@ function initial(h: PublishHost | null, ov: PublishOverview): Form {
     blockExploits: h.block_exploits,
     advanced: h.advanced ?? "",
     authentik: false,
+    theme: true,
   };
 }
 
@@ -79,6 +82,8 @@ function toAction(f: Form, h: PublishHost | null): PublishAction {
       http2: f.http2,
       hsts: f.hsts,
       authentik: f.authentik,
+      advanced_config: f.advanced.trim() || undefined,
+      theme: f.theme,
     };
   }
   const a: PublishAction = { action: "update", host_id: h.id };
@@ -177,7 +182,12 @@ export function HostEditor({ host, ov, onClose }: { host: PublishHost | null; ov
             ["hsts", "HSTS"],
             ["websockets", "Websockets"],
             ["blockExploits", "Exploits blokkeren"],
-            ...(host ? [] : ([["authentik", "Achter Authentik"]] as const)),
+            ...(host
+              ? []
+              : ([
+                  ["authentik", "Achter Authentik"],
+                  ["theme", "Met sjabloon (css)"],
+                ] as const)),
           ] as const
         ).map(([k, l]) => (
           <label key={k} className="flex items-center gap-1">
@@ -199,6 +209,7 @@ export function HostEditor({ host, ov, onClose }: { host: PublishHost | null; ov
       {host?.authentik === "beschermd" && (
         <p className="text-xs text-slate-500">De forward auth van Authentik blijft staan; die gaat aan of uit met de knop in de lijst.</p>
       )}
+      {host && <HostCss host={host} />}
       <Button onClick={() => setShown(draft)}>{shown ? "Voorbeeld bijwerken" : "Voorbeeld"}</Button>
     </div>
   );
@@ -215,5 +226,44 @@ export function HostEditor({ host, ov, onClose }: { host: PublishHost | null; ov
     <ActionModal title={title} action={shown} onClose={onClose} blocked={blocked}>
       {fields}
     </ActionModal>
+  );
+}
+
+// HostCss: het css-bestand van deze host voor het sjabloon, en het sjabloon
+// meteen op deze host zetten.
+function HostCss({ host }: { host: PublishHost }) {
+  const [css, setCss] = useState(host.css_set ?? "");
+  const [apply, setApply] = useState(false);
+  const save = useSetHostCss();
+  const dirty = css.trim() !== (host.css_set ?? "");
+  if (apply) {
+    return (
+      <ActionModal title={`Sjabloon op ${host.domains[0]}`} action={{ action: "theme_many", hosts: [host.id] }} onClose={() => setApply(false)} />
+    );
+  }
+  return (
+    <div className="space-y-2 rounded border border-slate-200 p-3 dark:border-slate-800">
+      <Field label="Css-bestand voor het sjabloon" htmlFor="he-css">
+        <Input
+          id="he-css"
+          value={css}
+          placeholder={host.css_set ? "" : host.css ? `standaard: ${host.css}` : "geen standaard-css; vul een adres in"}
+          onChange={(e) => setCss(e.target.value)}
+        />
+      </Field>
+      <p className="text-xs text-slate-500">
+        Leeg is de standaard, een streepje (-) is geen thema op deze host.{" "}
+        {host.themed ? "Het sjabloon staat nu op deze host." : "Het sjabloon staat nog niet op deze host."}
+      </p>
+      {save.isError && <Alert>{(save.error as Error).message}</Alert>}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" disabled={!dirty || save.isPending} onClick={() => save.mutate({ hostId: host.id, css: css.trim() })}>
+          Css bewaren
+        </Button>
+        <Button variant="secondary" disabled={dirty} onClick={() => setApply(true)}>
+          Sjabloon op deze host zetten
+        </Button>
+      </div>
+    </div>
   );
 }

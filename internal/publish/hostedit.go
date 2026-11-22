@@ -10,29 +10,26 @@ import (
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
-// keepSnippet zet de eigen Advanced van de gebruiker en houdt het blok van
-// ClusterForge (forward auth naar Authentik) erachter.
+// keepSnippet zet de eigen Advanced van de gebruiker en houdt de blokken
+// van ClusterForge (forward auth naar Authentik, sjabloon) erachter.
 func keepSnippet(current, own string) (string, error) {
 	own = strings.TrimSpace(strings.ReplaceAll(own, "\r\n", "\n"))
-	if strings.Contains(own, snippetBegin) || strings.Contains(own, snippetEnd) {
-		return "", invalid("het blok van ClusterForge hoort niet in je eigen Advanced; zet Authentik aan of uit met de knop")
+	if strings.Contains(own, snippetBegin) || strings.Contains(own, snippetEnd) || strings.Contains(own, themeBegin) || strings.Contains(own, themeEnd) {
+		return "", invalid("de blokken van ClusterForge horen niet in je eigen Advanced; zet Authentik aan of uit met de knop en het thema via Sjabloon")
 	}
-	i := strings.Index(current, snippetBegin)
-	if i < 0 {
-		return own, nil
+	var blocks []string
+	if i := strings.Index(current, snippetBegin); i >= 0 {
+		if j := strings.Index(current[i:], snippetEnd); j >= 0 {
+			blocks = append(blocks, current[i:i+j+len(snippetEnd)])
+		}
 	}
-	j := strings.Index(current[i:], snippetEnd)
-	if j < 0 {
-		return own, nil
+	if b := themeBlock(current); b != "" {
+		blocks = append(blocks, b)
 	}
-	block := current[i : i+j+len(snippetEnd)]
-	if locationRoot.MatchString(own) {
-		return "", invalid("een eigen 'location /' botst met de forward auth van Authentik op deze host")
+	if len(blocks) > 0 && locationRoot.MatchString(own) {
+		return "", invalid("een eigen 'location /' botst met het blok van ClusterForge op deze host (forward auth of sjabloon). Zet het in het sjabloon, of zet de host in Sjabloon op \"geen thema\" en Authentik uit")
 	}
-	if own == "" {
-		return block, nil
-	}
-	return own + "\n\n" + block, nil
+	return joinBlocks(append([]string{own}, blocks...)...), nil
 }
 
 // planDomains controleert nieuwe namen voor een host. Staat er in Authentik

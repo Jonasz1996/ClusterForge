@@ -85,6 +85,9 @@ type Action struct {
 	AdvancedConfig *string  `json:"advanced_config,omitempty"`
 	SSLForced      *bool    `json:"ssl_forced,omitempty"`
 	Domains        []string `json:"domains,omitempty"`
+	// Theme bij ActPublish: het sjabloon voor Advanced gebruiken (leeg =
+	// ja als er een standaard-css is).
+	Theme *bool `json:"theme,omitempty"`
 }
 
 // Plan is wat een actie zou doen, voor het voorbeeldscherm en de taak.
@@ -118,6 +121,9 @@ type PlannedHost struct {
 	AppSlug   string `json:"app_slug,omitempty"`
 	AppGroup  string `json:"app_group,omitempty"`
 	Outpost   string `json:"outpost,omitempty"`
+	// Advanced is de eigen Advanced van een nieuwe host (fase 42b). Met een
+	// eigen forward auth erin komt hij pas na Authentik in NPM.
+	Advanced string `json:"advanced,omitempty"`
 	// AKUndo is wat ClusterForge eerder in Authentik maakte (bij weghalen).
 	AKUndo *akCreated `json:"ak_undo,omitempty"`
 	// Waar de dienst draait, voor publish_hosts.
@@ -485,7 +491,7 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			if err != nil {
 				return Plan{}, err
 			}
-			adv, err := withSnippet(h.AdvancedConfig, outpost)
+			adv, err := s.protectAdvanced(ctx, h, name, outpost)
 			if err != nil {
 				return Plan{}, err
 			}
@@ -502,10 +508,24 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			if !hasSnippet(h.AdvancedConfig) {
 				return Plan{}, invalid("deze host heeft geen forward auth naar Authentik")
 			}
-			if !strings.Contains(h.AdvancedConfig, snippetBegin) {
+			tb := themeBlock(h.AdvancedConfig)
+			if !strings.Contains(h.AdvancedConfig, snippetBegin) && !hasSnippet(tb) {
 				return Plan{}, invalid("de forward auth van deze host is niet door ClusterForge gezet; haal hem in NPM weg (Advanced)")
 			}
-			ph.Unprotect, ph.Body = true, map[string]any{"advanced_config": withoutSnippet(h.AdvancedConfig)}
+			adv := withoutSnippet(h.AdvancedConfig)
+			if tb != "" {
+				t, err := s.Theme(ctx)
+				if err != nil {
+					return Plan{}, err
+				}
+				if themed, _, ok := t.themedAdvanced(h.AdvancedConfig, h.ID, name, false, ""); ok {
+					adv = themed
+					p.Lines = append(p.Lines, "NPM: sjabloon zonder Authentik in Advanced")
+				} else {
+					adv = ownAdvanced(h.AdvancedConfig)
+				}
+			}
+			ph.Unprotect, ph.Body = true, map[string]any{"advanced_config": adv}
 			p.Title = "Authentik weghalen: " + name
 			p.Lines = append(p.Lines, "NPM: forward auth uit Advanced")
 			if m, ok := managed[h.ID]; ok && m.AKCreated {
@@ -551,6 +571,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 		p.Hosts = append(p.Hosts, ph)
 	case ActRetargetMany:
 		if err := s.planRetargetMany(ctx, npm, managed, a, &p); err != nil {
+			return Plan{}, err
+		}
+	case ActThemeMany:
+		if err := s.planThemeMany(ctx, st, npm, managed, a, &p); err != nil {
 			return Plan{}, err
 		}
 	case ActRename:
@@ -713,6 +737,53 @@ func (s *Service) planPublish(ctx context.Context, st Settings, npm *NPMRead, ta
 	}
 	if a.Authentik != nil {
 		protect = *a.Authentik
+	}
+	own := ""
+	if a.AdvancedConfig != nil {
+		var err error
+		if own, err = keepSnippet("", *a.AdvancedConfig); err != nil {
+			return PlannedHost{}, nil, nil, err
+		}
+	}
+	manual := hasSnippet(own)
+	th, err := s.Theme(ctx)
+	if err != nil {
+		return PlannedHost{}, nil, nil, err
+	}
+	css := ""
+	if a.Theme == nil || *a.Theme {
+		css = th.cssFor(0, name)
+	}
+	if css != "" && (locationRoot.MatchString(own) || manual) {
+		warns = append(warns, "je eigen Advanced heeft een 'location /' of eigen forward auth; het sjabloon (thema) blijft daarom weg")
+		css = ""
+	}
+	protectOK := protect && st.AuthentikLinked()
+	switch {
+	case css != "":
+		body["advanced_config"] = joinBlocks(own, th.render(false, name, css, ""))
+		lines = append(lines, "Sjabloon voor Advanced met css "+css)
+		if protectOK {
+			outpost, err := s.outpostFor(ctx, st)
+			if err != nil {
+				return PlannedHost{}, nil, nil, err
+			}
+			ph.Advanced = joinBlocks(own, th.render(true, name, css, outpost))
+		}
+	case own == "":
+	case protectOK && !manual && locationRoot.MatchString(own):
+		return PlannedHost{}, nil, nil, invalid("je eigen Advanced heeft een 'location /'; die botst met de forward auth van ClusterForge. Laat 'location /' weg of zet hem in het sjabloon (Publicatie → Proxy hosts → Sjabloon)")
+	case protectOK && manual:
+		ph.Advanced = own
+		lines = append(lines, "Eigen Advanced met eigen forward auth: komt in NPM nadat Authentik de provider heeft")
+	case manual:
+		body["advanced_config"] = own
+		warns = append(warns, "je eigen Advanced gebruikt de outpost van Authentik, maar \"Achter Authentik\" staat uit: zonder provider voor deze naam geeft de outpost een fout")
+		lines = append(lines, "Eigen Advanced (nginx) meegegeven")
+	default:
+		body["advanced_config"] = own
+		ph.Advanced = own
+		lines = append(lines, "Eigen Advanced (nginx) meegegeven")
 	}
 	if protect {
 		if !st.AuthentikLinked() {
@@ -891,7 +962,7 @@ func (s *Service) runApply(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
-	if p.Action.Action == ActRetargetMany && len(p.Plan.Hosts) > 1 {
+	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany) && len(p.Plan.Hosts) > 1 {
 		return s.runMany(ctx, j, st, node, snapshot, p)
 	}
 	for i := range p.Plan.Hosts {
@@ -1043,9 +1114,11 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 			if err != nil {
 				return err
 			}
-			adv, err := withSnippet("", ph.Outpost)
-			if err != nil {
-				return err
+			adv := ph.Advanced
+			if !hasSnippet(adv) {
+				if adv, err = withSnippet(ph.Advanced, ph.Outpost); err != nil {
+					return err
+				}
 			}
 			if _, err := s.npmWrite(ctx, st, node, hostID, map[string]any{"advanced_config": adv}, false); err != nil {
 				return err

@@ -1733,6 +1733,12 @@ type PublishHost struct {
 	UpdatedBy    *uuid.UUID
 }
 
+type PublishHostCss struct {
+	HostID    int32
+	Css       string
+	UpdatedAt time.Time
+}
+
 type PublishRead struct {
 	Kind   string
 	Data   []byte
@@ -1765,6 +1771,14 @@ type PublishSetting struct {
 	AuthentikOutpost   string
 	UpdatedAt          time.Time
 	UpdatedBy          *uuid.UUID
+}
+
+type PublishTheme struct {
+	ID            bool
+	TemplateAuth  string
+	TemplatePlain string
+	CssDefault    string
+	UpdatedAt     time.Time
 }
 
 type PublishTraffic struct {

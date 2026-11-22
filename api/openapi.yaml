@@ -5726,6 +5726,54 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /publish/theme:
+    get:
+      operationId: getPublishTheme
+      summary: Sjabloon voor Advanced van de proxy hosts, met de css per host (fase 42b)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: savePublishTheme
+      summary: Het algemene sjabloon en de standaard-css bewaren (admin); leeg = standaardsjabloon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/theme/hosts/{hostId}:
+    parameters:
+      - { name: hostId, in: path, required: true, schema: { type: integer } }
+    put:
+      operationId: setPublishHostCss
+      summary: Het css-bestand van één proxy host (admin); leeg = standaard, "-" = geen thema
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /publish/test/{what}:
     parameters:
       - { name: what, in: path, required: true, schema: { type: string, enum: [npm, authentik] } }

@@ -67,6 +67,11 @@ type HostView struct {
 	HSTS          bool   `json:"hsts"`
 	BlockExploits bool   `json:"block_exploits"`
 	Advanced      string `json:"advanced,omitempty"`
+	// Themed: het sjabloon staat in Advanced; CSS is het css-bestand dat
+	// het sjabloon zou gebruiken, CSSSet de eigen keuze ("-" = geen thema).
+	Themed bool   `json:"themed,omitempty"`
+	CSS    string `json:"css,omitempty"`
+	CSSSet string `json:"css_set,omitempty"`
 	// Typo: verbeterde naam bij een tikfout in het domein.
 	Typo string `json:"typo,omitempty"`
 	// TypoDomains: alle namen met de tikfout rechtgezet (voor één klik).
@@ -110,7 +115,9 @@ type Overview struct {
 	Counts    Counts       `json:"counts"`
 	Clusters  []ClusterRef `json:"clusters"`
 	Certs     []CertView   `json:"certs"`
-	Protocol  int          `json:"protocol"`
+	// Outpost is het adres van de Authentik-outpost voor sjablonen (fase 42b).
+	Outpost  string `json:"outpost,omitempty"`
+	Protocol int    `json:"protocol"`
 }
 
 // ClusterRef is een cluster om in de instellingen te kiezen.
@@ -274,6 +281,16 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 	akRead := st.AuthentikLinked() && !akAt.IsZero()
 	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now())
 	ov.Apps = buildApps(npm, ak)
+	if st.AuthentikLinked() {
+		ov.Outpost, _ = s.outpostFor(ctx, st)
+	}
+	if th, err := s.Theme(ctx); err == nil {
+		for i, h := range ov.Hosts {
+			if len(h.Domains) > 0 {
+				ov.Hosts[i].CSS, ov.Hosts[i].CSSSet = th.cssFor(h.ID, h.Domains[0]), th.Hosts[h.ID]
+			}
+		}
+	}
 	ov.Certs = make([]CertView, 0, len(npm.Certs))
 	for _, c := range npm.Certs {
 		cv := CertView{ID: c.ID, Name: certLabel(c), Domains: c.DomainNames, Provider: c.Provider}
@@ -383,7 +400,7 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 			Enabled: h.IsEnabled(), SSLForced: bool(h.SSLForced), Websockets: bool(h.AllowWebsocketUpgrade), CertID: h.CertID(),
 			HasAdvanced: strings.TrimSpace(h.AdvancedConfig) != "", AccessList: listByID[h.AccessListID], Problems: []Problem{},
 			HTTP2: bool(h.HTTP2Support), HSTS: bool(h.HSTSEnabled), BlockExploits: bool(h.BlockExploits),
-			Advanced: strings.TrimSpace(withoutSnippet(h.AdvancedConfig)),
+			Advanced: ownAdvanced(h.AdvancedConfig), Themed: themeBlock(h.AdvancedConfig) != "",
 		}
 		add := func(code, level, format string, args ...any) {
 			v.Problems = append(v.Problems, Problem{Code: code, Level: level, Text: fmt.Sprintf(format, args...)})

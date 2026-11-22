@@ -15965,6 +15965,12 @@ type PlanPublishJSONRequestBody = PveObject
 // SavePublishSettingsJSONRequestBody defines body for SavePublishSettings for application/json ContentType.
 type SavePublishSettingsJSONRequestBody = PveObject
 
+// SavePublishThemeJSONRequestBody defines body for SavePublishTheme for application/json ContentType.
+type SavePublishThemeJSONRequestBody = PveObject
+
+// SetPublishHostCssJSONRequestBody defines body for SetPublishHostCss for application/json ContentType.
+type SetPublishHostCssJSONRequestBody = PveObject
+
 // StartPveHostActionJSONRequestBody defines body for StartPveHostAction for application/json ContentType.
 type StartPveHostActionJSONRequestBody = PveActionInput
 
@@ -17107,6 +17113,15 @@ type ServerInterface interface {
 	// TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
 	// (POST /publish/test/{what})
 	TestPublishLink(w http.ResponseWriter, r *http.Request, what string)
+	// GetPublishTheme Sjabloon voor Advanced van de proxy hosts, met de css per host (fase 42b)
+	// (GET /publish/theme)
+	GetPublishTheme(w http.ResponseWriter, r *http.Request)
+	// SavePublishTheme Het algemene sjabloon en de standaard-css bewaren (admin); leeg = standaardsjabloon
+	// (PUT /publish/theme)
+	SavePublishTheme(w http.ResponseWriter, r *http.Request)
+	// SetPublishHostCss Het css-bestand van één proxy host (admin); leeg = standaard, "-" = geen thema
+	// (PUT /publish/theme/hosts/{hostId})
+	SetPublishHostCss(w http.ResponseWriter, r *http.Request, hostId int)
 	// GetPublishTraffic Verkeer van NPM per host en client-IP, open verbindingen en de vergelijking met de bans van CrowdSec (fase 39)
 	// (GET /publish/traffic)
 	GetPublishTraffic(w http.ResponseWriter, r *http.Request, params GetPublishTrafficParams)
@@ -19474,6 +19489,24 @@ func (_ Unimplemented) SavePublishSettings(w http.ResponseWriter, r *http.Reques
 // TestPublishLink De koppeling met NPM of Authentik proberen via de agent (admin)
 // (POST /publish/test/{what})
 func (_ Unimplemented) TestPublishLink(w http.ResponseWriter, r *http.Request, what string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishTheme Sjabloon voor Advanced van de proxy hosts, met de css per host (fase 42b)
+// (GET /publish/theme)
+func (_ Unimplemented) GetPublishTheme(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishTheme Het algemene sjabloon en de standaard-css bewaren (admin); leeg = standaardsjabloon
+// (PUT /publish/theme)
+func (_ Unimplemented) SavePublishTheme(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetPublishHostCss Het css-bestand van één proxy host (admin); leeg = standaard, "-" = geen thema
+// (PUT /publish/theme/hosts/{hostId})
+func (_ Unimplemented) SetPublishHostCss(w http.ResponseWriter, r *http.Request, hostId int) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -30090,6 +30123,60 @@ func (siw *ServerInterfaceWrapper) TestPublishLink(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishTheme operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishTheme(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishTheme(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishTheme operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishTheme(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishTheme(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetPublishHostCss operation middleware
+func (siw *ServerInterfaceWrapper) SetPublishHostCss(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hostId" -------------
+	var hostId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hostId", chi.URLParam(r, "hostId"), &hostId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hostId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPublishHostCss(w, r, hostId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPublishTraffic operation middleware
 func (siw *ServerInterfaceWrapper) GetPublishTraffic(w http.ResponseWriter, r *http.Request) {
 
@@ -33492,6 +33579,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/publish/settings", wrapper.SavePublishSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/theme", wrapper.GetPublishTheme)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/theme", wrapper.SavePublishTheme)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/theme/hosts/{hostId}", wrapper.SetPublishHostCss)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/test/{what}", wrapper.TestPublishLink)

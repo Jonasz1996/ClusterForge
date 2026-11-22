@@ -187,3 +187,48 @@ func (s *Server) GetPublishLogins(w http.ResponseWriter, r *http.Request, params
 	}
 	writeJSON(w, http.StatusOK, v)
 }
+
+func (s *Server) GetPublishTheme(w http.ResponseWriter, r *http.Request) {
+	t, err := s.publish.Theme(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) SavePublishTheme(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in publish.ThemeInput
+	if !decode(w, r, &in) {
+		return
+	}
+	t, err := s.publish.SaveTheme(r.Context(), events.User(p.User.ID), in)
+	if err != nil {
+		s.publishError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) SetPublishHostCss(w http.ResponseWriter, r *http.Request, hostID int) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		CSS string `json:"css"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	t, err := s.publish.SetHostCSS(r.Context(), events.User(p.User.ID), hostID, in.CSS)
+	if err != nil {
+		s.publishError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}

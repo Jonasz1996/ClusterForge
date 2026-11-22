@@ -96,6 +96,9 @@ export type PublishHost = {
   advanced?: string;
   typo?: string;
   typo_domains?: string[];
+  themed?: boolean;
+  css?: string;
+  css_set?: string;
 };
 
 export type PublishSuggestion = {
@@ -197,10 +200,11 @@ export type PublishOverview = {
   };
   clusters: { id: string; name: string; template?: string; vips?: string[] }[];
   certs?: PublishCert[];
+  outpost?: string;
   protocol: number;
 };
 
-export type PublishActionKind = "publish" | "update" | "retarget" | "retarget_many" | "protect" | "unprotect" | "delete" | "restore" | "rename";
+export type PublishActionKind = "publish" | "update" | "retarget" | "retarget_many" | "protect" | "unprotect" | "delete" | "restore" | "rename" | "theme_many";
 
 export type PublishAction = {
   action: PublishActionKind;
@@ -225,6 +229,7 @@ export type PublishAction = {
   advanced_config?: string;
   ssl_forced?: boolean;
   domains?: string[];
+  theme?: boolean;
 };
 
 export type PublishPlan = {
@@ -446,3 +451,40 @@ export const actionLabel: Record<string, string> = {
   logout: "afgemeld",
   authorize_application: "app geopend",
 };
+
+// Sjabloon voor Advanced (fase 42b): één algemeen sjabloon met en zonder
+// Authentik, met per host een eigen css-bestand.
+export type PublishTheme = {
+  template_auth: string;
+  template_plain: string;
+  css_default: string;
+  hosts: Record<string, string>;
+  default_auth: string;
+  default_plain: string;
+  updated_at?: string;
+};
+
+export function usePublishTheme() {
+  return useQuery({
+    queryKey: ["publish", "theme"],
+    queryFn: async () => unwrap(await api.GET("/publish/theme")) as unknown as PublishTheme,
+  });
+}
+
+export function useSavePublishTheme() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: { template_auth: string; template_plain: string; css_default: string }) =>
+      unwrap(await api.PUT("/publish/theme", { body: body as unknown as Body })) as unknown as PublishTheme,
+    onSuccess: done,
+  });
+}
+
+export function useSetHostCss() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async ({ hostId, css }: { hostId: number; css: string }) =>
+      unwrap(await api.PUT("/publish/theme/hosts/{hostId}", { params: { path: { hostId } }, body: { css } as unknown as Body })) as unknown as PublishTheme,
+    onSuccess: done,
+  });
+}

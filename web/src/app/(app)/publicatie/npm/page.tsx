@@ -5,6 +5,7 @@ import { askConfirm } from "@/components/Confirm";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ActionModal } from "@/components/publish/ActionModal";
 import { HostEditor } from "@/components/publish/HostEditor";
+import { ThemeEditor } from "@/components/publish/ThemeEditor";
 import { AKBadge, Empty, StatusBar } from "@/components/publish/bits";
 import { toast } from "@/components/Toast";
 import { Alert, Badge, Button, Card, Input, PageHeader } from "@/components/ui";
@@ -26,6 +27,7 @@ export default function PublishNPMPage() {
   const [picked, setPicked] = useState<number[]>([]);
   const [open, setOpen] = useState<Open | null>(null);
   const [edit, setEdit] = useState<PublishHost | "new" | null>(null);
+  const [theme, setTheme] = useState(false);
 
   const hosts = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -60,6 +62,9 @@ export default function PublishNPMPage() {
           {admin && ov.npm.linked && (
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => setEdit("new")}>Proxy host toevoegen</Button>
+              <Button variant="secondary" onClick={() => setTheme(true)}>
+                Sjabloon (Advanced en css)
+              </Button>
               {suggested.length > 0 && (
                 <Button
                   variant="secondary"
@@ -159,6 +164,7 @@ export default function PublishNPMPage() {
         </>
       )}
       {open && <ActionModal title={open.title} action={open.action} onClose={() => setOpen(null)} />}
+      {theme && ov && <ThemeEditor ov={ov} onClose={() => setTheme(false)} />}
       {edit && ov && <HostEditor host={edit === "new" ? null : edit} ov={ov} onClose={() => setEdit(null)} />}
     </div>
   );

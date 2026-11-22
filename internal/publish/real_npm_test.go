@@ -563,6 +563,51 @@ func TestRealNPM(t *testing.T) {
 	if c := conf(old[0]); !strings.Contains(c, "webapp.example.test") || strings.Contains(c, "exampel") {
 		t.Fatalf("tikfout niet rechtgezet:\n%s", c)
 	}
+
+	// 11. Sjabloon (fase 42b): standaard-css, één host zonder thema; de
+	// eigen regel blijft staan.
+	if _, err := s.SaveTheme(ctx, events.System(), ThemeInput{CSSDefault: "https://css.example.test/{naam}.css"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetHostCSS(ctx, events.System(), old[1], NoCSS); err != nil {
+		t.Fatal(err)
+	}
+	alive()
+	s.Refresh(ctx)
+	run(Action{Action: ActThemeMany, Hosts: old}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "css.example.test/extra.css") || !strings.Contains(c, "X-CF-Test fase42") || !strings.Contains(c, "sub_filter") {
+		t.Fatalf("sjabloon:\n%s", c)
+	}
+	if c := conf(old[1]); strings.Contains(c, "sub_filter") {
+		t.Fatalf("host zonder thema kreeg het sjabloon:\n%s", c)
+	}
+	s.Refresh(ctx)
+	ov, _ = s.Overview(ctx)
+	for _, h := range ov.Hosts {
+		if h.ID == old[0] && (!h.Themed || h.Advanced != adv || h.CSS != "https://css.example.test/extra.css") {
+			t.Fatalf("sjabloon in overzicht: %+v", h)
+		}
+	}
+	// Eigen css voor de host, opnieuw toepassen.
+	if _, err := s.SetHostCSS(ctx, events.System(), old[0], "https://css.example.test/eigen.css"); err != nil {
+		t.Fatal(err)
+	}
+	alive()
+	run(Action{Action: ActThemeMany, Hosts: []int{old[0]}}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "eigen.css") || strings.Contains(c, "extra.css") {
+		t.Fatalf("eigen css:\n%s", c)
+	}
+	// De Authentik-knop wisselt naar het sjabloon met de outpost en terug.
+	alive()
+	run(Action{Action: ActProtect, HostID: old[0]}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "eigen.css") || !strings.Contains(c, "auth_request /outpost.goauthentik.io") || strings.Contains(c, snippetBegin) {
+		t.Fatalf("beschermen met sjabloon:\n%s", c)
+	}
+	alive()
+	run(Action{Action: ActUnprotect, HostID: old[0]}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "eigen.css") || strings.Contains(c, "goauthentik") {
+		t.Fatalf("weghalen met sjabloon:\n%s", c)
+	}
 }
 
 func loginNPM(t *testing.T, port, identity, secret string) string {
