@@ -50,8 +50,11 @@ type Node struct {
 	Template    string     `json:"cluster_template"`
 	Online      bool       `json:"online"`
 	Protocol    int        `json:"protocol"`
-	// Supported: de agent kent de firewall (protocol 30).
+	// Supported: de agent kent de firewall (protocol 30) en de node is
+	// een gewone Linux-node (geen OPNsense of TrueNAS).
 	Supported bool `json:"supported"`
+	// Unsupported zegt waarom niet.
+	Unsupported string `json:"unsupported,omitempty"`
 	// Mode is off, preview of managed.
 	Mode          string                   `json:"mode"`
 	Status        *protocol.FirewallStatus `json:"status"`
@@ -155,11 +158,20 @@ func (s *Service) nodes(ctx context.Context, sql string, args ...any) ([]Node, e
 		}
 		n.Protocol = int(proto)
 		n.Supported = n.Protocol >= protocol.FirewallSince
+		if !n.Supported {
+			n.Unsupported = "agent te oud (protocol 30 nodig; Nodes → Agents bijwerken)"
+		}
 		n.Online = hb != nil && now.Sub(*hb) <= status.HeartbeatLate
 		if len(facts) > 0 {
 			var f protocol.Facts
 			if json.Unmarshal(facts, &f) == nil {
 				n.facts = &f
+				if app := f.Appliance(); app != "" {
+					// Eigen firewall: een automatische toepassing zou
+					// elk uur opnieuw mislukken.
+					n.Supported = false
+					n.Unsupported = app + " heeft een eigen firewall; ClusterForge beheert daar geen ufw"
+				}
 				if n.Address == "" {
 					n.Address = f.PrimaryAddress
 				}

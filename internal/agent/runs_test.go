@@ -167,7 +167,7 @@ func TestRunDocker(t *testing.T) {
 	if res.Status == nil || res.Status.State != protocol.RunOK {
 		t.Fatalf("%+v", res)
 	}
-	want := "docker compose ls -a --format json;docker compose -p web -f /srv/web/compose.yml pull;docker compose -p web -f /srv/web/compose.yml up -d;docker image prune -f"
+	want := "docker compose ls -a --format json;docker compose -p web -f /srv/web/compose.yml config --format json;docker compose -p web -f /srv/web/compose.yml pull --ignore-buildable;docker compose -p web -f /srv/web/compose.yml up -d;docker image prune -f"
 	if got := strings.Join(h.called("docker"), ";"); got != want {
 		t.Errorf("commando's:\n%s\nwil\n%s", got, want)
 	}
@@ -179,7 +179,7 @@ func TestRunDocker(t *testing.T) {
 	if got := h.called("docker compose -p npm -f /srv/npm/a.yml -f /srv/npm/b.yml up -d"); len(got) != 1 {
 		t.Errorf("npm: %v", h.calls)
 	}
-	if got := h.called("docker compose -p web"); len(got) != 2 {
+	if got := h.called("docker compose -p web"); len(got) != 3 {
 		t.Errorf("web na npm (alfabetisch npm eerst): %v", h.calls)
 	}
 	// Een onbekend project is een fout.

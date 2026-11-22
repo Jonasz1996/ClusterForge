@@ -228,6 +228,11 @@ export const navGroups: NavGroup[] = [
         keywords: "apt upgrade versies pakketten",
       },
       {
+        href: "/onderhoud",
+        label: "Automatisch onderhoud",
+        keywords: "opruimen schijf logs journal docker prune database optimize vacuum analyze index automatisch",
+      },
+      {
         href: "/back-ups",
         label: "Back-ups",
         keywords: "backup restore controle",

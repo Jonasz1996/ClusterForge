@@ -12206,6 +12206,23 @@ type Preferences struct {
 	KubeLearning bool `json:"kube_learning"`
 }
 
+// Prod2FA defines model for Prod2FA.
+type Prod2FA struct {
+	// Required Acties op prodclusters vragen een account met tweestapsverificatie. Het intikken van de clusternaam blijft altijd.
+	Required  bool                         `json:"required"`
+	UpdatedAt nullable.Nullable[time.Time] `json:"updated_at"`
+}
+
+// Prod2FAInput defines model for Prod2FAInput.
+type Prod2FAInput struct {
+	// Password Om uit te zetten: je wachtwoord (zonder tweestapsverificatie)
+	Password *string `json:"password,omitempty"`
+	Required bool    `json:"required"`
+
+	// TotpCode Om uit te zetten: je code (met tweestapsverificatie)
+	TotpCode *string `json:"totp_code,omitempty"`
+}
+
 // ProxmoxConnection defines model for ProxmoxConnection.
 type ProxmoxConnection struct {
 	// ApiUrl Bijvoorbeeld https://pve1.lan:8006
@@ -16210,6 +16227,9 @@ type ApplySecurityFixesJSONRequestBody = SecurityFixInput
 // CreateSecurityImportTokenJSONRequestBody defines body for CreateSecurityImportToken for application/json ContentType.
 type CreateSecurityImportTokenJSONRequestBody = SecurityObject
 
+// SetProd2FAJSONRequestBody defines body for SetProd2FA for application/json ContentType.
+type SetProd2FAJSONRequestBody = Prod2FAInput
+
 // RefreshSecurityJSONRequestBody defines body for RefreshSecurity for application/json ContentType.
 type RefreshSecurityJSONRequestBody = SecurityRefreshInput
 
@@ -17460,6 +17480,12 @@ type ServerInterface interface {
 	// RevokeSecurityImportToken Importsleutel intrekken (admin)
 	// (DELETE /security/import-tokens/{tokenId})
 	RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID)
+	// GetProd2FA Of acties op prodclusters tweestapsverificatie vragen
+	// (GET /security/prod-2fa)
+	GetProd2FA(w http.ResponseWriter, r *http.Request)
+	// SetProd2FA Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code)
+	// (PUT /security/prod-2fa)
+	SetProd2FA(w http.ResponseWriter, r *http.Request)
 	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 	// (POST /security/refresh)
 	RefreshSecurity(w http.ResponseWriter, r *http.Request)
@@ -19998,6 +20024,18 @@ func (_ Unimplemented) CreateSecurityImportToken(w http.ResponseWriter, r *http.
 // RevokeSecurityImportToken Importsleutel intrekken (admin)
 // (DELETE /security/import-tokens/{tokenId})
 func (_ Unimplemented) RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetProd2FA Of acties op prodclusters tweestapsverificatie vragen
+// (GET /security/prod-2fa)
+func (_ Unimplemented) GetProd2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetProd2FA Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code)
+// (PUT /security/prod-2fa)
+func (_ Unimplemented) SetProd2FA(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -31488,6 +31526,34 @@ func (siw *ServerInterfaceWrapper) RevokeSecurityImportToken(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
+// GetProd2FA operation middleware
+func (siw *ServerInterfaceWrapper) GetProd2FA(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProd2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetProd2FA operation middleware
+func (siw *ServerInterfaceWrapper) SetProd2FA(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetProd2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RefreshSecurity operation middleware
 func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
 
@@ -33125,6 +33191,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nav/usage", wrapper.GetNavUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/prod-2fa", wrapper.GetProd2FA)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/security/prod-2fa", wrapper.SetProd2FA)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/disk/settings", wrapper.GetDiskWatchSettings)

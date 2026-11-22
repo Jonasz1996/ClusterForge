@@ -80,7 +80,7 @@ func (s *Server) IssueKubeAccess(w http.ResponseWriter, r *http.Request, cluster
 		s.kubeError(w, r, err)
 		return
 	}
-	if role == protocol.KubeAccessAdmin && !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een admin-kubeconfig krijgen") {
+	if role == protocol.KubeAccessAdmin && !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een admin-kubeconfig krijgen") {
 		return
 	}
 	if s.authError(w, r, s.auth.Confirm(ctx, p, deref(in.Password), deref(in.TotpCode), "kube_access")) {

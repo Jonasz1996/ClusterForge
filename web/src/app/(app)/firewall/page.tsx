@@ -58,6 +58,7 @@ function Firewall() {
         description="ClusterForge beheert ufw op de nodes die je aanzet: open wat de software gebruikt, voor wie het nodig is, de rest dicht. Clusterpoorten gaan alleen open voor de andere clusterleden, SSH blijft altijd open en een toepassing die de node onbereikbaar maakt, draait zichzelf terug."
       />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      {data.isPending && <p className="text-sm text-slate-500">Firewall van de nodes laden…</p>}
       {data.isError && <Alert>Firewall laden mislukte.</Alert>}
       {data.data && tab === "overzicht" && <OverviewTab o={data.data} isAdmin={isAdmin} goNodes={() => setTab("nodes")} />}
       {data.data && tab === "verkeer" && <TrafficTab o={data.data} isAdmin={isAdmin} />}

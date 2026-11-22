@@ -171,6 +171,9 @@ type RunRequest struct {
 }
 
 // RunStatus is de stand van een run.
+// RunLostError is de fout van een run die zonder eindstand wegviel.
+const RunLostError = "de run stopte onverwacht (herstart van de node?)"
+
 type RunStatus struct {
 	State     string     `json:"state"`
 	StartedAt time.Time  `json:"started_at,omitzero"`

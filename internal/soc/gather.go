@@ -299,7 +299,8 @@ func (s *Service) coverage(ctx context.Context, now time.Time) ([]CoverageRow, e
 			for _, sv := range f.Services {
 				switch strings.TrimSuffix(sv.Name, ".service") {
 				case "ufw":
-					fw.serviceActive = sv.Active == "active"
+					// ufw.service is een oneshot: "active" ook met een
+					// uitgeschakelde ufw. Alleen de firewallstand telt.
 				case "crowdsec":
 					cs.serviceActive = sv.Active == "active"
 				}

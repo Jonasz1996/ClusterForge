@@ -216,7 +216,7 @@ func (s *Server) StartUpdates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "werk de nodes van één prodcluster tegelijk bij")
 		return
 	}
-	if len(prod) == 1 && !confirmProd(w, p, true, prod[0], in.Confirm, "bijwerken") {
+	if len(prod) == 1 && !s.confirmProd(w, r, p, true, prod[0], in.Confirm, "bijwerken") {
 		return
 	}
 	started, skipped, err := s.updates.Start(ctx, events.User(p.User.ID), req, nodes)
@@ -443,7 +443,7 @@ func (s *Server) RunCommand(w http.ResponseWriter, r *http.Request, id uuid.UUID
 		writeError(w, http.StatusBadRequest, "invalid", "draai een commando op één prodcluster tegelijk")
 		return
 	}
-	if len(t.Prod) == 1 && !confirmProd(w, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
+	if len(t.Prod) == 1 && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
 		return
 	}
 	j, err := s.commands.Start(ctx, events.User(p.User.ID), id, req, t)
@@ -480,7 +480,7 @@ func (s *Server) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "draai een commando op één prodcluster tegelijk")
 		return
 	}
-	if len(t.Prod) == 1 && !confirmProd(w, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
+	if len(t.Prod) == 1 && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
 		return
 	}
 	o := commands.Once{Name: deref(in.Name), Script: in.Script, RunAs: deref(in.RunAs)}
@@ -525,7 +525,7 @@ func (s *Server) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, out)
 		return
 	}
-	if len(plan.Prod) > 0 && !confirmProd(w, p, true, "prod", in.Confirm, "prodclusters bijwerken") {
+	if len(plan.Prod) > 0 && !s.confirmProd(w, r, p, true, "prod", in.Confirm, "prodclusters bijwerken") {
 		return
 	}
 	req := updates.Request{Reboot: in.Reboot != nil && *in.Reboot, NoFailover: in.Failover != nil && !*in.Failover}
@@ -600,7 +600,7 @@ func (s *Server) ResumeUpdate(w http.ResponseWriter, r *http.Request, jobID uuid
 	}
 	for _, n := range nodes {
 		if n.Prod() {
-			if !confirmProd(w, p, true, n.ClusterSlug, in.Confirm, "bijwerken") {
+			if !s.confirmProd(w, r, p, true, n.ClusterSlug, in.Confirm, "bijwerken") {
 				return
 			}
 			break

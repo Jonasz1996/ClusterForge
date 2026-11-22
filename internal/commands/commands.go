@@ -382,7 +382,7 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		spec := protocol.RunSpec{
 			ID: fmt.Sprintf("%s-%d-%d-cmd", j.ID, j.Attempts, i), Kind: protocol.RunScript,
 			Title:  title,
-			Script: p.Script, User: p.RunAs, TimeoutSeconds: p.TimeoutSeconds,
+			Script: Strict(p.Script), User: p.RunAs, TimeoutSeconds: p.TimeoutSeconds,
 		}
 		err := j.Step(ctx, name, func(ctx context.Context, st *jobs.Step) error {
 			res, err := s.Run.Do(ctx, st, n.ID, spec)
@@ -434,4 +434,22 @@ func clipScript(s string) string {
 		return string(r[:2000]) + "…"
 	}
 	return s
+}
+
+// shellShebang herkent een #!-regel van sh, bash of dash.
+var shellShebang = regexp.MustCompile(`^#!\s*(/usr)?/bin/(env\s+)?(ba|da)?sh(\s|$)`)
+
+// Strict zet set -e voor een shellscript, zodat een commando dat faalt het
+// script stopt en de taak mislukt (en niet "Gelukt" toont omdat de laatste
+// regel lukte). Wie fouten wil negeren, zet zelf set +e in het script. Een
+// script met een andere interpreter (python, ...) blijft zoals het is.
+func Strict(script string) string {
+	if !strings.HasPrefix(script, "#!") {
+		return "set -e\n" + script
+	}
+	first, rest, _ := strings.Cut(script, "\n")
+	if !shellShebang.MatchString(first) {
+		return script
+	}
+	return first + "\nset -e\n" + rest
 }

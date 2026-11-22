@@ -38,7 +38,7 @@ func (s *Server) RemediateClusterDrift(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	if plan.NeedsConfirmation() {
-		if p.User.TotpEnabledAt == nil {
+		if s.needs2FA(r.Context(), p) {
 			writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie herstellen; zet die aan bij Instellingen")
 			return
 		}

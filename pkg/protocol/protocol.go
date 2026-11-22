@@ -706,6 +706,21 @@ type EnrollResponse struct {
 // Stable geeft een kopie zonder velden die bij elke meting veranderen, zoals
 // schijfgebruik. Daarover rekent de server de hash, zodat alleen een echte
 // wijziging een nieuwe snapshot en een event oplevert.
+// Appliance is de naam van een appliance met een eigen beheer (OPNsense,
+// TrueNAS) of een niet-Linux-systeem; leeg voor een gewone Linux-node.
+// Beleid voor Linux (ufw, apt, de Zabbix-agent) hoort daar niet.
+func (f Facts) Appliance() string {
+	switch {
+	case f.OPNsense != nil || f.OS.ID == "opnsense":
+		return "OPNsense"
+	case f.TrueNAS != nil:
+		return "TrueNAS"
+	case f.OS.ID == "freebsd":
+		return "FreeBSD"
+	}
+	return ""
+}
+
 func (f Facts) Stable() Facts {
 	out := f
 	out.Filesystems = make([]Filesystem, len(f.Filesystems))

@@ -85,6 +85,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
+	"github.com/Jonasz1996/clusterforge/internal/upkeep"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
@@ -249,6 +250,10 @@ func serve() error {
 	csec.Box = box
 	// Fase 41: schijfbewaking en veilig opruimen, via scripttaken.
 	dsk := diskwatch.NewService(pool, ev, runner, bus, log)
+	// Fase 46: automatisch onderhoud door de agents (schijf en databases),
+	// per cluster rolling met het clusterslot, via scripttaken.
+	upk := upkeep.NewService(pool, ev, runner, bus, log)
+	upk.Nodes, upk.Disk, upk.DB = upd.Overview, dsk.Full, dbs.Overview
 	// Zabbix-agents: zabbix-agent2 met een eigen PSK per node, via runs en de Zabbix API.
 	zba := zabbixagent.NewService(pool, ev, runner, bus, log)
 	zbm := zabbixmon.NewService(pool, ev, zba, log)
@@ -372,6 +377,7 @@ func serve() error {
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
 		planner.Task{Name: "automatisch bijwerken", Tick: upd.AutoTick},
+		planner.Task{Name: "automatisch onderhoud", Tick: upk.Tick},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
 		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
@@ -510,7 +516,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -45,7 +45,7 @@ func (s *Server) RemoveKubeNode(w http.ResponseWriter, r *http.Request, clusterI
 		})
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een worker weghalen") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een worker weghalen") {
 		return
 	}
 	j, err := s.kubeNodes.Request(ctx, events.User(p.User.ID), clusterID, in.Node, deref(in.Force))
