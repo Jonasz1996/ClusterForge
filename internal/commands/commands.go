@@ -261,7 +261,9 @@ type params struct {
 	RunAs           string    `json:"run_as"`
 	TimeoutSeconds  int       `json:"timeout_seconds"`
 	ContinueOnError bool      `json:"continue_on_error,omitempty"`
-	Nodes           []node    `json:"nodes"`
+	// Once: een eenmalig commando, zonder eigen commando erachter.
+	Once  bool   `json:"once,omitempty"`
+	Nodes []node `json:"nodes"`
 }
 
 type node struct {
@@ -285,6 +287,37 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, id uuid.UUID, r
 		CommandID: c.ID, Name: c.Name, Revision: int(c.Revision), Script: c.Script, RunAs: c.RunAs,
 		TimeoutSeconds: int(c.TimeoutSeconds), ContinueOnError: req.ContinueOnError,
 	}
+	return s.enqueue(ctx, actor, p, t)
+}
+
+// Once is een eenmalig commando (fase 47): het draait zoals een eigen
+// commando, met live uitvoer en een regel in het logboek per node, maar
+// komt niet in de lijst met eigen commando's. De tekst staat in de taak.
+type Once struct {
+	// Name is de titel van de taak; leeg wordt "Eenmalig commando".
+	Name           string
+	Script         string
+	RunAs          string
+	TimeoutSeconds int
+}
+
+// StartOnce zet een eenmalig commando in de wachtrij.
+func (s *Service) StartOnce(ctx context.Context, actor events.Actor, o Once, req RunRequest, t Target) (store.Job, error) {
+	in := Input{Name: o.Name, Script: o.Script, RunAs: o.RunAs, TimeoutSeconds: o.TimeoutSeconds}
+	if strings.TrimSpace(in.Name) == "" {
+		in.Name = "Eenmalig commando"
+	}
+	if err := in.normalize(); err != nil {
+		return store.Job{}, err
+	}
+	p := params{
+		Name: in.Name, Script: in.Script, RunAs: in.RunAs, TimeoutSeconds: in.TimeoutSeconds,
+		ContinueOnError: req.ContinueOnError, Once: true,
+	}
+	return s.enqueue(ctx, actor, p, t)
+}
+
+func (s *Service) enqueue(ctx context.Context, actor events.Actor, p params, t Target) (store.Job, error) {
 	var cluster *uuid.UUID
 	same := true
 	for i, n := range t.Nodes {
@@ -299,16 +332,17 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, id uuid.UUID, r
 	spec := jobs.Spec{Kind: Kind, Params: p, Actor: actor}
 	switch {
 	case len(t.Nodes) == 1:
-		spec.Title, spec.NodeID = fmt.Sprintf("%s op %s", c.Name, t.Nodes[0].Hostname), &t.Nodes[0].NodeID
+		spec.Title, spec.NodeID = fmt.Sprintf("%s op %s", p.Name, t.Nodes[0].Hostname), &t.Nodes[0].NodeID
 	case same && cluster != nil:
-		spec.Title = fmt.Sprintf("%s in %s", c.Name, t.Nodes[0].ClusterName)
+		spec.Title = fmt.Sprintf("%s in %s", p.Name, t.Nodes[0].ClusterName)
 	default:
-		spec.Title = fmt.Sprintf("%s op %d nodes", c.Name, len(t.Nodes))
+		spec.Title = fmt.Sprintf("%s op %d nodes", p.Name, len(t.Nodes))
 	}
 	if same {
 		spec.ClusterID = cluster
 	}
 	var j store.Job
+	var err error
 	if spec.ClusterID != nil {
 		j, err = s.runner.EnqueueForCluster(ctx, spec)
 	} else {
@@ -341,9 +375,13 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		if n.VIPHolder {
 			name += " (VIP-houder)"
 		}
+		title := fmt.Sprintf("%s (revisie %d) op %s als %s", p.Name, p.Revision, n.Hostname, p.RunAs)
+		if p.Once {
+			title = fmt.Sprintf("%s (eenmalig) op %s als %s", p.Name, n.Hostname, p.RunAs)
+		}
 		spec := protocol.RunSpec{
 			ID: fmt.Sprintf("%s-%d-%d-cmd", j.ID, j.Attempts, i), Kind: protocol.RunScript,
-			Title:  fmt.Sprintf("%s (revisie %d) op %s als %s", p.Name, p.Revision, n.Hostname, p.RunAs),
+			Title:  title,
 			Script: p.Script, User: p.RunAs, TimeoutSeconds: p.TimeoutSeconds,
 		}
 		err := j.Step(ctx, name, func(ctx context.Context, st *jobs.Step) error {
@@ -352,11 +390,18 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 				return err
 			}
 			rt, _ := s.q.GetNodeRuntime(ctx, n.ID)
+			payload := map[string]any{
+				"command": p.Name, "command_id": p.CommandID.String(), "revision": p.Revision, "sha256": hash,
+				"hostname": n.Hostname, "result": res.State, "exit": res.Exit, "job_id": j.ID.String(),
+			}
+			if p.Once {
+				// Geen eigen commando: de tekst zelf in het logboek.
+				delete(payload, "command_id")
+				delete(payload, "revision")
+				payload["once"], payload["script"] = true, clipScript(p.Script)
+			}
 			_ = s.ev.Write(ctx, nil, events.Event{Actor: actor, SubjectType: "node", SubjectID: n.ID.String(), ClusterID: rt.ClusterID,
-				Action: "node.command_ran", Payload: map[string]any{
-					"command": p.Name, "command_id": p.CommandID.String(), "revision": p.Revision, "sha256": hash,
-					"hostname": n.Hostname, "result": res.State, "exit": res.Exit, "job_id": j.ID.String(),
-				}})
+				Action: "node.command_ran", Payload: payload})
 			if res.State != protocol.RunOK {
 				return errors.New(noderun.Describe(res))
 			}
@@ -381,4 +426,12 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		return fmt.Errorf("mislukt op %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// clipScript houdt het logboek klein: de eerste 2000 tekens.
+func clipScript(s string) string {
+	if r := []rune(s); len(r) > 2000 {
+		return string(r[:2000]) + "…"
+	}
+	return s
 }

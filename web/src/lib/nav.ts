@@ -20,21 +20,305 @@ export type NavItem = {
   keywords?: string;
   // tabs: het eerste tabblad is het item zelf (zelfde href).
   tabs?: NavTab[];
+  // needs: het item staat alleen in het menu als dit onderdeel in gebruik
+  // is (fase 47). Zoeken en "Alles tonen" vinden het altijd.
+  needs?: UsageKey;
 };
+
+// UsageKey is een veld van GET /nav/usage.
+export type UsageKey =
+  | "kubernetes"
+  | "gitops"
+  | "dependencies"
+  | "proxmox"
+  | "docker"
+  | "pbs"
+  | "truenas"
+  | "opnsense"
+  | "zabbix"
+  | "aiverslag";
+
+export type NavUsage = Partial<Record<UsageKey, boolean>>;
 
 export type NavGroup = { id: string; label: string; items: NavItem[] };
 
+// NavPlatform is een platform met zijn eigen onderdelen (fase 47): het
+// staat als tabblad onder Platformen in plaats van als groep in het menu.
+export type NavPlatform = { id: string; label: string; needs: UsageKey; items: NavItem[] };
+
+// inUse: zonder gegevens over gebruik (nog laden) telt alles als in gebruik
+// behalve wat een onderdeel nodig heeft.
+export function inUse(i: { needs?: UsageKey }, usage: NavUsage | undefined): boolean {
+  return !i.needs || !!usage?.[i.needs];
+}
+
 export const navHome: NavItem = {
   href: "/",
-  label: "Overzicht",
-  keywords: "dashboard start home aandacht",
+  label: "Wat moet ik doen",
+  keywords: "overzicht dashboard start home aandacht problemen oorzaken",
 };
 
 export const navGroups: NavGroup[] = [
   {
-    id: "hulp",
-    label: "Hulp",
+    id: "overzicht",
+    label: "Overzicht",
     items: [
+      navHome,
+      {
+        href: "/incidenten",
+        label: "Incidenten",
+        keywords: "storing problemen",
+        tabs: [
+          { href: "/incidenten", label: "Incidenten" },
+          {
+            href: "/tijdlijn",
+            label: "Tijdlijn",
+            keywords: "wijzigingen wat veranderde",
+          },
+        ],
+      },
+      {
+        href: "/monitoring",
+        label: "Monitoring",
+        keywords: "cpu ram grafiek metrics",
+      },
+      {
+        href: "/logs",
+        label: "Logs",
+        adminOnly: true,
+        keywords: "journald syslog docker logs",
+      },
+      {
+        href: "/rapporten",
+        label: "Rapporten",
+        keywords: "scorecard pdf",
+        tabs: [
+          { href: "/rapporten", label: "Rapporten" },
+          {
+            href: "/risico",
+            label: "Risico",
+            keywords: "spof single point of failure",
+          },
+        ],
+      },
+      {
+        href: "/zabbix/overzicht",
+        label: "Zabbix", needs: "zabbix",
+        keywords:
+          "zabbix problemen triggers beschikbaarheid hosts proxy ha dashboard",
+        tabs: [
+          { href: "/zabbix/overzicht", label: "Overzicht" },
+          {
+            href: "/zabbix/dashboards",
+            label: "Dashboards",
+            keywords:
+              "grafana grafieken kiosk tv top cpu geheugen mttr heatmap",
+          },
+          {
+            href: "/zabbix/problemen",
+            label: "Problemen",
+            keywords: "triggers alerts ernst",
+          },
+          {
+            href: "/zabbix/hosts",
+            label: "Hosts",
+            keywords: "beschikbaarheid koppelen",
+          },
+          {
+            href: "/zabbix",
+            label: "Agents",
+            keywords: "zabbix-agents agent2 psk sleutel",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "infra",
+    label: "Clusters & nodes",
+    items: [
+      {
+        href: "/clusters",
+        label: "Clusters",
+        keywords: "vip keepalived uitrollen",
+      },
+      {
+        href: "/nodes",
+        label: "Nodes",
+        keywords: "servers agents machines ct lxc vm",
+      },
+      {
+        href: "/platformen",
+        label: "Platformen",
+        keywords: "proxmox pbs backup server truenas opnsense docker platform hypervisor nas firewall",
+      },
+      {
+        href: "/kaart",
+        label: "Kaart", needs: "dependencies",
+        keywords: "netwerk vlan map",
+        tabs: [
+          { href: "/kaart", label: "Netwerk" },
+          {
+            href: "/afhankelijkheden",
+            label: "Afhankelijkheden",
+            keywords: "graaf dependencies",
+          },
+        ],
+      },
+      { href: "/kubernetes", label: "Kubernetes", needs: "kubernetes", keywords: "k3s pods" },
+    ],
+  },
+  {
+    id: "services",
+    label: "Diensten",
+    items: [
+      {
+        href: "/publicatie",
+        label: "Publicatie",
+        keywords:
+          "npm nginx proxy manager authentik subdomein domein jbogaert publiceren ssl certificaat forward auth",
+        tabs: [
+          {
+            href: "/publicatie",
+            label: "Diensten",
+            keywords: "diensten poorten containers vip publiceren",
+          },
+          {
+            href: "/publicatie/npm",
+            label: "Proxy hosts",
+            keywords: "npm nginx proxy host overnemen drift ssl",
+          },
+          {
+            href: "/publicatie/authentik",
+            label: "Authentik",
+            keywords: "authentik sso applicatie provider outpost forward auth",
+          },
+          {
+            href: "/publicatie/verkeer",
+            label: "Verkeer",
+            keywords: "npm logs verkeer aanvragen bezoekers ip crowdsec ban verbindingen 5xx",
+          },
+          {
+            href: "/publicatie/logins",
+            label: "Logins",
+            keywords: "authentik logins mislukte aanmeldingen brute force gebruikers",
+          },
+        ],
+      },
+      {
+        href: "/databases",
+        label: "Databases",
+        keywords: "mariadb galera postgresql patroni dump",
+      },
+      {
+        href: "/homepage-apps",
+        label: "Homepage-apps",
+        keywords:
+          "homepage tegels apps api v2 dashboard plex nextcloud herkennen",
+      },
+    ],
+  },
+  {
+    id: "onderhoud",
+    label: "Onderhoud",
+    items: [
+      {
+        href: "/updates",
+        label: "Updates",
+        keywords: "apt upgrade versies pakketten",
+      },
+      {
+        href: "/back-ups",
+        label: "Back-ups",
+        keywords: "backup restore controle",
+        tabs: [
+          { href: "/back-ups", label: "Controle" },
+          {
+            href: "/proxmox/backups",
+            label: "Proxmox",
+            keywords:
+              "pve vzdump pbs proxmox backup server terugzetten restore terugzettest retentie",
+          },
+        ],
+      },
+      { href: "/cronjobs", label: "Cronjobs", keywords: "cron rsync planning" },
+      {
+        href: "/commandos",
+        label: "Commando's",
+        keywords: "shell uitvoeren script",
+      },
+      { href: "/taken", label: "Taken", keywords: "jobs voortgang" },
+      {
+        href: "/templates",
+        label: "Templates",
+        keywords: "uitrollen blauwdruk",
+        tabs: [
+          { href: "/templates", label: "Templates" },
+          { href: "/recepten", label: "Recepten", keywords: "stappen" },
+        ],
+      },
+      {
+        href: "/tests",
+        label: "Tests",
+        keywords: "failover disaster recovery dr",
+      },
+      { href: "/gitops", label: "GitOps", needs: "gitops", keywords: "git github wijzigingen" },
+    ],
+  },
+  {
+    id: "security",
+    label: "Beveiliging",
+    items: [
+      {
+        href: "/soc",
+        label: "SOC",
+        keywords: "beveiliging dreiging aanvallers security dashboard score",
+      },
+      {
+        href: "/kwetsbaarheden",
+        label: "Kwetsbaarheden",
+        keywords:
+          "cve kev exploit debian security tracker pakketten lek patch verharding hardening cis lynis ssh sysctl suid scopes scan nmap subnet vlan pentest",
+      },
+      { href: "/firewall", label: "Firewall", keywords: "ufw poorten" },
+      { href: "/crowdsec", label: "CrowdSec", keywords: "bans bouncer alerts" },
+      {
+        href: "/aiverslag",
+        label: "AI-verslag", needs: "aiverslag",
+        keywords:
+          "aiverslag ai verslag opnsense dreigingsniveau incident alarm analyse ollama bevinding fix lokaleai",
+      },
+    ],
+  },
+  {
+    id: "admin",
+    label: "Instellingen",
+    items: [
+      {
+        href: "/instellingen",
+        label: "Instellingen",
+        keywords: "wachtwoord totp gebruikers sessies thema api-tokens",
+        tabs: [
+          { href: "/instellingen", label: "Instellingen" },
+          {
+            href: "/proxmox",
+            label: "Proxmox-koppeling",
+            keywords: "pve proxmox token api koppeling",
+          },
+        ],
+      },
+      {
+        href: "/logboek",
+        label: "Logboek",
+        adminOnly: true,
+        keywords: "audit wie wat",
+      },
+      {
+        href: "/documentatie",
+        label: "Documentatie",
+        keywords: "docs markdown",
+      },
+      { href: "/assistent", label: "Assistent", keywords: "ai vraag" },
       {
         href: "/aan-de-slag",
         label: "Aan de slag",
@@ -47,39 +331,15 @@ export const navGroups: NavGroup[] = [
       },
     ],
   },
-  {
-    id: "infra",
-    label: "Infrastructuur",
-    items: [
-      {
-        href: "/clusters",
-        label: "Clusters",
-        keywords: "vip keepalived uitrollen",
-      },
-      {
-        href: "/nodes",
-        label: "Nodes",
-        keywords: "servers agents machines ct lxc vm",
-      },
-      { href: "/kubernetes", label: "Kubernetes", keywords: "k3s pods" },
-      {
-        href: "/kaart",
-        label: "Kaart",
-        keywords: "netwerk vlan map",
-        tabs: [
-          { href: "/kaart", label: "Netwerk" },
-          {
-            href: "/afhankelijkheden",
-            label: "Afhankelijkheden",
-            keywords: "graaf dependencies",
-          },
-        ],
-      },
-    ],
-  },
+];
+
+// De platformen (fase 47) staan niet in het menu maar als tabbladen onder
+// Clusters & nodes → Platformen, en bij de node die het platform is.
+export const navPlatforms: NavPlatform[] = [
   {
     id: "proxmox",
     label: "Proxmox",
+    needs: "proxmox",
     items: [
       {
         href: "/proxmox/datacenter",
@@ -174,6 +434,13 @@ export const navGroups: NavGroup[] = [
         keywords:
           "pve apt upgrade bijwerken kernel herstart onderhoudsmodus rolling",
       },
+    ],
+  },
+  {
+    id: "pbs",
+    label: "Backup Server",
+    needs: "pbs",
+    items: [
       {
         href: "/pbs",
         label: "Backup Server",
@@ -223,6 +490,13 @@ export const navGroups: NavGroup[] = [
           },
         ],
       },
+    ],
+  },
+  {
+    id: "truenas",
+    label: "TrueNAS",
+    needs: "truenas",
+    items: [
       {
         href: "/truenas",
         label: "TrueNAS",
@@ -249,6 +523,13 @@ export const navGroups: NavGroup[] = [
           },
         ],
       },
+    ],
+  },
+  {
+    id: "opnsense",
+    label: "OPNsense",
+    needs: "opnsense",
+    items: [
       {
         href: "/opnsense",
         label: "OPNsense",
@@ -338,8 +619,9 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
-    id: "services",
-    label: "Diensten",
+    id: "docker",
+    label: "Docker",
+    needs: "docker",
     items: [
       {
         href: "/docker",
@@ -385,226 +667,6 @@ export const navGroups: NavGroup[] = [
           },
         ],
       },
-      {
-        href: "/publicatie",
-        label: "Publicatie",
-        keywords:
-          "npm nginx proxy manager authentik subdomein domein jbogaert publiceren ssl certificaat forward auth",
-        tabs: [
-          {
-            href: "/publicatie",
-            label: "Diensten",
-            keywords: "diensten poorten containers vip publiceren",
-          },
-          {
-            href: "/publicatie/npm",
-            label: "Proxy hosts",
-            keywords: "npm nginx proxy host overnemen drift ssl",
-          },
-          {
-            href: "/publicatie/authentik",
-            label: "Authentik",
-            keywords: "authentik sso applicatie provider outpost forward auth",
-          },
-          {
-            href: "/publicatie/verkeer",
-            label: "Verkeer",
-            keywords: "npm logs verkeer aanvragen bezoekers ip crowdsec ban verbindingen 5xx",
-          },
-          {
-            href: "/publicatie/logins",
-            label: "Logins",
-            keywords: "authentik logins mislukte aanmeldingen brute force gebruikers",
-          },
-        ],
-      },
-      {
-        href: "/homepage-apps",
-        label: "Homepage-apps",
-        keywords:
-          "homepage tegels apps api v2 dashboard plex nextcloud herkennen",
-      },
-      {
-        href: "/databases",
-        label: "Databases",
-        keywords: "mariadb galera postgresql patroni dump",
-      },
-      { href: "/cronjobs", label: "Cronjobs", keywords: "cron rsync planning" },
-    ],
-  },
-  {
-    id: "deploy",
-    label: "Uitrollen en onderhoud",
-    items: [
-      {
-        href: "/templates",
-        label: "Templates",
-        keywords: "uitrollen blauwdruk",
-        tabs: [
-          { href: "/templates", label: "Templates" },
-          { href: "/recepten", label: "Recepten", keywords: "stappen" },
-        ],
-      },
-      {
-        href: "/updates",
-        label: "Updates",
-        keywords: "apt upgrade versies pakketten",
-      },
-      {
-        href: "/commandos",
-        label: "Commando's",
-        keywords: "shell uitvoeren script",
-      },
-      { href: "/gitops", label: "GitOps", keywords: "git github wijzigingen" },
-    ],
-  },
-  {
-    id: "security",
-    label: "Beveiliging",
-    items: [
-      {
-        href: "/soc",
-        label: "SOC",
-        keywords: "beveiliging dreiging aanvallers security dashboard score",
-      },
-      {
-        href: "/aiverslag",
-        label: "AI-verslag",
-        keywords:
-          "aiverslag ai verslag opnsense dreigingsniveau incident alarm analyse ollama bevinding fix lokaleai",
-      },
-      { href: "/firewall", label: "Firewall", keywords: "ufw poorten" },
-      { href: "/crowdsec", label: "CrowdSec", keywords: "bans bouncer alerts" },
-      {
-        href: "/kwetsbaarheden",
-        label: "Kwetsbaarheden",
-        keywords:
-          "cve kev exploit debian security tracker pakketten lek patch verharding hardening cis lynis ssh sysctl suid scopes scan nmap subnet vlan pentest",
-      },
-    ],
-  },
-  {
-    id: "watch",
-    label: "Bewaking en herstel",
-    items: [
-      {
-        href: "/monitoring",
-        label: "Monitoring",
-        keywords: "cpu ram grafiek metrics",
-      },
-      {
-        href: "/zabbix/overzicht",
-        label: "Zabbix",
-        keywords:
-          "zabbix problemen triggers beschikbaarheid hosts proxy ha dashboard",
-        tabs: [
-          { href: "/zabbix/overzicht", label: "Overzicht" },
-          {
-            href: "/zabbix/dashboards",
-            label: "Dashboards",
-            keywords:
-              "grafana grafieken kiosk tv top cpu geheugen mttr heatmap",
-          },
-          {
-            href: "/zabbix/problemen",
-            label: "Problemen",
-            keywords: "triggers alerts ernst",
-          },
-          {
-            href: "/zabbix/hosts",
-            label: "Hosts",
-            keywords: "beschikbaarheid koppelen",
-          },
-          {
-            href: "/zabbix",
-            label: "Agents",
-            keywords: "zabbix-agents agent2 psk sleutel",
-          },
-        ],
-      },
-      {
-        href: "/logs",
-        label: "Logs",
-        adminOnly: true,
-        keywords: "journald syslog docker logs",
-      },
-      {
-        href: "/incidenten",
-        label: "Incidenten",
-        keywords: "storing problemen",
-        tabs: [
-          { href: "/incidenten", label: "Incidenten" },
-          {
-            href: "/tijdlijn",
-            label: "Tijdlijn",
-            keywords: "wijzigingen wat veranderde",
-          },
-        ],
-      },
-      {
-        href: "/rapporten",
-        label: "Rapporten",
-        keywords: "scorecard pdf",
-        tabs: [
-          { href: "/rapporten", label: "Rapporten" },
-          {
-            href: "/risico",
-            label: "Risico",
-            keywords: "spof single point of failure",
-          },
-        ],
-      },
-      {
-        href: "/back-ups",
-        label: "Back-ups",
-        keywords: "backup restore controle",
-        tabs: [
-          { href: "/back-ups", label: "Controle" },
-          {
-            href: "/proxmox/backups",
-            label: "Proxmox",
-            keywords:
-              "pve vzdump pbs proxmox backup server terugzetten restore terugzettest retentie",
-          },
-        ],
-      },
-      {
-        href: "/tests",
-        label: "Tests",
-        keywords: "failover disaster recovery dr",
-      },
-    ],
-  },
-  {
-    id: "admin",
-    label: "Beheer",
-    items: [
-      { href: "/taken", label: "Taken", keywords: "jobs voortgang" },
-      {
-        href: "/documentatie",
-        label: "Documentatie",
-        keywords: "docs markdown",
-      },
-      { href: "/assistent", label: "Assistent", keywords: "ai vraag" },
-      {
-        href: "/logboek",
-        label: "Logboek",
-        adminOnly: true,
-        keywords: "audit wie wat",
-      },
-      {
-        href: "/instellingen",
-        label: "Instellingen",
-        keywords: "wachtwoord totp gebruikers sessies thema api-tokens",
-        tabs: [
-          { href: "/instellingen", label: "Instellingen" },
-          {
-            href: "/proxmox",
-            label: "Proxmox-koppeling",
-            keywords: "pve proxmox token api koppeling",
-          },
-        ],
-      },
     ],
   },
 ];
@@ -619,26 +681,34 @@ const parentOf: Record<string, string> = {
   "/containers": "/docker/stacks",
 };
 
-// Elke pagina (item of tabblad) met het menu-item waar ze onder valt.
+// Elke pagina (item of tabblad) met het menu-item waar ze onder valt. Een
+// pagina van een platform hoort in het menu bij Platformen.
 type Entry = {
   href: string;
   label: string;
   item: NavItem;
   group: NavGroup;
   tab?: NavTab;
+  platform?: NavPlatform;
 };
 
+const platformsItem = "/platformen";
+
+let entryCache: Entry[] | null = null;
+
 function entries(): Entry[] {
+  if (entryCache) return entryCache;
   const out: Entry[] = [];
-  for (const g of navGroups) {
-    for (const i of g.items) {
-      out.push({ href: i.href, label: i.label, item: i, group: g });
-      for (const t of i.tabs ?? []) {
-        if (t.href !== i.href)
-          out.push({ href: t.href, label: t.label, item: i, group: g, tab: t });
-      }
+  const push = (g: NavGroup, i: NavItem, platform?: NavPlatform) => {
+    out.push({ href: i.href, label: i.label, item: i, group: g, platform });
+    for (const t of i.tabs ?? []) {
+      if (t.href !== i.href) out.push({ href: t.href, label: t.label, item: i, group: g, tab: t, platform });
     }
-  }
+  };
+  for (const g of navGroups) for (const i of g.items) push(g, i);
+  const infra = navGroups.find((g) => g.items.some((i) => i.href === platformsItem))!;
+  for (const p of navPlatforms) for (const i of p.items) push(infra, i, p);
+  entryCache = out;
   return out;
 }
 
@@ -651,45 +721,44 @@ function entryFor(pathname: string): Entry | null {
   const p = parent ?? path;
   let best: Entry | null = null;
   for (const e of entries()) {
-    if (p === e.href || p.startsWith(e.href + "/")) {
+    if (p === e.href || (e.href !== "/" && p.startsWith(e.href + "/"))) {
       if (!best || e.href.length > best.href.length) best = e;
     }
   }
   return best;
 }
 
-// allNavItems is alles wat Ctrl K vindt: de menu-items en hun tabbladen.
+// allNavItems is alles wat Ctrl K vindt: de menu-items, de platformen en
+// hun tabbladen, ook wat niet in gebruik is.
 export function allNavItems(isAdmin: boolean): (NavItem & { group: string })[] {
-  const out: (NavItem & { group: string })[] = [{ ...navHome, group: "" }];
-  for (const g of navGroups) {
-    for (const i of g.items) {
-      if (i.adminOnly && !isAdmin) continue;
-      out.push({
-        href: i.href,
-        label: i.label,
-        keywords: i.keywords,
-        adminOnly: i.adminOnly,
-        group: g.label,
-      });
-      for (const t of i.tabs ?? []) {
-        if (t.href === i.href || (t.adminOnly && !isAdmin)) continue;
-        out.push({
-          href: t.href,
-          label: `${i.label} › ${t.label}`,
-          keywords: t.keywords,
-          group: g.label,
-        });
-      }
+  const out: (NavItem & { group: string })[] = [];
+  const add = (i: NavItem, group: string, prefix = "") => {
+    if (i.adminOnly && !isAdmin) return;
+    out.push({ href: i.href, label: prefix + i.label, keywords: i.keywords, adminOnly: i.adminOnly, group });
+    for (const t of i.tabs ?? []) {
+      if (t.href === i.href || (t.adminOnly && !isAdmin)) continue;
+      out.push({ href: t.href, label: `${prefix}${i.label} › ${t.label}`, keywords: t.keywords, group });
     }
-  }
+  };
+  for (const g of navGroups) for (const i of g.items) add(i, i === navHome ? "" : g.label);
+  for (const p of navPlatforms) for (const i of p.items) add(i, p.label, p.items.length > 1 ? `${p.label} › ` : "");
   return out;
 }
 
 // activeHref is het menu-item dat bij een pad hoort (bij een tabblad: zijn
-// item).
+// item; bij een platform: Platformen).
 export function activeHref(pathname: string): string | null {
   if (pathname === "/" || pathname === "") return "/";
-  return entryFor(pathname)?.item.href ?? null;
+  const e = entryFor(pathname);
+  if (!e) return null;
+  return e.platform ? platformsItem : e.item.href;
+}
+
+// platformOf geeft het platform van een pagina met het onderdeel dat open
+// is; null buiten de platformen.
+export function platformOf(pathname: string): { platform: NavPlatform; item: NavItem } | null {
+  const e = entryFor(pathname);
+  return e?.platform ? { platform: e.platform, item: e.item } : null;
 }
 
 // sectionTabs geeft de tabbladen van het menu-item van deze pagina, en welk
@@ -709,20 +778,21 @@ export function sectionTabs(
 }
 
 // itemHrefs zijn de adressen die bij een menu-item horen (voor de tellers).
+// Platformen telt de meldingen van elk platform.
 export function itemHrefs(i: NavItem): string[] {
+  if (i.href === platformsItem) return navPlatforms.flatMap((p) => p.items.flatMap(itemHrefs));
   return i.tabs ? i.tabs.map((t) => t.href) : [i.href];
 }
 
 export function titleFor(pathname: string): string {
-  if (pathname === "/" || pathname === "") return navHome.label;
+  if (pathname === "/" || pathname === "") return "Overzicht";
   const e = entryFor(pathname);
   if (!e) return "";
-  return e.tab ? `${e.tab.label} · ${e.item.label}` : e.item.label;
+  const item = e.platform && e.platform.items.length > 1 ? `${e.item.label} · ${e.platform.label}` : e.item.label;
+  return e.tab ? `${e.tab.label} · ${item}` : item;
 }
 
 export function groupOf(href: string | null): string | null {
   if (!href) return null;
-  return (
-    navGroups.find((g) => g.items.some((i) => i.href === href))?.id ?? null
-  );
+  return navGroups.find((g) => g.items.some((i) => i.href === href))?.id ?? null;
 }

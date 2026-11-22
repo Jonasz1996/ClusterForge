@@ -322,9 +322,25 @@ func (s *Server) ListJobs(w http.ResponseWriter, r *http.Request, params gen.Lis
 	if params.Limit != nil {
 		limit = max(1, min(*params.Limit, 200))
 	}
-	rows, err := s.q.ListJobs(r.Context(), store.ListJobsParams{
+	lp := store.ListJobsParams{
 		NodeID: params.NodeId, ProxmoxID: params.ProxmoxId, ClusterID: params.ClusterId, MaxRows: int32(limit),
-	})
+	}
+	// Fase 47: alleen wat jij of een gebruiker startte, en een status.
+	if params.Who != nil {
+		switch *params.Who {
+		case gen.ListJobsParamsWhoMe:
+			if p, ok := principalFrom(r.Context()); ok {
+				lp.RequestedBy = &p.User.ID
+			}
+		case gen.ListJobsParamsWhoPeople:
+			lp.PeopleOnly = true
+		}
+	}
+	if params.Status != nil {
+		st := string(*params.Status)
+		lp.Status = &st
+	}
+	rows, err := s.q.ListJobs(r.Context(), lp)
 	if err != nil {
 		s.internalError(w, r, err)
 		return

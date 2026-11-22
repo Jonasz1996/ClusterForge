@@ -61,30 +61,39 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 	if err != nil {
 		return gen.Attention{}, err
 	}
+	// Nodes: agents die niet antwoorden en drift, alleen voor actieve nodes
+	// (onderhoud of afbouwen is bewust).
+	nodeRows, err := s.q.ListNodes(ctx)
+	if err != nil {
+		return gen.Attention{}, err
+	}
+	nodes := make([]gen.Node, 0, len(nodeRows))
+	for _, row := range nodeRows {
+		nodes = append(nodes, toAPINode(nodeRow(row)))
+	}
+	causes, covered := attentionCauses(clusters, nodes)
+
 	var down, degraded, split []string
 	for _, c := range clusters {
 		switch c.Cluster.Status {
 		case string(gen.StatusDown):
 			down = append(down, c.Cluster.Name)
 		case string(gen.StatusDegraded):
-			degraded = append(degraded, c.Cluster.Name)
+			// Een cluster waar alleen een dienst op een node faalt, staat al
+			// bij die oorzaak (fase 47); de dienst van het cluster werkt.
+			if !covered[c.Cluster.ID] {
+				degraded = append(degraded, c.Cluster.Name)
+			}
 		case string(gen.StatusSplitBrain):
 			split = append(split, c.Cluster.Name)
 		}
 	}
 	add("clusters-split", red, plural(len(split), "cluster heeft", "clusters hebben")+" split-brain (VIP op meer dan één node)", names(split), "/clusters", len(split))
 	add("clusters-down", red, plural(len(down), "cluster ligt", "clusters liggen")+" plat", names(down), "/clusters", len(down))
-	add("clusters-degraded", amber, plural(len(degraded), "cluster draait", "clusters draaien")+" verminderd", names(degraded), "/clusters", len(degraded))
+	add("clusters-degraded", amber, plural(len(degraded), "cluster werkt", "clusters werken")+" met minder reserve", names(degraded), "/clusters", len(degraded))
 
-	// Nodes: agents die niet antwoorden en drift, alleen voor actieve nodes
-	// (onderhoud of afbouwen is bewust).
-	nodes, err := s.q.ListNodes(ctx)
-	if err != nil {
-		return gen.Attention{}, err
-	}
 	var offline, drift []string
-	for _, row := range nodes {
-		n := toAPINode(nodeRow(row))
+	for _, n := range nodes {
 		if n.Lifecycle != gen.NodeLifecycleActive {
 			continue
 		}
@@ -97,6 +106,7 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 	}
 	add("agents-offline", red, plural(len(offline), "agent antwoordt", "agents antwoorden")+" niet", names(offline), "/nodes", len(offline))
 	add("drift", amber, plural(len(drift), "node wijkt", "nodes wijken")+" af van de gewenste staat", names(drift), "/clusters", len(drift))
+	items = append(items, causes...)
 
 	incidents, err := s.q.CountOpenIncidents(ctx)
 	if err != nil {
@@ -343,9 +353,10 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 	}
 
 	for i := range items {
-		if h := helpFor(items[i].Id); h != "" {
+		if h := helpFor(items[i].Id); h != "" && items[i].Help == nil {
 			items[i].Help = &h
 		}
+		decorate(&items[i])
 	}
 
 	// Rood eerst, dan op aantal.

@@ -2,19 +2,23 @@
 
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
+import { GroupIcon } from "@/components/shell/icons";
 import { cx } from "@/components/ui";
-import { activeHref, groupOf, itemHrefs, navGroups, navHome, type NavItem } from "@/lib/nav";
+import { activeHref, groupOf, inUse, itemHrefs, navGroups, navPlatforms, type NavItem } from "@/lib/nav";
+import { useNavUsage, useShowAll } from "@/lib/navUsage";
 
-const collapsedKey = "cf-nav-dicht";
+// Welke hoofditems je zelf openklapte; de groep van de pagina waar je bent
+// staat altijd open, de rest is standaard dicht (fase 47).
+const openKey = "cf-nav-open";
 
 const listeners = new Set<() => void>();
 let cache: { raw: string | null; value: string[] } = { raw: null, value: [] };
 const none: string[] = [];
 
-function readCollapsed(): string[] {
+function readOpen(): string[] {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(collapsedKey);
+    raw = localStorage.getItem(openKey);
   } catch {
     return none;
   }
@@ -24,24 +28,28 @@ function readCollapsed(): string[] {
     const v = JSON.parse(raw ?? "[]");
     if (Array.isArray(v)) value = v.filter((x) => typeof x === "string");
   } catch {
-    // kapotte waarde: alles open
+    // kapotte waarde: alles dicht
   }
   cache = { raw, value };
   return value;
 }
 
-function writeCollapsed(next: string[]) {
+function writeOpen(next: string[]) {
   try {
-    localStorage.setItem(collapsedKey, JSON.stringify(next));
+    localStorage.setItem(openKey, JSON.stringify(next));
   } catch {
     // niet bewaard
   }
   for (const l of listeners) l();
 }
 
-// Sidebar is het menu in groepen. Een groep klapt dicht met een klik op de
-// kop; dat onthoudt de browser. De groep van de huidige pagina staat altijd
-// open. badges zijn tellers naast een menu-item, zoals open incidenten.
+type BadgeMap = Record<string, { count: number; tone: "red" | "amber" }>;
+
+// Sidebar is het menu: zes hoofditems (fase 47). Een hoofditem opent zijn
+// eerste pagina en klapt zijn onderdelen open; de pijl klapt alleen open of
+// dicht. Onderdelen die niet in gebruik zijn (Kubernetes, GitOps, …) staan
+// er pas als ze iets beheren, of met "Alles tonen". badges zijn tellers,
+// zoals open incidenten.
 export function Sidebar({
   pathname,
   isAdmin,
@@ -50,22 +58,24 @@ export function Sidebar({
 }: {
   pathname: string;
   isAdmin: boolean;
-  badges?: Record<string, { count: number; tone: "red" | "amber" }>;
+  badges?: BadgeMap;
   onNavigate?: () => void;
 }) {
   const active = activeHref(pathname);
   const activeGroup = groupOf(active);
-  const collapsed = useSyncExternalStore(
+  const usage = useNavUsage().data;
+  const [showAll, setShowAll] = useShowAll();
+  const opened = useSyncExternalStore(
     (l) => {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    readCollapsed,
+    readOpen,
     () => none,
   );
 
   function toggle(id: string) {
-    writeCollapsed(collapsed.includes(id) ? collapsed.filter((x) => x !== id) : [...collapsed, id]);
+    writeOpen(opened.includes(id) ? opened.filter((x) => x !== id) : [...opened, id]);
   }
 
   // Een item met tabbladen telt de meldingen van al zijn tabbladen op.
@@ -79,9 +89,35 @@ export function Sidebar({
     return out;
   };
 
+  const badge = (b?: { count: number; tone: "red" | "amber" }) =>
+    b &&
+    b.count > 0 && (
+      <span
+        className={cx(
+          "min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5 font-semibold",
+          b.tone === "red" ? "bg-red-600 text-white" : "bg-amber-400 text-amber-950",
+        )}
+      >
+        {b.count > 99 ? "99+" : b.count}
+      </span>
+    );
+
+  // Platformen staat er alleen als er minstens één platform in gebruik is.
+  const platformsUsed = navPlatforms.some((p) => inUse(p, usage));
+  let hidden = 0;
+  const visible = (i: NavItem) => {
+    if (i.adminOnly && !isAdmin) return false;
+    const used = i.href === "/platformen" ? platformsUsed : inUse(i, usage);
+    // Wat je nu open hebt, staat er altijd.
+    if (!used && !showAll && active !== i.href) {
+      hidden++;
+      return false;
+    }
+    return true;
+  };
+
   const item = (i: NavItem) => {
     const on = active === i.href;
-    const b = badgeOf(i);
     return (
       <Link
         key={i.href}
@@ -89,55 +125,79 @@ export function Sidebar({
         onClick={onNavigate}
         aria-current={on ? "page" : undefined}
         className={cx(
-          "flex items-center justify-between gap-2 rounded-md px-3 py-1.5 text-sm font-medium",
+          "flex items-center justify-between gap-2 rounded-md py-1.5 pr-3 pl-9 text-sm",
           on
-            ? "bg-brand-50 text-brand-700 dark:bg-slate-800 dark:text-white"
-            : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800",
+            ? "bg-brand-50 font-medium text-brand-700 dark:bg-slate-800 dark:text-white"
+            : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800",
         )}
       >
         <span className="truncate">{i.label}</span>
-        {b && b.count > 0 && (
-          <span
-            className={cx(
-              "min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5 font-semibold",
-              b.tone === "red" ? "bg-red-600 text-white" : "bg-amber-400 text-amber-950",
-            )}
-          >
-            {b.count > 99 ? "99+" : b.count}
-          </span>
-        )}
+        {badge(badgeOf(i))}
       </Link>
     );
   };
 
   return (
-    <nav aria-label="Hoofdmenu" className="space-y-1 px-3 pb-4">
-      {item(navHome)}
+    <nav aria-label="Hoofdmenu" className="space-y-0.5 px-3 pb-4">
       {navGroups.map((g) => {
-        const items = g.items.filter((i) => !i.adminOnly || isAdmin);
+        const items = g.items.filter(visible);
         if (items.length === 0) return null;
-        const open = g.id === activeGroup || !collapsed.includes(g.id);
-        const groupCount = items.reduce((n, i) => n + (badgeOf(i)?.count ?? 0), 0);
+        const here = g.id === activeGroup;
+        const open = here || opened.includes(g.id);
+        let count = 0;
+        let tone: "red" | "amber" = "amber";
+        for (const i of g.items) {
+          const b = badgeOf(i);
+          if (!b) continue;
+          count += b.count;
+          if (b.tone === "red") tone = "red";
+        }
         return (
-          <div key={g.id} className="pt-2">
-            <button
-              type="button"
-              onClick={() => toggle(g.id)}
-              aria-expanded={open}
-              className="flex w-full items-center justify-between rounded px-3 py-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase hover:text-slate-800 dark:hover:text-slate-200"
+          <div key={g.id}>
+            <div
+              className={cx(
+                "flex items-center rounded-md",
+                here ? "text-brand-700 dark:text-white" : "text-slate-800 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800",
+              )}
             >
-              <span>{g.label}</span>
-              <span className="flex items-center gap-1.5">
-                {!open && groupCount > 0 && <span className="size-2 rounded-full bg-red-500" aria-label="meldingen" />}
-                <span aria-hidden className={cx("transition-transform", open ? "rotate-90" : "")}>
+              <Link
+                href={items[0].href}
+                onClick={() => {
+                  if (!opened.includes(g.id)) writeOpen([...opened, g.id]);
+                  onNavigate?.();
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-sm font-semibold"
+              >
+                <GroupIcon id={g.id} />
+                <span className="truncate">{g.label}</span>
+                {!open && <span className="ml-auto">{badge(count > 0 ? { count, tone } : undefined)}</span>}
+              </Link>
+              <button
+                type="button"
+                onClick={() => toggle(g.id)}
+                aria-expanded={open}
+                aria-label={open ? `${g.label} dichtklappen` : `${g.label} openklappen`}
+                disabled={here}
+                className="rounded px-2 py-2 text-slate-400 hover:text-slate-700 disabled:opacity-40 dark:hover:text-slate-200"
+              >
+                <span aria-hidden className={cx("inline-block transition-transform", open ? "rotate-90" : "")}>
                   ›
                 </span>
-              </span>
-            </button>
-            {open && <div className="mt-0.5 space-y-0.5">{items.map(item)}</div>}
+              </button>
+            </div>
+            {open && <div className="mt-0.5 mb-1.5 space-y-0.5">{items.map(item)}</div>}
           </div>
         );
       })}
+      {(hidden > 0 || showAll) && (
+        <button
+          type="button"
+          onClick={() => setShowAll(!showAll)}
+          className="mt-3 w-full rounded px-3 py-1 text-left text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+        >
+          {showAll ? "Alleen wat in gebruik is" : `Alles tonen (${hidden} niet in gebruik)`}
+        </button>
+      )}
     </nav>
   );
 }

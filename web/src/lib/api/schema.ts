@@ -157,6 +157,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nav/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47) */
+        get: operations["getNavUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/disk/settings": {
         parameters: {
             query?: never;
@@ -3954,6 +3971,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/updates/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+         * @description Elk cluster krijgt een gewone clusterupdate (rollend, de VIP-houder als laatste); het volgende cluster begint pas
+         *     als het vorige gelukt is en bij een fout stopt de rij. Lab en test eerst, prod als laatste en alleen met
+         *     include_prod (dan tweestapsverificatie en confirm "prod"), daarna de nodes zonder cluster. Proxmox-hosts doen niet
+         *     mee: die werk je bij via Proxmox → Host-updates. Met dry_run komt alleen het plan terug.
+         */
+        post: operations["startUpdatesAll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/updates/policies": {
         parameters: {
             query?: never;
@@ -6537,6 +6577,27 @@ export interface paths {
          *     niet met exitcode 0 eindigt. Op prod vraagt het tweestapsverificatie en de slug in confirm.
          */
         post: operations["runCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commands/once": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+         * @description Zoals een eigen commando draaien, maar de tekst komt niet in de lijst met eigen commando's: hij staat in de taak
+         *     en per node in het logboek. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["runCommandOnce"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10896,6 +10957,37 @@ export interface components {
             count: number;
             /** @description Wat kun je doen, in gewone taal (fase 41) */
             help?: string;
+            /**
+             * @description Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat
+             * @enum {string}
+             */
+            impact?: "service_ok" | "service_down";
+            /** @description Acties bij de regel zelf (fase 47), zoals de logs van de dienst of herstarten */
+            actions?: components["schemas"]["AttentionAction"][];
+        };
+        AttentionAction: {
+            /**
+             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+             * @enum {string}
+             */
+            kind: "link" | "restart_service";
+            label: string;
+            href?: string;
+            unit?: string;
+            node_ids?: string[];
+        };
+        NavUsage: {
+            kubernetes: boolean;
+            gitops: boolean;
+            /** @description Er zijn afhankelijkheden tussen diensten (Kaart) */
+            dependencies: boolean;
+            proxmox: boolean;
+            docker: boolean;
+            pbs: boolean;
+            truenas: boolean;
+            opnsense: boolean;
+            zabbix: boolean;
+            aiverslag: boolean;
         };
         DiskWatchSettings: {
             /** @description Vanaf deze bezetting: let op (oranje) */
@@ -13996,6 +14088,8 @@ export interface components {
             nodes: components["schemas"]["UpdateNode"][];
         };
         UpdateNode: {
+            /** @description De node is een Proxmox-host; Alles bijwerken slaat hem over (fase 47) */
+            pve_host: boolean;
             /** Format: uuid */
             node_id: string;
             hostname: string;
@@ -14056,6 +14150,8 @@ export interface components {
             docker?: {
                 /** @description Leeg is elk Compose-project */
                 projects?: string[];
+                /** @description Fase 47: deze Compose-projecten deze keer overslaan */
+                skip?: string[];
                 prune?: boolean;
                 /** @description Ook zonder nieuw image down en up -d */
                 always?: boolean;
@@ -14075,6 +14171,40 @@ export interface components {
             failover?: boolean;
             /** @description De slug van het prodcluster */
             confirm?: string;
+            /**
+             * Format: uuid
+             * @description Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id
+             */
+            start_from?: string;
+        };
+        UpdateAllInput: {
+            apt?: {
+                full?: boolean;
+                autoremove?: boolean;
+            };
+            docker?: {
+                prune?: boolean;
+                always?: boolean;
+                health_seconds?: number;
+                rollback?: boolean;
+            };
+            reboot?: boolean;
+            failover?: boolean;
+            include_prod?: boolean;
+            /** @description Met include_prod: prod, ter bevestiging */
+            confirm?: string;
+            dry_run?: boolean;
+        };
+        UpdateAllResult: {
+            job?: components["schemas"]["Job"];
+            /** @description De clusters in de rij */
+            clusters: string[];
+            /** @description Wat niet meedoet */
+            skipped: string[];
+            /** @description Proxmox-hosts */
+            hosts: string[];
+            /** @description De prodclusters in de rij (slug) */
+            prod: string[];
         };
         DockerReport: {
             /** Format: uuid */
@@ -14220,6 +14350,21 @@ export interface components {
             /** Format: uuid */
             cluster_id?: string;
             /** @description Ook op de volgende nodes draaien als het op een node mislukt */
+            continue_on_error?: boolean;
+            /** @description De slug van het prodcluster */
+            confirm?: string;
+        };
+        CommandOnceInput: {
+            /** @description De titel van de taak; leeg is Eenmalig commando */
+            name?: string;
+            script: string;
+            /** @description Leeg is root */
+            run_as?: string;
+            /** @description Nul is 30 minuten */
+            timeout_seconds?: number;
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
             continue_on_error?: boolean;
             /** @description De slug van het prodcluster */
             confirm?: string;
@@ -16603,6 +16748,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Attention"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getNavUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavUsage"];
                 };
             };
             401: components["responses"]["Error"];
@@ -19461,6 +19627,9 @@ export interface operations {
                 node_id?: string;
                 cluster_id?: string;
                 proxmox_id?: string;
+                /** @description Fase 47: me is wat jij startte, people wat een gebruiker startte (geen automatische taken), all is alles */
+                who?: "me" | "people" | "all";
+                status?: components["schemas"]["JobStatus"];
                 limit?: number;
             };
             header?: never;
@@ -22563,6 +22732,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    startUpdatesAll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAllInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt, of het plan bij dry_run */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateAllResult"];
                 };
             };
             400: components["responses"]["Error"];
@@ -26744,6 +26941,34 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    runCommandOnce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommandOnceInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             409: components["responses"]["Error"];
         };
     };

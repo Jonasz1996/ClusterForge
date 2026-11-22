@@ -87,6 +87,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus 
 	}
 	if runner != nil {
 		runner.Register(Kind, s.run)
+		runner.Register(QueueKind, s.runQueue)
 	}
 	return s
 }
@@ -112,6 +113,9 @@ type Node struct {
 	HasDatabase    bool
 	VIPHolder      bool
 	FactsAt        *time.Time
+	// PVEHost: de node is een Proxmox-host; die werk je bij via
+	// Proxmox → Host-updates, niet met "Alles bijwerken" (fase 47).
+	PVEHost bool
 }
 
 // Prod is true voor een node in een prodcluster.
@@ -138,6 +142,7 @@ func (s *Service) Overview(ctx context.Context) ([]Node, error) {
 			var f protocol.Facts
 			if json.Unmarshal(r.Facts, &f) == nil {
 				n.Upgrades, n.RebootRequired, n.AptUpdatedAt, n.Docker = f.Upgrades, f.RebootRequired, f.AptUpdatedAt, f.Docker
+				n.PVEHost = f.Proxmox != nil && f.Proxmox.Node != ""
 			}
 		}
 		if r.ClusterID != nil {
@@ -186,6 +191,10 @@ type Docker struct {
 	Tags          []protocol.ImageTag `json:"tags,omitempty"`
 	// Edit schrijft een bestand uit de editor (één node, één project).
 	Edit *protocol.ComposeEdit `json:"edit,omitempty"`
+	// Skip zijn projecten die deze keer niet bijgewerkt worden (fase 47),
+	// zoals een project waarvan de pull mislukte. Start zet per node de
+	// projecten die overblijven.
+	Skip []string `json:"skip,omitempty"`
 }
 
 // needsSmart is true als de Docker-opties protocol 29 vragen.
@@ -207,6 +216,9 @@ type Request struct {
 	NoFailover bool
 	// Auto: gestart door automatisch bijwerken.
 	Auto bool
+	// StartFrom hervat een clusterupdate vanaf deze node (fase 47): de
+	// nodes ervoor in de volgorde zijn al bijgewerkt. Alleen met ClusterID.
+	StartFrom *uuid.UUID
 }
 
 // Select geeft de nodes van een verzoek, in de volgorde van de taak per
@@ -246,7 +258,18 @@ func (s *Service) Select(ctx context.Context, req Request) ([]Node, error) {
 	if len(out) == 0 {
 		return nil, &ConflictError{"dit cluster heeft geen nodes met een agent"}
 	}
-	return Order(out), nil
+	out = Order(out)
+	if req.StartFrom != nil {
+		if req.ClusterID == nil {
+			return nil, &FieldError{"hervatten kan alleen bij een cluster"}
+		}
+		i := slices.IndexFunc(out, func(n Node) bool { return n.NodeID == *req.StartFrom })
+		if i < 0 {
+			return nil, &ConflictError{"de node om mee verder te gaan hoort niet (meer) bij dit cluster"}
+		}
+		out = out[i:]
+	}
+	return out, nil
 }
 
 // Order zet de nodes per cluster op volgorde: zonder VIP eerst, de
@@ -297,6 +320,10 @@ type jobNode struct {
 	HasDatabase bool      `json:"has_database,omitempty"`
 	// Smart: de agent had protocol 29 toen de taak begon.
 	Smart bool `json:"smart,omitempty"`
+	// Projects: met Docker.Skip de projecten die op deze node bijgewerkt
+	// worden; SkipDocker als er geen overblijven (fase 47).
+	Projects   []string `json:"projects,omitempty"`
+	SkipDocker bool     `json:"skip_docker,omitempty"`
 }
 
 // Start zet per cluster één taak in de wachtrij. Een cluster waar al een
@@ -326,7 +353,12 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request, no
 	for _, g := range groups {
 		p := params{Apt: req.Apt, Docker: req.Docker, Reboot: req.Reboot, NoFailover: req.NoFailover, Auto: req.Auto}
 		for _, n := range g.nodes {
-			p.Nodes = append(p.Nodes, jobNode{ID: n.NodeID, Hostname: n.Hostname, VIPHolder: n.VIPHolder, HasDatabase: n.HasDatabase, Smart: n.Smart})
+			jn := jobNode{ID: n.NodeID, Hostname: n.Hostname, VIPHolder: n.VIPHolder, HasDatabase: n.HasDatabase, Smart: n.Smart}
+			if req.Docker != nil && len(req.Docker.Skip) > 0 {
+				jn.Projects = keepProjects(n, req.Docker.Projects, req.Docker.Skip)
+				jn.SkipDocker = len(jn.Projects) == 0
+			}
+			p.Nodes = append(p.Nodes, jn)
 		}
 		spec := jobs.Spec{Kind: Kind, Params: p, ClusterID: g.cluster, Actor: actor}
 		switch {
@@ -339,6 +371,9 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request, no
 		}
 		if req.Auto {
 			spec.Title = "Automatisch: " + spec.Title
+		}
+		if req.StartFrom != nil && len(g.nodes) > 0 {
+			spec.Title += " (verder vanaf " + g.nodes[0].Hostname + ")"
 		}
 		var j store.Job
 		var err error
@@ -432,11 +467,23 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 				return stop(ctx, err, n)
 			}
 		}
-		if p.Docker != nil {
+		if p.Docker != nil && n.SkipDocker {
+			if err := j.Step(ctx, name+": Docker overgeslagen", func(ctx context.Context, st *jobs.Step) error {
+				st.Logf("de gekozen Compose-projecten worden deze keer overgeslagen: %s", strings.Join(p.Docker.Skip, ", "))
+				return nil
+			}); err != nil {
+				return stop(ctx, err, n)
+			}
+		}
+		if p.Docker != nil && !n.SkipDocker {
+			projects := p.Docker.Projects
+			if len(n.Projects) > 0 {
+				projects = n.Projects
+			}
 			spec := protocol.RunSpec{
 				ID: runID(j, i, "docker"), Kind: protocol.RunDocker, Title: "Docker bijwerken op " + n.Hostname,
 				TimeoutSeconds: int((time.Hour).Seconds()),
-				Docker:         &protocol.DockerRun{Projects: p.Docker.Projects, Prune: p.Docker.Prune},
+				Docker:         &protocol.DockerRun{Projects: projects, Prune: p.Docker.Prune},
 			}
 			if n.Smart {
 				d := spec.Docker
@@ -485,6 +532,22 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		}
 	}
 	return nil
+}
+
+// keepProjects zijn de Compose-projecten van een node zonder de
+// overgeslagen; projects beperkt ze verder als het niet leeg is.
+func keepProjects(n Node, projects, skip []string) []string {
+	var out []string
+	if n.Docker == nil {
+		return nil
+	}
+	for _, p := range n.Docker.Projects {
+		if slices.Contains(skip, p.Name) || (len(projects) > 0 && !slices.Contains(projects, p.Name)) {
+			continue
+		}
+		out = append(out, p.Name)
+	}
+	return out
 }
 
 // stop zegt bij een fout dat de nodes erna niet aan de beurt kwamen.

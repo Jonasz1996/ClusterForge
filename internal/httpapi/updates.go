@@ -38,7 +38,7 @@ func (s *Server) ListUpdates(w http.ResponseWriter, r *http.Request) {
 			NodeId: n.NodeID, Hostname: n.Hostname, ClusterId: nullableOf(n.ClusterID), ClusterName: n.ClusterName,
 			ClusterSlug: n.ClusterSlug, ClusterEnvironment: n.ClusterEnv, Online: n.Online, Protocol: n.Protocol,
 			Supported: n.Supported, Smart: n.Smart, Packages: []string{}, RebootRequired: n.RebootRequired, HasDatabase: n.HasDatabase,
-			VipHolder: n.VIPHolder, FactsAt: nullableOf(n.FactsAt), UpgradesTotal: nullable.NewNullNullable[int](),
+			VipHolder: n.VIPHolder, FactsAt: nullableOf(n.FactsAt), PveHost: n.PVEHost, UpgradesTotal: nullable.NewNullNullable[int](),
 			AptUpdatedAt: nullable.NewNullNullable[time.Time](),
 		}
 		if !n.AptUpdatedAt.IsZero() {
@@ -163,7 +163,7 @@ func (s *Server) StartUpdates(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	req := updates.Request{ClusterID: in.ClusterId, Reboot: in.Reboot != nil && *in.Reboot, NoFailover: in.Failover != nil && !*in.Failover}
+	req := updates.Request{ClusterID: in.ClusterId, Reboot: in.Reboot != nil && *in.Reboot, NoFailover: in.Failover != nil && !*in.Failover, StartFrom: in.StartFrom}
 	if in.NodeIds != nil {
 		req.NodeIDs = *in.NodeIds
 	}
@@ -174,6 +174,9 @@ func (s *Server) StartUpdates(w http.ResponseWriter, r *http.Request) {
 		req.Docker = &updates.Docker{Prune: in.Docker.Prune != nil && *in.Docker.Prune}
 		if in.Docker.Projects != nil {
 			req.Docker.Projects = *in.Docker.Projects
+		}
+		if in.Docker.Skip != nil {
+			req.Docker.Skip = *in.Docker.Skip
 		}
 		req.Docker.Always = in.Docker.Always != nil && *in.Docker.Always
 		req.Docker.NoRollback = in.Docker.Rollback != nil && !*in.Docker.Rollback
@@ -449,4 +452,99 @@ func (s *Server) RunCommand(w http.ResponseWriter, r *http.Request, id uuid.UUID
 		return
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// RunCommandOnce draait een commando zonder het te bewaren (fase 47), zoals
+// "Herstarten" bij een dienst in Aandacht of een diagnose die je niet in de
+// lijst wilt.
+func (s *Server) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.CommandOnceInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	req := commands.RunRequest{ClusterID: in.ClusterId, ContinueOnError: in.ContinueOnError != nil && *in.ContinueOnError}
+	if in.NodeIds != nil {
+		req.NodeIDs = *in.NodeIds
+	}
+	t, err := s.commands.Select(ctx, req)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	if len(t.Prod) > 1 {
+		writeError(w, http.StatusBadRequest, "invalid", "draai een commando op één prodcluster tegelijk")
+		return
+	}
+	if len(t.Prod) == 1 && !confirmProd(w, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
+		return
+	}
+	o := commands.Once{Name: deref(in.Name), Script: in.Script, RunAs: deref(in.RunAs)}
+	if in.TimeoutSeconds != nil {
+		o.TimeoutSeconds = *in.TimeoutSeconds
+	}
+	j, err := s.commands.StartOnce(ctx, events.User(p.User.ID), o, req, t)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// StartUpdatesAll is "Alles bijwerken" (fase 47): de clusters één na één.
+func (s *Server) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.UpdateAllInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	includeProd := in.IncludeProd != nil && *in.IncludeProd
+	plan, err := s.updates.PlanAll(ctx, includeProd)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	out := gen.UpdateAllResult{Clusters: []string{}, Skipped: plan.Skipped, Hosts: plan.Hosts, Prod: plan.Prod}
+	for _, g := range plan.Groups {
+		out.Clusters = append(out.Clusters, g.Name)
+	}
+	for _, l := range []*[]string{&out.Skipped, &out.Hosts, &out.Prod} {
+		if *l == nil {
+			*l = []string{}
+		}
+	}
+	if in.DryRun != nil && *in.DryRun {
+		writeJSON(w, http.StatusAccepted, out)
+		return
+	}
+	if len(plan.Prod) > 0 && !confirmProd(w, p, true, "prod", in.Confirm, "prodclusters bijwerken") {
+		return
+	}
+	req := updates.Request{Reboot: in.Reboot != nil && *in.Reboot, NoFailover: in.Failover != nil && !*in.Failover}
+	if in.Apt != nil {
+		req.Apt = &updates.Apt{Full: in.Apt.Full != nil && *in.Apt.Full, Autoremove: in.Apt.Autoremove != nil && *in.Apt.Autoremove}
+	}
+	if in.Docker != nil {
+		req.Docker = &updates.Docker{Prune: in.Docker.Prune != nil && *in.Docker.Prune, Always: in.Docker.Always != nil && *in.Docker.Always,
+			NoRollback: in.Docker.Rollback != nil && !*in.Docker.Rollback}
+		if in.Docker.HealthSeconds != nil {
+			req.Docker.HealthSeconds = *in.Docker.HealthSeconds
+		}
+	}
+	j, err := s.updates.StartAll(ctx, events.User(p.User.ID), req, plan)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	aj := toAPIJob(j, &p.User.Username)
+	out.Job = &aj
+	writeJSON(w, http.StatusAccepted, out)
 }

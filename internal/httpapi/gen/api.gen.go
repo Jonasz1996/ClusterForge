@@ -198,6 +198,24 @@ func (e AssistantConversationInputSubjectType) Valid() bool {
 	}
 }
 
+// Defines values for AttentionActionKind.
+const (
+	Link           AttentionActionKind = "link"
+	RestartService AttentionActionKind = "restart_service"
+)
+
+// Valid indicates whether the value is a known member of the AttentionActionKind enum.
+func (e AttentionActionKind) Valid() bool {
+	switch e {
+	case Link:
+		return true
+	case RestartService:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttentionBadgeTone.
 const (
 	AttentionBadgeToneAmber AttentionBadgeTone = "amber"
@@ -210,6 +228,24 @@ func (e AttentionBadgeTone) Valid() bool {
 	case AttentionBadgeToneAmber:
 		return true
 	case AttentionBadgeToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttentionItemImpact.
+const (
+	AttentionItemImpactServiceDown AttentionItemImpact = "service_down"
+	AttentionItemImpactServiceOk   AttentionItemImpact = "service_ok"
+)
+
+// Valid indicates whether the value is a known member of the AttentionItemImpact enum.
+func (e AttentionItemImpact) Valid() bool {
+	switch e {
+	case AttentionItemImpactServiceDown:
+		return true
+	case AttentionItemImpactServiceOk:
 		return true
 	default:
 		return false
@@ -4302,6 +4338,27 @@ func (e ListIncidentsParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListJobsParamsWho.
+const (
+	ListJobsParamsWhoAll    ListJobsParamsWho = "all"
+	ListJobsParamsWhoMe     ListJobsParamsWho = "me"
+	ListJobsParamsWhoPeople ListJobsParamsWho = "people"
+)
+
+// Valid indicates whether the value is a known member of the ListJobsParamsWho enum.
+func (e ListJobsParamsWho) Valid() bool {
+	switch e {
+	case ListJobsParamsWhoAll:
+		return true
+	case ListJobsParamsWhoMe:
+		return true
+	case ListJobsParamsWhoPeople:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetMapParamsLayer.
 const (
 	GetMapParamsLayerNetwork  GetMapParamsLayer = "network"
@@ -4914,6 +4971,20 @@ type Attention struct {
 	Items  []AttentionItem           `json:"items"`
 }
 
+// AttentionAction defines model for AttentionAction.
+type AttentionAction struct {
+	Href *string `json:"href,omitempty"`
+
+	// Kind link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+	Kind    AttentionActionKind   `json:"kind"`
+	Label   string                `json:"label"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+	Unit    *string               `json:"unit,omitempty"`
+}
+
+// AttentionActionKind link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+type AttentionActionKind string
+
 // AttentionBadge defines model for AttentionBadge.
 type AttentionBadge struct {
 	Count int                `json:"count"`
@@ -4925,7 +4996,9 @@ type AttentionBadgeTone string
 
 // AttentionItem defines model for AttentionItem.
 type AttentionItem struct {
-	Count int `json:"count"`
+	// Actions Acties bij de regel zelf (fase 47), zoals de logs van de dienst of herstarten
+	Actions *[]AttentionAction `json:"actions,omitempty"`
+	Count   int                `json:"count"`
 
 	// Detail De betrokken clusters of nodes, kort
 	Detail string `json:"detail"`
@@ -4937,10 +5010,16 @@ type AttentionItem struct {
 	Href string `json:"href"`
 
 	// Id Vast kenmerk van het soort melding
-	Id    string            `json:"id"`
-	Title string            `json:"title"`
-	Tone  AttentionItemTone `json:"tone"`
+	Id string `json:"id"`
+
+	// Impact Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat
+	Impact *AttentionItemImpact `json:"impact,omitempty"`
+	Title  string               `json:"title"`
+	Tone   AttentionItemTone    `json:"tone"`
 }
+
+// AttentionItemImpact Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat
+type AttentionItemImpact string
 
 // AttentionItemTone defines model for AttentionItem.Tone.
 type AttentionItemTone string
@@ -5680,6 +5759,26 @@ type CommandDetail struct {
 type CommandInput struct {
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
+
+	// RunAs Leeg is root
+	RunAs  *string `json:"run_as,omitempty"`
+	Script string  `json:"script"`
+
+	// TimeoutSeconds Nul is 30 minuten
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+}
+
+// CommandOnceInput defines model for CommandOnceInput.
+type CommandOnceInput struct {
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+
+	// Confirm De slug van het prodcluster
+	Confirm         *string `json:"confirm,omitempty"`
+	ContinueOnError *bool   `json:"continue_on_error,omitempty"`
+
+	// Name De titel van de taak; leeg is Eenmalig commando
+	Name    *string               `json:"name,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
 
 	// RunAs Leeg is root
 	RunAs  *string `json:"run_as,omitempty"`
@@ -11777,6 +11876,22 @@ type Metrics struct {
 // MetricsRange defines model for MetricsRange.
 type MetricsRange string
 
+// NavUsage defines model for NavUsage.
+type NavUsage struct {
+	Aiverslag bool `json:"aiverslag"`
+
+	// Dependencies Er zijn afhankelijkheden tussen diensten (Kaart)
+	Dependencies bool `json:"dependencies"`
+	Docker       bool `json:"docker"`
+	Gitops       bool `json:"gitops"`
+	Kubernetes   bool `json:"kubernetes"`
+	Opnsense     bool `json:"opnsense"`
+	Pbs          bool `json:"pbs"`
+	Proxmox      bool `json:"proxmox"`
+	Truenas      bool `json:"truenas"`
+	Zabbix       bool `json:"zabbix"`
+}
+
 // NewApiToken defines model for NewApiToken.
 type NewApiToken struct {
 	Item ApiToken `json:"item"`
@@ -13926,6 +14041,43 @@ type TotpSetup struct {
 	Secret     string `json:"secret"`
 }
 
+// UpdateAllInput defines model for UpdateAllInput.
+type UpdateAllInput struct {
+	Apt *struct {
+		Autoremove *bool `json:"autoremove,omitempty"`
+		Full       *bool `json:"full,omitempty"`
+	} `json:"apt,omitempty"`
+
+	// Confirm Met include_prod: prod, ter bevestiging
+	Confirm *string `json:"confirm,omitempty"`
+	Docker  *struct {
+		Always        *bool `json:"always,omitempty"`
+		HealthSeconds *int  `json:"health_seconds,omitempty"`
+		Prune         *bool `json:"prune,omitempty"`
+		Rollback      *bool `json:"rollback,omitempty"`
+	} `json:"docker,omitempty"`
+	DryRun      *bool `json:"dry_run,omitempty"`
+	Failover    *bool `json:"failover,omitempty"`
+	IncludeProd *bool `json:"include_prod,omitempty"`
+	Reboot      *bool `json:"reboot,omitempty"`
+}
+
+// UpdateAllResult defines model for UpdateAllResult.
+type UpdateAllResult struct {
+	// Clusters De clusters in de rij
+	Clusters []string `json:"clusters"`
+
+	// Hosts Proxmox-hosts
+	Hosts []string `json:"hosts"`
+	Job   *Job     `json:"job,omitempty"`
+
+	// Prod De prodclusters in de rij (slug)
+	Prod []string `json:"prod"`
+
+	// Skipped Wat niet meedoet
+	Skipped []string `json:"skipped"`
+}
+
 // UpdateInput defines model for UpdateInput.
 type UpdateInput struct {
 	Apt *struct {
@@ -13951,7 +14103,10 @@ type UpdateInput struct {
 
 		// Rollback Bij een mislukte test de vorige versie terugzetten (standaard aan)
 		Rollback *bool `json:"rollback,omitempty"`
-		Tags     *[]struct {
+
+		// Skip Fase 47: deze Compose-projecten deze keer overslaan
+		Skip *[]string `json:"skip,omitempty"`
+		Tags *[]struct {
 			From    string `json:"from"`
 			Project string `json:"project"`
 			To      string `json:"to"`
@@ -13964,6 +14119,9 @@ type UpdateInput struct {
 
 	// Reboot Herstarten als de node daar na de update om vraagt
 	Reboot *bool `json:"reboot,omitempty"`
+
+	// StartFrom Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id
+	StartFrom *openapi_types.UUID `json:"start_from,omitempty"`
 }
 
 // UpdateNode defines model for UpdateNode.
@@ -14001,13 +14159,16 @@ type UpdateNode struct {
 	FactsAt       nullable.Nullable[time.Time] `json:"facts_at"`
 
 	// HasDatabase Het cluster heeft een database; die pakketten blijven staan
-	HasDatabase    bool               `json:"has_database"`
-	Hostname       string             `json:"hostname"`
-	NodeId         openapi_types.UUID `json:"node_id"`
-	Online         bool               `json:"online"`
-	Packages       []string           `json:"packages"`
-	Protocol       int                `json:"protocol"`
-	RebootRequired bool               `json:"reboot_required"`
+	HasDatabase bool               `json:"has_database"`
+	Hostname    string             `json:"hostname"`
+	NodeId      openapi_types.UUID `json:"node_id"`
+	Online      bool               `json:"online"`
+	Packages    []string           `json:"packages"`
+	Protocol    int                `json:"protocol"`
+
+	// PveHost De node is een Proxmox-host; Alles bijwerken slaat hem over (fase 47)
+	PveHost        bool `json:"pve_host"`
+	RebootRequired bool `json:"reboot_required"`
 
 	// Smart De agent kent de updates van fase 15 (protocol 29)
 	Smart            bool `json:"smart"`
@@ -15192,8 +15353,15 @@ type ListJobsParams struct {
 	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
 	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
 	ProxmoxId *openapi_types.UUID `form:"proxmox_id,omitempty" json:"proxmox_id,omitempty"`
-	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Who Fase 47: me is wat jij startte, people wat een gebruiker startte (geen automatische taken), all is alles
+	Who    *ListJobsParamsWho `form:"who,omitempty" json:"who,omitempty"`
+	Status *JobStatus         `form:"status,omitempty" json:"status,omitempty"`
+	Limit  *int               `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// ListJobsParamsWho defines parameters for ListJobs.
+type ListJobsParamsWho string
 
 // GetKubeConfigParams defines parameters for GetKubeConfig.
 type GetKubeConfigParams struct {
@@ -15716,6 +15884,9 @@ type CreateVipJSONRequestBody = VipInput
 // CreateCommandJSONRequestBody defines body for CreateCommand for application/json ContentType.
 type CreateCommandJSONRequestBody = CommandInput
 
+// RunCommandOnceJSONRequestBody defines body for RunCommandOnce for application/json ContentType.
+type RunCommandOnceJSONRequestBody = CommandOnceInput
+
 // UpdateCommandJSONRequestBody defines body for UpdateCommand for application/json ContentType.
 type UpdateCommandJSONRequestBody = CommandInput
 
@@ -16045,6 +16216,9 @@ type UpdateStackJSONRequestBody = StackUpdateInput
 
 // StartUpdatesJSONRequestBody defines body for StartUpdates for application/json ContentType.
 type StartUpdatesJSONRequestBody = UpdateInput
+
+// StartUpdatesAllJSONRequestBody defines body for StartUpdatesAll for application/json ContentType.
+type StartUpdatesAllJSONRequestBody = UpdateAllInput
 
 // ReadComposeFilesJSONRequestBody defines body for ReadComposeFiles for application/json ContentType.
 type ReadComposeFilesJSONRequestBody = ComposeRef
@@ -16426,6 +16600,9 @@ type ServerInterface interface {
 	// CreateCommand Een eigen commando maken (admin)
 	// (POST /commands)
 	CreateCommand(w http.ResponseWriter, r *http.Request)
+	// RunCommandOnce Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+	// (POST /commands/once)
+	RunCommandOnce(w http.ResponseWriter, r *http.Request)
 	// DeleteCommand Een eigen commando weghalen (admin); de taken van zijn runs blijven
 	// (DELETE /commands/{commandId})
 	DeleteCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID)
@@ -16885,6 +17062,9 @@ type ServerInterface interface {
 	// GetMap Een laag van de infrastructuurkaart
 	// (GET /map)
 	GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams)
+	// GetNavUsage Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47)
+	// (GET /nav/usage)
+	GetNavUsage(w http.ResponseWriter, r *http.Request)
 	// ListNodeLinks Voorstellen om een node aan een VM te koppelen
 	// (GET /node-links)
 	ListNodeLinks(w http.ResponseWriter, r *http.Request)
@@ -17350,6 +17530,9 @@ type ServerInterface interface {
 	// StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
 	// (POST /updates)
 	StartUpdates(w http.ResponseWriter, r *http.Request)
+	// StartUpdatesAll Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+	// (POST /updates/all)
+	StartUpdatesAll(w http.ResponseWriter, r *http.Request)
 	// ReadComposeFiles De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders
 	// (POST /updates/compose)
 	ReadComposeFiles(w http.ResponseWriter, r *http.Request)
@@ -18121,6 +18304,12 @@ func (_ Unimplemented) ListCommands(w http.ResponseWriter, r *http.Request) {
 // CreateCommand Een eigen commando maken (admin)
 // (POST /commands)
 func (_ Unimplemented) CreateCommand(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunCommandOnce Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+// (POST /commands/once)
+func (_ Unimplemented) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19039,6 +19228,12 @@ func (_ Unimplemented) UpdateLogView(w http.ResponseWriter, r *http.Request, vie
 // GetMap Een laag van de infrastructuurkaart
 // (GET /map)
 func (_ Unimplemented) GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNavUsage Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47)
+// (GET /nav/usage)
+func (_ Unimplemented) GetNavUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19969,6 +20164,12 @@ func (_ Unimplemented) ListUpdates(w http.ResponseWriter, r *http.Request) {
 // StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
 // (POST /updates)
 func (_ Unimplemented) StartUpdates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartUpdatesAll Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+// (POST /updates/all)
+func (_ Unimplemented) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -23381,6 +23582,20 @@ func (siw *ServerInterfaceWrapper) CreateCommand(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// RunCommandOnce operation middleware
+func (siw *ServerInterfaceWrapper) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunCommandOnce(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteCommand operation middleware
 func (siw *ServerInterfaceWrapper) DeleteCommand(w http.ResponseWriter, r *http.Request) {
 
@@ -26353,6 +26568,32 @@ func (siw *ServerInterfaceWrapper) ListJobs(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// ------------- Optional query parameter "who" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "who", r.URL.Query(), &params.Who, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "who"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "who", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -27971,6 +28212,20 @@ func (siw *ServerInterfaceWrapper) GetMap(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMap(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNavUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetNavUsage(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNavUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -31975,6 +32230,20 @@ func (siw *ServerInterfaceWrapper) StartUpdates(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// StartUpdatesAll operation middleware
+func (siw *ServerInterfaceWrapper) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartUpdatesAll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReadComposeFiles operation middleware
 func (siw *ServerInterfaceWrapper) ReadComposeFiles(w http.ResponseWriter, r *http.Request) {
 
@@ -32753,6 +33022,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/attention", wrapper.GetAttention)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nav/usage", wrapper.GetNavUsage)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/disk/settings", wrapper.GetDiskWatchSettings)
 	})
 	r.Group(func(r chi.Router) {
@@ -33416,6 +33688,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/updates", wrapper.StartUpdates)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates/all", wrapper.StartUpdatesAll)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/updates/policies", wrapper.GetUpdatePolicies)
 	})
 	r.Group(func(r chi.Router) {
@@ -33885,6 +34160,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/commands/{commandId}/run", wrapper.RunCommand)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/commands/once", wrapper.RunCommandOnce)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/agent-upgrades", wrapper.ListAgentUpgrades)

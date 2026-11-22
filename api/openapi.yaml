@@ -145,6 +145,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Attention" }
         "401": { $ref: "#/components/responses/Error" }
+  /nav/usage:
+    get:
+      operationId: getNavUsage
+      summary: Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NavUsage" }
+        "401": { $ref: "#/components/responses/Error" }
   /disk/settings:
     get:
       operationId: getDiskWatchSettings
@@ -2037,6 +2048,11 @@ paths:
         - { name: node_id, in: query, schema: { type: string, format: uuid } }
         - { name: cluster_id, in: query, schema: { type: string, format: uuid } }
         - { name: proxmox_id, in: query, schema: { type: string, format: uuid } }
+        - name: who
+          in: query
+          description: "Fase 47: me is wat jij startte, people wat een gebruiker startte (geen automatische taken), all is alles"
+          schema: { type: string, enum: [me, people, all], default: all }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/JobStatus" } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         "200":
@@ -4217,6 +4233,30 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /updates/all:
+    post:
+      operationId: startUpdatesAll
+      summary: Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+      description: |
+        Elk cluster krijgt een gewone clusterupdate (rollend, de VIP-houder als laatste); het volgende cluster begint pas
+        als het vorige gelukt is en bij een fout stopt de rij. Lab en test eerst, prod als laatste en alleen met
+        include_prod (dan tweestapsverificatie en confirm "prod"), daarna de nodes zonder cluster. Proxmox-hosts doen niet
+        mee: die werk je bij via Proxmox → Host-updates. Met dry_run komt alleen het plan terug.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAllInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt, of het plan bij dry_run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateAllResult" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
@@ -6963,6 +7003,28 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /commands/once:
+    post:
+      operationId: runCommandOnce
+      summary: Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+      description: |
+        Zoals een eigen commando draaien, maar de tekst komt niet in de lijst met eigen commando's: hij staat in de taak
+        en per node in het logboek. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandOnceInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
   /agent-upgrades:
     get:
@@ -11458,6 +11520,40 @@ components:
         href: { type: string, description: Pagina waar je het oplost }
         count: { type: integer }
         help: { type: string, description: "Wat kun je doen, in gewone taal (fase 41)" }
+        impact:
+          type: string
+          enum: [service_ok, service_down]
+          description: "Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat"
+        actions:
+          type: array
+          description: "Acties bij de regel zelf (fase 47), zoals de logs van de dienst of herstarten"
+          items: { $ref: "#/components/schemas/AttentionAction" }
+    AttentionAction:
+      type: object
+      required: [kind, label]
+      properties:
+        kind:
+          type: string
+          enum: [link, restart_service]
+          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando"
+        label: { type: string }
+        href: { type: string }
+        unit: { type: string }
+        node_ids: { type: array, items: { type: string, format: uuid } }
+    NavUsage:
+      type: object
+      required: [kubernetes, gitops, dependencies, proxmox, docker, pbs, truenas, opnsense, zabbix, aiverslag]
+      properties:
+        kubernetes: { type: boolean }
+        gitops: { type: boolean }
+        dependencies: { type: boolean, description: Er zijn afhankelijkheden tussen diensten (Kaart) }
+        proxmox: { type: boolean }
+        docker: { type: boolean }
+        pbs: { type: boolean }
+        truenas: { type: boolean }
+        opnsense: { type: boolean }
+        zabbix: { type: boolean }
+        aiverslag: { type: boolean }
     DiskWatchSettings:
       type: object
       required: [warn_pct, crit_pct, ignore_mounts]
@@ -14724,8 +14820,9 @@ components:
       type: object
       required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, online, protocol, supported,
         upgrades_total, upgrades_security, packages, reboot_required, apt_updated_at, docker_version, compose_projects,
-        has_database, vip_holder, facts_at, smart, docker_reports]
+        has_database, vip_holder, facts_at, smart, docker_reports, pve_host]
       properties:
+        pve_host: { type: boolean, description: "De node is een Proxmox-host; Alles bijwerken slaat hem over (fase 47)" }
         node_id: { type: string, format: uuid }
         hostname: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -14788,6 +14885,7 @@ components:
           type: object
           properties:
             projects: { type: array, items: { type: string }, description: Leeg is elk Compose-project }
+            skip: { type: array, items: { type: string }, description: "Fase 47: deze Compose-projecten deze keer overslaan" }
             prune: { type: boolean }
             always: { type: boolean, description: Ook zonder nieuw image down en up -d }
             health_seconds: { type: integer, description: Hoe lang de test mag duren; 0 is 120 s }
@@ -14804,6 +14902,36 @@ components:
         reboot: { type: boolean, description: Herstarten als de node daar na de update om vraagt }
         failover: { type: boolean, description: De VIP-houder eerst failoveren naar een bijgewerkte node (standaard aan) }
         confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+        start_from: { type: string, format: uuid, description: "Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id" }
+    UpdateAllInput:
+      type: object
+      properties:
+        apt:
+          type: object
+          properties:
+            full: { type: boolean }
+            autoremove: { type: boolean }
+        docker:
+          type: object
+          properties:
+            prune: { type: boolean }
+            always: { type: boolean }
+            health_seconds: { type: integer }
+            rollback: { type: boolean }
+        reboot: { type: boolean }
+        failover: { type: boolean }
+        include_prod: { type: boolean }
+        confirm: { type: string, description: "Met include_prod: prod, ter bevestiging" }
+        dry_run: { type: boolean }
+    UpdateAllResult:
+      type: object
+      required: [clusters, skipped, hosts, prod]
+      properties:
+        job: { $ref: "#/components/schemas/Job" }
+        clusters: { type: array, items: { type: string }, description: De clusters in de rij, op volgorde }
+        skipped: { type: array, items: { type: string }, description: Wat niet meedoet, met de reden }
+        hosts: { type: array, items: { type: string }, description: Proxmox-hosts, die niet meedoen }
+        prod: { type: array, items: { type: string }, description: De prodclusters in de rij (slug) }
     DockerReport:
       type: object
       required: [node_id, project, result, problem, created_at, job_id, conversation_id, services, logs, edited]
@@ -14969,6 +15097,18 @@ components:
         node_ids: { type: array, items: { type: string, format: uuid } }
         cluster_id: { type: string, format: uuid }
         continue_on_error: { type: boolean, description: Ook op de volgende nodes draaien als het op een node mislukt }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+    CommandOnceInput:
+      type: object
+      required: [script]
+      properties:
+        name: { type: string, description: "De titel van de taak; leeg is Eenmalig commando" }
+        script: { type: string }
+        run_as: { type: string, description: Leeg is root }
+        timeout_seconds: { type: integer, description: Nul is 30 minuten }
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        cluster_id: { type: string, format: uuid }
+        continue_on_error: { type: boolean }
         confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
     AgentUpgradeInput:
       type: object
