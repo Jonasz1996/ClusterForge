@@ -329,18 +329,15 @@ func (s *Service) coverage(ctx context.Context, now time.Time) ([]CoverageRow, e
 }
 
 type coverageFirewall struct {
-	row           bool
-	mode          string
-	status        *protocol.FirewallStatus
-	applyError    string
-	supported     bool
-	serviceActive bool
+	row        bool
+	mode       string
+	status     *protocol.FirewallStatus
+	applyError string
+	supported  bool
 }
 
 func (f coverageFirewall) state() string {
 	switch {
-	case !f.row && f.serviceActive:
-		return StateUnmanaged
 	case !f.row && !f.supported:
 		return StateUnsupported
 	case !f.row:

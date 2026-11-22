@@ -119,7 +119,7 @@ func TestOverview(t *testing.T) {
 	}
 	check("web1", StateOn, StateOn, StateOn)
 	check("web2", StatePreview, StateOn, StateDown)
-	check("db1", StateUnmanaged, StateUnmanaged, "")
+	check("db1", StateMissing, StateUnmanaged, "")
 	check("oud", StateUnsupported, StateUnsupported, "")
 	if len(cov["web1"].Gaps) != 0 {
 		t.Errorf("web1 heeft gaten: %v", cov["web1"].Gaps)
@@ -155,7 +155,7 @@ func TestOverview(t *testing.T) {
 	for _, it := range o.Now {
 		keys[it.Key] = true
 	}
-	for _, k := range []string{"bouncer-hit", "bruteforce-198.51.100.9", "totp", "security-updates", "firewall-preview", "crowdsec-unmanaged", "firewall-unmanaged"} {
+	for _, k := range []string{"bouncer-hit", "bruteforce-198.51.100.9", "totp", "security-updates", "firewall-preview", "crowdsec-unmanaged"} {
 		if !keys[k] {
 			t.Errorf("punt %s ontbreekt in %v", k, keys)
 		}
