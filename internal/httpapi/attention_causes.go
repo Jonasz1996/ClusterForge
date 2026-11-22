@@ -178,4 +178,3 @@ func decorate(it *gen.AttentionItem) {
 		it.Actions = &acts
 	}
 }
-
