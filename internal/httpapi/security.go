@@ -549,6 +549,7 @@ func (s *Server) ImportSecurityScan(w http.ResponseWriter, r *http.Request) {
 		s.securityError(w, r, err)
 		return
 	}
+	s.autoFixImport(run)
 	writeJSON(w, http.StatusCreated, run)
 }
 
@@ -675,6 +676,7 @@ func (s *Server) importNmap(w http.ResponseWriter, r *http.Request) {
 		s.securityError(w, r, err)
 		return
 	}
+	s.autoFixImport(run)
 	writeJSON(w, http.StatusCreated, map[string]any{"run_id": run.ID, "hosts_up": run.HostsUp, "open_ports": run.OpenPorts, "findings": run.Findings,
 		"url": "/kwetsbaarheden/scans?tab=uitvoeringen&run=" + run.ID.String()})
 }

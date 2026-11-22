@@ -81,7 +81,9 @@ var rules = map[string]rule{
 	"sharing.smb.update": {args: taskEnable("SMB-share")},
 	"sharing.nfs.update": {args: taskEnable("NFS-share")},
 	"service.control":    {job: true, args: serviceControl},
-	"service.update":     {args: serviceAutostart},
+	// Fase 43b: alleen de SNMP-community vervangen (pentest: "public").
+	"snmp.update":    {args: snmpCommunity},
+	"service.update": {args: serviceAutostart},
 
 	// --- Updates en herstarten (M4) ------------------------------------
 	"update.download": {job: true, args: func(a []json.RawMessage) (string, string, error) {
@@ -191,7 +193,7 @@ func check(method string, args json.RawMessage) (Allowed, error) {
 // readDenied zijn methodes die een kijker niet leest: sleutels,
 // wachtwoorden en gebruikers.
 func readDenied(method string) bool {
-	for _, p := range []string{"keychaincredential", "cloudsync.credentials", "api_key", "auth", "user", "group", "ssh", "kmip", "certificate", "certificateauthority", "acme", "directoryservices", "activedirectory", "ldap", "mail", "system.general.config", "tunable"} {
+	for _, p := range []string{"keychaincredential", "cloudsync.credentials", "api_key", "auth", "user", "group", "ssh", "kmip", "certificate", "certificateauthority", "acme", "directoryservices", "activedirectory", "ldap", "mail", "system.general.config", "tunable", "snmp"} {
 		if method == p || strings.HasPrefix(method, p+".") {
 			return true
 		}
@@ -450,4 +452,22 @@ func updateApply(a []json.RawMessage) (string, string, error) {
 		return "TrueNAS bijwerken en herstarten", "update", nil
 	}
 	return "TrueNAS-update installeren (actief na herstart)", "update", nil
+}
+
+var community = regexp.MustCompile(`^[A-Za-z0-9]{16,64}$`)
+
+// snmpCommunity: snmp.update({community}) en niets anders.
+func snmpCommunity(a []json.RawMessage) (string, string, error) {
+	if err := count(a, 1); err != nil {
+		return "", "", err
+	}
+	var in map[string]json.RawMessage
+	if err := json.Unmarshal(a[0], &in); err != nil || len(in) != 1 {
+		return "", "", fmt.Errorf("alleen community mag veranderen")
+	}
+	var c string
+	if v, ok := in["community"]; !ok || json.Unmarshal(v, &c) != nil || !community.MatchString(c) {
+		return "", "", fmt.Errorf("community moet 16 tot 64 letters of cijfers zijn")
+	}
+	return "SNMP-community vervangen", "", nil
 }

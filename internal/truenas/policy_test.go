@@ -79,3 +79,14 @@ func TestScrubSecrets(t *testing.T) {
 		t.Fatal("onveranderd antwoord herschreven")
 	}
 }
+
+func TestSNMPCommunity(t *testing.T) {
+	if _, err := check("snmp.update", []byte(`[{"community":"abcdefghijkmnopqrstuvwx"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{`[{"community":"public"}]`, `[{"community":"abcdefghijkmnopqrstuvwx","v3":true}]`, `[]`} {
+		if _, err := check("snmp.update", []byte(bad)); err == nil {
+			t.Fatalf("%s mocht", bad)
+		}
+	}
+}

@@ -130,3 +130,12 @@ VALUES (NULL, $1, 'import', 'klaar', $2, $2, $3, $4, $5, $6, $7) RETURNING id`, 
 	}
 	return runs[0], nil
 }
+
+// AddRunNotes zet extra regels bij een uitvoering, zoals wat de
+// automatische fixes deden.
+func (s *Service) AddRunNotes(ctx context.Context, id uuid.UUID, notes []string) error {
+	raw, _ := json.Marshal(notes)
+	_, err := s.pool.Exec(ctx, `UPDATE security_scan_runs SET result = jsonb_set(coalesce(result, '{}'::jsonb), '{notes}',
+		coalesce(result->'notes', '[]'::jsonb) || $2::jsonb) WHERE id = $1`, id, raw)
+	return err
+}

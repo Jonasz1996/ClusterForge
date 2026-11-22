@@ -615,7 +615,9 @@ function AutoImport() {
       <div className="mt-3 space-y-3">
         <p className="text-slate-600 dark:text-slate-400">
           Maak een importsleutel en laat het pentestsysteem na elke run zijn XML-bestanden sturen. De sleutel kan alleen rapporten inlezen. Elke
-          import staat in het logboek en verschijnt hier onder Uitvoeringen.
+          import staat in het logboek en verschijnt hier onder Uitvoeringen. Na elke import zet ClusterForge vanzelf een publieke .git dicht in de
+          proxy hosts van NPM en vervangt het SNMP-community &quot;public&quot; op een TrueNAS (niet als Zabbix er SNMP leest); wat het deed, staat
+          bij de uitvoering. Firewallregels blijven een eigen klik.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Naam van de sleutel" htmlFor="imp-tok">

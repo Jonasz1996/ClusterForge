@@ -400,6 +400,11 @@ func TestSecurityImportNmap(t *testing.T) {
 	if !strings.Contains(strings.Join(det.Result.Notes, " "), "1 poorten zonder antwoord") {
 		t.Fatalf("notes = %v", det.Result.Notes)
 	}
+	// De automatische fix meldt zich bij de uitvoering (NPM is hier niet gekoppeld).
+	eventually(t, "notitie van de automatische fix", func() bool {
+		c.do("GET", "/api/v1/security/scan-runs/"+run.ID, nil, &det)
+		return strings.Contains(strings.Join(det.Result.Notes, " "), "Automatisch: .git op 192.168.77.10:80")
+	})
 	if s := c.do("POST", "/api/v1/security/scans/import", map[string]any{"files": []map[string]any{{"name": "x.xml", "xml": "geen xml"}}}, nil); s != http.StatusBadRequest {
 		t.Fatalf("slechte xml: %d", s)
 	}
