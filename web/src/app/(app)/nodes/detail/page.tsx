@@ -2,6 +2,8 @@
 
 import { SectionNav } from "@/components/shell/SectionNav";
 import { Tile, TileGrid } from "@/components/Tiles";
+import { Tabs } from "@/components/Tabs";
+import { NodeProblems, nodeTabs, tabOf, type NodeTab } from "@/components/inventory/NodeProblems";
 import { NodeZabbixTile } from "@/components/zabbix/NodeZabbix";
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
@@ -81,6 +83,14 @@ function NodeDetailInner() {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const jobs = useJobs({ node_id: id, limit: 10 }, id !== "");
+  const params = useSearchParams();
+  const tab = tabOf(params.get("tab"));
+  const setTab = (t: NodeTab) => {
+    const q = new URLSearchParams(params.toString());
+    if (t === "status") q.delete("tab");
+    else q.set("tab", t);
+    router.replace(`/nodes/detail?${q.toString()}`, { scroll: false });
+  };
 
   if (id === "") return <Alert>Geen node opgegeven.</Alert>;
 
@@ -132,7 +142,19 @@ function NodeDetailInner() {
               )
             }
           />
-          <SectionNav views />
+          {/* Fase 47: bovenaan status, problemen en de acties die je het
+              vaakst nodig hebt; de rest in vier tabbladen. */}
+          <NodeProblems node={node.data} isAdmin={isAdmin} />
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <Tabs
+              className="min-w-0 flex-1"
+              value={tab}
+              onChange={setTab}
+              label="Onderdelen van de node"
+              tabs={nodeTabs.map((t) => ({ key: t.key, label: t.label }))}
+            />
+            <SectionNav views />
+          </div>
 
           {deleting && (
             <ConfirmDelete
@@ -167,7 +189,8 @@ function NodeDetailInner() {
             </Card>
           )}
 
-          <TileGrid>
+          {tab === "status" && (
+            <TileGrid>
             {!editing && (
               <Tile>
                 <Card title="Inventory">
@@ -194,27 +217,13 @@ function NodeDetailInner() {
                 <NodeDiskCard nodeId={id} isAdmin={isAdmin} />
               </Tile>
             )}
+            {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} part="opslag" />}
             <Tile>
               <NodeLifecycleCard node={node.data} runtime={runtime.data} jobs={jobs.data} isAdmin={isAdmin} />
             </Tile>
             {node.data.cluster_id && (
               <Tile>
                 <NodeDriftCard nodeId={id} clusterId={node.data.cluster_id} isAdmin={isAdmin} />
-              </Tile>
-            )}
-            <Tile>
-              <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
-            </Tile>
-            {(jobs.data?.length ?? 0) > 0 && (
-              <Tile wide>
-                <Card title="Taken">
-                  <JobList jobs={jobs.data!} />
-                </Card>
-              </Tile>
-            )}
-            {node.data.proxmox && (
-              <Tile>
-                <NodeBackupsCard nodeId={id} isAdmin={isAdmin} />
               </Tile>
             )}
             {node.data.agent && (
@@ -227,25 +236,6 @@ function NodeDetailInner() {
                 <FirewallNodeCard nodeId={id} isAdmin={isAdmin} />
               </Tile>
             )}
-            {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
-            {isAdmin && node.data.agent && (
-              <Tile>
-                <NodeConnectionsCard nodeId={id} />
-              </Tile>
-            )}
-            {node.data.agent && (
-              <Tile wide>
-                <NodeChangesCard nodeId={id} />
-              </Tile>
-            )}
-            {node.data.agent && (
-              <Tile>
-                <NodeCronCard nodeId={id} />
-              </Tile>
-            )}
-            <Tile wide>
-              <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
-            </Tile>
             <NodeZabbixTile nodeId={id} />
             {node.data.agent && (
               <Tile wide tall>
@@ -256,7 +246,72 @@ function NodeDetailInner() {
                 />
               </Tile>
             )}
-          </TileGrid>
+            </TileGrid>
+          )}
+
+          {tab === "software" && (
+            <TileGrid>
+            {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} part="software" />}
+            <Tile>
+              <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
+            </Tile>
+            {node.data.proxmox && (
+              <Tile>
+                <NodeBackupsCard nodeId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            {node.data.agent && (
+              <Tile>
+                <NodeCronCard nodeId={id} />
+              </Tile>
+            )}
+            {!runtime.data?.facts && (
+              <Tile>
+                <Card title="Software">
+                  <p className="text-sm text-slate-500">Nog geen facts van de agent: het besturingssysteem, de updates en de services verschijnen hier zodra de agent ze stuurt.</p>
+                </Card>
+              </Tile>
+            )}
+            </TileGrid>
+          )}
+
+          {tab === "netwerk" && (
+            <TileGrid>
+            {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} part="netwerk" />}
+            {isAdmin && node.data.agent && (
+              <Tile>
+                <NodeConnectionsCard nodeId={id} />
+              </Tile>
+            )}
+            {!runtime.data?.facts && !(isAdmin && node.data.agent) && (
+              <Tile>
+                <Card title="Netwerk">
+                  <p className="text-sm text-slate-500">Nog geen netwerkgegevens van de agent.</p>
+                </Card>
+              </Tile>
+            )}
+            </TileGrid>
+          )}
+
+          {tab === "geschiedenis" && (
+            <TileGrid>
+            {(jobs.data?.length ?? 0) > 0 && (
+              <Tile wide>
+                <Card title="Taken">
+                  <JobList jobs={jobs.data!} />
+                </Card>
+              </Tile>
+            )}
+            {node.data.agent && (
+              <Tile wide>
+                <NodeChangesCard nodeId={id} />
+              </Tile>
+            )}
+            <Tile wide>
+              <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
+            </Tile>
+            </TileGrid>
+          )}
         </div>
       )}
     </QueryState>
@@ -353,10 +408,15 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
   );
 }
 
-function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }) {
+// FactsView toont de facts in drie delen voor de tabbladen (fase 47):
+// software (systeem, updates, services), netwerk (interfaces, routes,
+// poorten) en opslag.
+function FactsView({ facts: f, runtime, part }: { facts: Facts; runtime: NodeRuntime; part: "software" | "netwerk" | "opslag" }) {
   const hbServices = runtime.heartbeat?.services ?? {};
   return (
     <>
+      {part === "software" && (
+      <>
 
         <Tile>
         <Card title="Systeem">
@@ -475,6 +535,10 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
         </Tile>
       )}
 
+      </>
+      )}
+      {part === "netwerk" && (
+      <>
         <Tile>
         <Card title="Netwerk">
           <Table head={["Interface", "Adressen", ""]}>
@@ -514,36 +578,6 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
               )}
             </p>
           )}
-        </Card>
-        </Tile>
-
-        <Tile>
-        <Card title="Opslag">
-          <Table head={["Mount", "Type", "Gebruik"]}>
-            {(f.filesystems ?? []).map((fs) => {
-              const pct = fs.size_bytes > 0 ? Math.round((fs.used_bytes / fs.size_bytes) * 100) : 0;
-              return (
-                <tr key={fs.mount + fs.device}>
-                  <td className={tdClass}>
-                    <span className="font-mono text-xs">{fs.mount}</span>
-                    <div className="text-[11px] text-slate-400">{fs.device}</div>
-                  </td>
-                  <td className={tdClass}>{fs.type}</td>
-                  <td className={`${tdClass} w-40`}>
-                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800">
-                      <div
-                        className={`h-1.5 rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-brand-600"}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500 tabular-nums">
-                      {formatBytes(fs.used_bytes)} van {formatBytes(fs.size_bytes)} ({pct}%)
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </Table>
         </Card>
         </Tile>
 
@@ -596,6 +630,42 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             </Tile>
           )}
         </>
+      )}
+      </>
+      )}
+      {part === "opslag" && (
+      <>
+        <Tile>
+        <Card title="Opslag">
+          <Table head={["Mount", "Type", "Gebruik"]}>
+            {(f.filesystems ?? []).map((fs) => {
+              const pct = fs.size_bytes > 0 ? Math.round((fs.used_bytes / fs.size_bytes) * 100) : 0;
+              return (
+                <tr key={fs.mount + fs.device}>
+                  <td className={tdClass}>
+                    <span className="font-mono text-xs">{fs.mount}</span>
+                    <div className="text-[11px] text-slate-400">{fs.device}</div>
+                  </td>
+                  <td className={tdClass}>{fs.type}</td>
+                  <td className={`${tdClass} w-40`}>
+                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className={`h-1.5 rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-brand-600"}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 tabular-nums">
+                      {formatBytes(fs.used_bytes)} van {formatBytes(fs.size_bytes)} ({pct}%)
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </Table>
+        </Card>
+        </Tile>
+
+      </>
       )}
     </>
   );

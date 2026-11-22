@@ -17,9 +17,10 @@ export type PageHelp = {
 export const pageHelp: Record<string, PageHelp> = {
   "/": {
     wat: "Het overzicht van al je servers en clusters in één scherm.",
-    waarom: "Je ziet meteen of alles werkt. Bovenaan staat Aandacht nodig: alleen wat nu een actie vraagt.",
+    waarom: "Bovenaan staat Wat moet ik doen: alleen wat nu een actie vraagt, één regel per oorzaak, met de knop die het oplost.",
     doen: [
-      "Staat er iets bij Aandacht nodig? Klik op 'Wat doen?' voor uitleg, of op de regel om het op te lossen.",
+      "Dezelfde oorzaak op veel servers is één regel. 'Dienst werkt' betekent dat gebruikers er niets van merken; 'Dienst plat' gaat voor.",
+      "Klik op 'Uitleg' bij een regel, of op een knop zoals 'Logs van …' of 'Herstarten'.",
       "Nieuw hier? Begin bij Aan de slag: daar staan de gewone taken stap voor stap.",
     ],
     termen: ["cluster", "node", "agent"],
@@ -59,7 +60,7 @@ export const pageHelp: Record<string, PageHelp> = {
     termen: ["node", "agent", "lxc", "vm"],
   },
   "/nodes/detail": {
-    wat: "Alles over één server: de agent, schijfruimte, updates, diensten, netwerk en wat er recent veranderde.",
+    wat: "Alles over één server. Bovenaan wat er mis is met de knoppen om het op te lossen; daaronder vier tabbladen: Status, Software, Netwerk en Geschiedenis.",
     doen: [
       "Herstarten of onderhoud: bij Levenscyclus. In een cluster verhuist het werk eerst naar een andere node.",
       "Schijf vol? Bij Schijfruimte meet je wat ruimte inneemt en maak je veilig ruimte vrij.",
@@ -171,7 +172,14 @@ export const pageHelp: Record<string, PageHelp> = {
   "/tests": { wat: "Proeven: failover testen en rampen nabootsen, om te zien of je clusters echt overnemen.", termen: ["failover"] },
   "/taken": {
     wat: "Taken: alles wat ClusterForge voor je uitvoert, zoals een update of een herstart, met de voortgang.",
-    doen: ["Klik op een taak voor de stappen en de uitvoer. Een mislukte taak zegt onderaan wat er misging."],
+    doen: [
+      "Standaard zie je wat jij startte. Automatische taken, zoals Firewall toepassen, staan onder 'Alles, ook automatisch'.",
+      "Klik op een taak voor de stappen en de uitvoer. Stopte een update halverwege, dan ga je daar verder met 'Hervat vanaf …'.",
+    ],
+  },
+  "/platformen": {
+    wat: "De systemen onder je clusters: Proxmox, Backup Server, TrueNAS, OPNsense en Docker. Elk platform heeft zijn eigen tabbladen.",
+    waarom: "Zo blijft het menu kort. Een platform dat je nog niet gebruikt, koppel je hier.",
   },
   "/documentatie": { wat: "Automatisch gemaakte documentatie van je clusters en netwerk, ook als export naar GitHub." },
   "/assistent": { wat: "De AI-assistent: stel een vraag in gewone taal, zoals 'waarom staat web rood?'." },

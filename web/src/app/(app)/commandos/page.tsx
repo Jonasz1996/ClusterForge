@@ -15,6 +15,7 @@ import {
   useCommands,
   useDeleteCommand,
   useRunCommand,
+  useRunOnce,
   useSaveCommand,
   useUpdates,
   zabbixExample,
@@ -46,6 +47,8 @@ function Commands() {
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  // Fase 47: wat in het formulier staat eenmalig draaien, zonder bewaren.
+  const [once, setOnce] = useState(false);
 
   // Het gekozen commando één keer per keuze in het formulier zetten.
   const key = current.data ? `${current.data.id}@${current.data.revision}@${current.data.updated_at}` : null;
@@ -158,8 +161,18 @@ function Commands() {
                       </Button>
                     )}
                     {id && !dirty && <Button onClick={() => setRunning(true)}>Uitvoeren…</Button>}
+                    {(!id || dirty) && (
+                      <Button
+                        variant={id ? "secondary" : "primary"}
+                        disabled={form.script.trim() === ""}
+                        title="Draaien zonder te bewaren: de tekst staat in de taak en het logboek, niet in de lijst"
+                        onClick={() => setOnce(true)}
+                      >
+                        Eenmalig uitvoeren…
+                      </Button>
+                    )}
                     <Button
-                      variant={id && !dirty ? "secondary" : "primary"}
+                      variant="secondary"
                       onClick={onSave}
                       disabled={save.isPending || form.name.trim() === "" || form.script.trim() === "" || (!!id && !dirty)}
                     >
@@ -197,7 +210,7 @@ function Commands() {
               placeholder={"#!/bin/sh\nset -e\n…"}
             />
             <p className="mt-1 text-xs text-slate-500">
-              Zonder #!-regel draait het met /bin/sh. Wachtwoorden zoals PASSWORD=… of -p… worden in de uitvoer gemaskeerd; zet ze liever niet in het script.
+              Een diagnose die je maar één keer nodig hebt? Gebruik Eenmalig uitvoeren: dan komt ze niet in de lijst. Zonder #!-regel draait het met /bin/sh. Wachtwoorden zoals PASSWORD=… of -p… worden in de uitvoer gemaskeerd; zet ze liever niet in het script.
             </p>
             {save.error && (
               <div className="mt-2">
@@ -215,6 +228,17 @@ function Commands() {
         </div>
       </div>
       {running && current.data && <RunDialog detail={current.data} onClose={() => setRunning(false)} />}
+      {once && (
+        <RunDialog
+          once={{
+            name: form.name.trim() || "Eenmalig commando",
+            script: form.script,
+            run_as: form.run_as,
+            timeout_seconds: Number.isFinite(Number(form.timeout)) ? Math.round(Number(form.timeout) * 60) : 0,
+          }}
+          onClose={() => setOnce(false)}
+        />
+      )}
     </div>
   );
 }
@@ -275,9 +299,15 @@ function Revisions({ detail }: { detail: CommandDetail }) {
   );
 }
 
-function RunDialog({ detail, onClose }: { detail: CommandDetail; onClose: () => void }) {
+type Once = { name: string; script: string; run_as: string; timeout_seconds: number };
+
+// RunDialog draait een bewaard commando (detail) of eenmalig wat in het
+// formulier staat (once, fase 47).
+function RunDialog({ detail, once, onClose }: { detail?: CommandDetail; once?: Once; onClose: () => void }) {
   const updates = useUpdates();
-  const run = useRunCommand();
+  const saved = useRunCommand();
+  const oneOff = useRunOnce();
+  const run = once ? oneOff : saved;
   const totp = useProdTotp();
   const [mode, setMode] = useState<"nodes" | "cluster">("nodes");
   const [clusterId, setClusterId] = useState("");
@@ -291,18 +321,16 @@ function RunDialog({ detail, onClose }: { detail: CommandDetail; onClose: () => 
   const prodSlug = prodSlugs.length === 1 ? prodSlugs[0] : undefined;
   const blocked =
     chosen.length === 0 || chosen.some((n) => !n.online || !n.supported) || prodSlugs.length > 1 || (!!prodSlug && !prodConfirmed(prodSlug, confirm, totp));
-  const submit = () =>
-    run.mutate({
-      id: detail.id,
-      body: {
-        ...(mode === "cluster" ? { cluster_id: clusterId } : { node_ids: picked }),
-        continue_on_error: cont,
-        ...(prodSlug ? { confirm } : {}),
-      },
-    });
+  const body = {
+    ...(mode === "cluster" ? { cluster_id: clusterId } : { node_ids: picked }),
+    continue_on_error: cont,
+    ...(prodSlug ? { confirm } : {}),
+  };
+  const submit = () => (once ? oneOff.mutate({ ...once, ...body }) : detail && saved.mutate({ id: detail.id, body }));
+  const timeout = once ? once.timeout_seconds || 1800 : (detail?.timeout_seconds ?? 1800);
 
   return (
-    <Modal title={`${detail.name} uitvoeren`} onClose={onClose} wide>
+    <Modal title={`${once ? once.name : detail?.name} ${once ? "eenmalig " : ""}uitvoeren`} onClose={onClose} wide>
       {run.data ? (
         <div className="space-y-3 text-sm">
           <Alert kind="success">Gestart.</Alert>
@@ -319,7 +347,8 @@ function RunDialog({ detail, onClose }: { detail: CommandDetail; onClose: () => 
       ) : (
         <div className="space-y-4 text-sm">
           <p className="text-slate-600 dark:text-slate-400">
-            Revisie {detail.revision}, als {detail.run_as}, hoogstens {Math.round(detail.timeout_seconds / 60)} minuten per node. Eén node tegelijk; bij een cluster de VIP-houder als laatste.
+            {once ? "Eenmalig, niet bewaard" : `Revisie ${detail?.revision}`}, als {once ? once.run_as || "root" : detail?.run_as}, hoogstens{" "}
+            {Math.round(timeout / 60)} minuten per node. Eén node tegelijk; bij een cluster de VIP-houder als laatste.
           </p>
           <div className="flex gap-4">
             <label className="flex items-center gap-2">

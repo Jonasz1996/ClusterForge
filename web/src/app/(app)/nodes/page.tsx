@@ -3,7 +3,8 @@
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import { useOpenFlag } from "@/lib/openFlag";
 import { BackupBadge } from "@/components/backups/Backups";
 import { AgentUpgradeCard } from "@/components/inventory/AgentUpgrades";
@@ -25,6 +26,17 @@ import {
 type Group = { key: string; title: string; href?: string; nodes: Node[] };
 
 export default function NodesPage() {
+  return (
+    <Suspense>
+      <NodesInner />
+    </Suspense>
+  );
+}
+
+function NodesInner() {
+  // ?zoek= vult het zoekveld, zoals vanuit Aandacht ("ufw draait niet op
+  // 25 nodes"); de status van een node telt ook mee (fase 47).
+  const initial = useSearchParams().get("zoek") ?? "";
   const nodes = useNodes(true);
   const backups = useBackups();
   const backupOf = useMemo(
@@ -36,7 +48,7 @@ export default function NodesPage() {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initial);
   const [lifecycle, setLifecycle] = useState("");
   useOpenFlag("agent", isAdmin, () => setInstalling(true));
 
@@ -50,7 +62,8 @@ export default function NodesPage() {
         (n.primary_ip ?? "").includes(s) ||
         n.role.toLowerCase().includes(s) ||
         n.tags.some((t) => t.includes(s)) ||
-        (n.cluster_name ?? "").toLowerCase().includes(s));
+        (n.cluster_name ?? "").toLowerCase().includes(s) ||
+        n.status_reason.toLowerCase().includes(s));
     const byCluster = new Map<string, Group>();
     const loose: Group = { key: "", title: "Zonder cluster", nodes: [] };
     for (const n of nodes.data ?? []) {
