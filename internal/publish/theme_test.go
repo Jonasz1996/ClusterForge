@@ -51,3 +51,21 @@ func TestThemeRender(t *testing.T) {
 		t.Fatal("csscontrole")
 	}
 }
+
+func TestAdvancedFixes(t *testing.T) {
+	services := []ServiceRow{{Key: "a", Proto: "tcp", Web: true, Target: "192.168.10.50", Port: 8006, Kind: "https", Name: "proxmox", Label: "proxmox"}}
+	idx := map[string]int{"192.168.103.244:9000": 0}
+	adv := "location / {\n proxy_pass https://192.168.0.50:8006;\n}\nlocation /outpost.goauthentik.io {\n proxy_pass http://192.168.0.9:9000/outpost.goauthentik.io;\n}\nlocation /x { proxy_pass http://192.168.103.244:9000/x; }\nlocation /y { proxy_pass $forward_scheme://$server:$port; }"
+	fixes := advancedFixes(adv, "proxmox.example.test", idx, services, "http://192.168.103.244:9000")
+	if len(fixes) != 2 || fixes[0].New != "https://192.168.10.50:8006" || fixes[1].New != "http://192.168.103.244:9000" {
+		t.Fatalf("fixes = %+v", fixes)
+	}
+	out := applyAdvFixes(adv, fixes)
+	if strings.Contains(out, "192.168.0.") || !strings.Contains(out, "proxy_pass http://192.168.103.244:9000/outpost.goauthentik.io;") || !strings.Contains(out, "proxy_pass https://192.168.10.50:8006;") {
+		t.Fatalf("out = %s", out)
+	}
+	// Een gok (alleen dezelfde poort) geeft geen vervanging.
+	if f := advancedFixes("proxy_pass http://10.9.9.9:8006;", "iets.example.test", idx, services, ""); len(f) != 0 {
+		t.Fatalf("gok = %+v", f)
+	}
+}

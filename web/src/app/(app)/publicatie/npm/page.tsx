@@ -36,7 +36,8 @@ export default function PublishNPMPage() {
       .filter((h) => !f || `${h.domains.join(" ")} ${h.forward_host} ${h.service_name ?? ""}`.toLowerCase().includes(f));
   }, [ov, filter, only]);
   const unmanaged = hosts.filter((h) => !h.managed).map((h) => h.id);
-  const suggested = (ov?.hosts ?? []).filter((h) => h.suggest);
+  // Samen toepassen: alleen zekere voorstellen en oude adressen in Advanced; een gok gaat per host.
+  const suggested = (ov?.hosts ?? []).filter((h) => h.suggest?.sure || (h.advanced_fix?.length ?? 0) > 0);
   const typos = (ov?.hosts ?? []).filter((h) => h.typo_domains);
 
   const doAdopt = async (ids: number[]) => {
@@ -225,6 +226,11 @@ function HostRow({
             {h.suggest.sure ? "" : ", gok"})
           </div>
         )}
+        {h.advanced_fix?.map((f) => (
+          <div key={f.old} className="text-xs text-sky-700 dark:text-sky-300" title={f.why}>
+            Advanced: {f.old} → {f.new}
+          </div>
+        ))}
         <div className="text-xs text-slate-500">
           {h.certificate_id
             ? `SSL ${h.certificate_name ?? ""}${h.certificate_expires ? ` tot ${new Date(h.certificate_expires).toLocaleDateString("nl-BE")}` : ""}`
@@ -257,7 +263,7 @@ function HostRow({
             <button type="button" className={btn} onClick={onEdit}>
               bewerken
             </button>
-            {h.suggest && (
+            {(h.suggest || (h.advanced_fix?.length ?? 0) > 0) && (
               <button
                 type="button"
                 className={btn}

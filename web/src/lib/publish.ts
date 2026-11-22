@@ -96,6 +96,7 @@ export type PublishHost = {
   advanced?: string;
   typo?: string;
   typo_domains?: string[];
+  advanced_fix?: { old: string; new: string; why: string }[];
   themed?: boolean;
   css?: string;
   css_set?: string;

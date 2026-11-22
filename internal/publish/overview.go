@@ -62,6 +62,8 @@ type HostView struct {
 	// Suggest: nieuw doel voor een host die naar een oud of onbekend adres
 	// wijst (fase 42).
 	Suggest *TargetSuggestion `json:"suggest,omitempty"`
+	// AdvancedFix: oude adressen in proxy_pass van Advanced (fase 42c).
+	AdvancedFix []AdvFix `json:"advanced_fix,omitempty"`
 	// Voor het bewerken (fase 42).
 	HTTP2         bool   `json:"http2"`
 	HSTS          bool   `json:"hsts"`
@@ -279,11 +281,11 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 		npm = NPMRead{}
 	}
 	akRead := st.AuthentikLinked() && !akAt.IsZero()
-	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now())
-	ov.Apps = buildApps(npm, ak)
 	if st.AuthentikLinked() {
 		ov.Outpost, _ = s.outpostFor(ctx, st)
 	}
+	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now(), ov.Outpost)
+	ov.Apps = buildApps(npm, ak)
 	if th, err := s.Theme(ctx); err == nil {
 		for i, h := range ov.Hosts {
 			if len(h.Domains) > 0 {
@@ -372,7 +374,7 @@ func targetIndex(nodes []nodeRow, services []ServiceRow) (map[string]int, map[st
 }
 
 func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []ServiceRow, npm NPMRead, ak AKRead, akRead bool,
-	managed map[int]managedHost, now time.Time) []HostView {
+	managed map[int]managedHost, now time.Time, outpost string) []HostView {
 	idx, known := targetIndex(nodes, services)
 	for _, c := range clusters {
 		for _, v := range c.VIPs {
@@ -483,6 +485,12 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 			if v.Suggest != nil && !known[fh] {
 				add("oud_doel", "warn", "wijst naar %s:%d, een adres dat ClusterForge niet kent; voorstel: %s://%s:%d (%s)",
 					h.ForwardHost, h.ForwardPort, v.Suggest.Scheme, v.Suggest.Host, v.Suggest.Port, v.Suggest.ServiceName)
+			}
+		}
+		if len(h.DomainNames) > 0 {
+			v.AdvancedFix = advancedFixes(h.AdvancedConfig, h.DomainNames[0], idx, services, outpost)
+			for _, f := range v.AdvancedFix {
+				add("advanced_oud", "warn", "Advanced wijst naar %s, een adres dat ClusterForge niet kent; voorstel: %s (%s)", f.Old, f.New, f.Why)
 			}
 		}
 		// Authentik.
@@ -607,6 +615,7 @@ func notices(ov *Overview) []Notice {
 		{"cert_verloopt", "Certificaat verloopt binnenkort", false},
 		{"naar_node", "Proxy host wijst naar één node in plaats van het VIP", false},
 		{"oud_doel", "Proxy host wijst naar een oud adres (voorstel klaar)", false},
+		{"advanced_oud", "Advanced van een proxy host wijst naar een oud adres (voorstel klaar)", false},
 		{"domein_tikfout", "Proxy host onder een domein dat op het hoofddomein lijkt (tikfout?)", false},
 		{"authentik_half", "Authentik half ingesteld", false},
 	} {

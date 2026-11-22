@@ -570,7 +570,7 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 		}
 		p.Hosts = append(p.Hosts, ph)
 	case ActRetargetMany:
-		if err := s.planRetargetMany(ctx, npm, managed, a, &p); err != nil {
+		if err := s.planRetargetMany(ctx, st, npm, managed, a, &p); err != nil {
 			return Plan{}, err
 		}
 	case ActThemeMany:
