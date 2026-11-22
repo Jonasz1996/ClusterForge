@@ -157,6 +157,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security/prod-2fa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Of acties op prodclusters tweestapsverificatie vragen */
+        get: operations["getProd2FA"];
+        /** Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code) */
+        put: operations["setProd2FA"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/disk/settings": {
         parameters: {
             query?: never;
@@ -10897,6 +10915,19 @@ export interface components {
             /** @description Wat kun je doen, in gewone taal (fase 41) */
             help?: string;
         };
+        Prod2FA: {
+            /** @description Acties op prodclusters vragen een account met tweestapsverificatie. Het intikken van de clusternaam blijft altijd. */
+            required: boolean;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        Prod2FAInput: {
+            required: boolean;
+            /** @description Om uit te zetten: je wachtwoord (zonder tweestapsverificatie) */
+            password?: string;
+            /** @description Om uit te zetten: je code (met tweestapsverificatie) */
+            totp_code?: string;
+        };
         DiskWatchSettings: {
             /** @description Vanaf deze bezetting: let op (oranje) */
             warn_pct: number;
@@ -16606,6 +16637,54 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getProd2FA: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prod2FA"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setProd2FA: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Prod2FAInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prod2FA"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     getDiskWatchSettings: {

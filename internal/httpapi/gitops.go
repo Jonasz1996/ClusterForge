@@ -272,11 +272,11 @@ func gitChangeOf(row store.GetGitChangeRow) store.GitChange {
 
 // confirmProd vraagt op prod tweestapsverificatie en de slug, zoals bij
 // herstel. Het geeft false als er al een antwoord is geschreven.
-func confirmProd(w http.ResponseWriter, p auth.Principal, prod bool, slug string, confirm *string, what string) bool {
+func (s *Server) confirmProd(w http.ResponseWriter, r *http.Request, p auth.Principal, prod bool, slug string, confirm *string, what string) bool {
 	if !prod {
 		return true
 	}
-	if p.User.TotpEnabledAt == nil {
+	if s.needs2FA(r.Context(), p) {
 		writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie "+what+"; zet die aan bij Instellingen")
 		return false
 	}
@@ -309,7 +309,7 @@ func (s *Server) ApproveGitChange(w http.ResponseWriter, r *http.Request, id uui
 		s.internalError(w, r, err)
 		return
 	}
-	if row.Status == "pending" && !confirmProd(w, p, approval.Prod, approval.Slug, in.Confirm, "een wijziging goedkeuren") {
+	if row.Status == "pending" && !s.confirmProd(w, r, p, approval.Prod, approval.Slug, in.Confirm, "een wijziging goedkeuren") {
 		return
 	}
 	d, err := s.git.Approve(ctx, events.User(p.User.ID), id)
@@ -380,7 +380,7 @@ func (s *Server) ReapplyClusterGit(w http.ResponseWriter, r *http.Request, id uu
 		s.gitError(w, r, err)
 		return
 	}
-	if c.AppliedRevision < c.SpecRevision && !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "opnieuw toepassen") {
+	if c.AppliedRevision < c.SpecRevision && !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "opnieuw toepassen") {
 		return
 	}
 	j, err := s.git.Reapply(ctx, events.User(p.User.ID), id, deref(in.ServerUrl))

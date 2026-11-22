@@ -633,6 +633,21 @@ overnemen() {
       *,timescaledb,*) ;;
       *) fail "PostgreSQL van het cluster laadt TimescaleDB niet. Databases → PostgreSQL van dit cluster → Instellingen → Vooraf geladen bibliotheken: timescaledb; daarna opnieuw" ;;
     esac
+    # De versie die het cluster laadt telt, niet alleen wat er beschikbaar
+    # is: met een oudere versie in de oude database faalt post_restore pas
+    # na het stoppen van de oude homepage. Dus eerst de oude database op die
+    # versie brengen (als de oude PostgreSQL ze heeft), of meteen stoppen.
+    nieuw=$(supg -d postgres -c "SELECT coalesce(default_version, '') FROM pg_available_extensions WHERE name = 'timescaledb'")
+    if [ -n "$nieuw" ] && [ "$nieuw" != "$TS" ]; then
+      [ "$(oud_pg -c "SELECT count(*) FROM pg_available_extension_versions WHERE name = 'timescaledb' AND version = '$nieuw'")" = 1 ] ||
+        fail "PostgreSQL van het cluster laadt TimescaleDB $nieuw, de oude database heeft $TS. Installeer TimescaleDB $nieuw ook bij de oude PostgreSQL op deze node (apt-get install timescaledb-2-postgresql-$(pg_major), zodat $nieuw er is) en probeer opnieuw. Er is niets veranderd"
+      say "TimescaleDB van de oude database bijwerken: $TS -> $nieuw (de versie die het cluster laadt)"
+      oud_pg -c "ALTER EXTENSION timescaledb UPDATE TO '$nieuw'" > /dev/null ||
+        fail "ALTER EXTENSION timescaledb UPDATE TO '$nieuw' in de oude database mislukte; de oude homepage draait nog. Er is niets gestopt"
+      TS=$(oud_pg -c "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'")
+      [ "$TS" = "$nieuw" ] || fail "de oude database heeft na de update TimescaleDB ${TS:-geen}, niet $nieuw"
+      echo "  TimescaleDB $TS"
+    fi
     [ "$(supg -d postgres -c "SELECT count(*) FROM pg_available_extension_versions WHERE name = 'timescaledb' AND version = '$TS'")" = 1 ] ||
       fail "TimescaleDB $TS (de versie van de oude database) ontbreekt in PostgreSQL van het cluster op deze node"
   fi

@@ -108,7 +108,7 @@ func (s *Server) aivCall(w http.ResponseWriter, r *http.Request) {
 		s.aivError(w, err)
 		return
 	}
-	if prep.Rule.Firewall && p.User.TotpEnabledAt == nil {
+	if prep.Rule.Firewall && s.needs2FA(r.Context(), p) {
 		writeError(w, http.StatusForbidden, "totp_required", "een fix van AI-verslag verandert de firewall; dat kan alleen een beheerder met tweestapsverificatie (zet die aan bij Instellingen)")
 		return
 	}

@@ -91,7 +91,7 @@ func (s *Server) StartClusterStackJob(w http.ResponseWriter, r *http.Request, cl
 		s.stackError(w, r, stacks.ErrNotFound)
 		return
 	}
-	if string(in.Action) != stacks.ActionLists && !confirmProd(w, p, string(o.Environment) == "prod", o.Slug, in.Confirm, "containers beheren") {
+	if string(in.Action) != stacks.ActionLists && !s.confirmProd(w, r, p, string(o.Environment) == "prod", o.Slug, in.Confirm, "containers beheren") {
 		return
 	}
 	params := stacks.Params{Action: string(in.Action), NodeID: in.NodeId}

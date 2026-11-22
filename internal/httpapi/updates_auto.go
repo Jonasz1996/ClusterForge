@@ -109,7 +109,7 @@ func (s *Server) SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, envi
 	if !decode(w, r, &in) {
 		return
 	}
-	if environment == "prod" && !confirmProd(w, p, true, "prod", in.Confirm, "automatisch bijwerken instellen") {
+	if environment == "prod" && !s.confirmProd(w, r, p, true, "prod", in.Confirm, "automatisch bijwerken instellen") {
 		return
 	}
 	pol := updates.Policy{
@@ -143,7 +143,7 @@ func (s *Server) SetClusterUpdatePolicy(w http.ResponseWriter, r *http.Request, 
 		s.internalError(w, r, err)
 		return
 	}
-	if c.Environment == "prod" && !confirmProd(w, p, true, c.Slug, in.Confirm, "automatisch bijwerken instellen") {
+	if c.Environment == "prod" && !s.confirmProd(w, r, p, true, c.Slug, in.Confirm, "automatisch bijwerken instellen") {
 		return
 	}
 	pol := updates.DefaultPolicy
@@ -219,7 +219,7 @@ func (s *Server) WriteComposeFile(w http.ResponseWriter, r *http.Request) {
 		s.updateError(w, r, err)
 		return
 	}
-	if nodes[0].Prod() && !confirmProd(w, p, true, nodes[0].ClusterSlug, in.Confirm, "een compose-bestand aanpassen") {
+	if nodes[0].Prod() && !s.confirmProd(w, r, p, true, nodes[0].ClusterSlug, in.Confirm, "een compose-bestand aanpassen") {
 		return
 	}
 	started, _, err := s.updates.Start(ctx, events.User(p.User.ID), req, nodes)

@@ -213,7 +213,7 @@ func (s *Server) StartUpdates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "werk de nodes van één prodcluster tegelijk bij")
 		return
 	}
-	if len(prod) == 1 && !confirmProd(w, p, true, prod[0], in.Confirm, "bijwerken") {
+	if len(prod) == 1 && !s.confirmProd(w, r, p, true, prod[0], in.Confirm, "bijwerken") {
 		return
 	}
 	started, skipped, err := s.updates.Start(ctx, events.User(p.User.ID), req, nodes)
@@ -440,7 +440,7 @@ func (s *Server) RunCommand(w http.ResponseWriter, r *http.Request, id uuid.UUID
 		writeError(w, http.StatusBadRequest, "invalid", "draai een commando op één prodcluster tegelijk")
 		return
 	}
-	if len(t.Prod) == 1 && !confirmProd(w, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
+	if len(t.Prod) == 1 && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
 		return
 	}
 	j, err := s.commands.Start(ctx, events.User(p.User.ID), id, req, t)

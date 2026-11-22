@@ -275,6 +275,7 @@ func (r *RunExecutor) dockerSmart(ctx context.Context, dir string, d *protocol.D
 	if len(todo) == 0 {
 		_, _ = fmt.Fprintf(out, "ClusterForge: geen Docker Compose-projecten op deze node\n")
 	}
+	var untouched []string
 	for _, p := range todo {
 		_, _ = fmt.Fprintf(out, "\n== %s (%s)\n", p.Name, p.WorkingDir)
 		for _, s := range p.Services {
@@ -287,11 +288,19 @@ func (r *RunExecutor) dockerSmart(ctx context.Context, dir string, d *protocol.D
 		rep := r.updateProject(ctx, dir, p, d, out)
 		st.Docker = append(st.Docker, rep)
 		if rep.Result == protocol.DockerFailed || rep.Result == protocol.DockerRolledBack {
-			return 1, fmt.Errorf("%s: %s", p.Name, rep.Problem)
+			if !rep.Unchanged {
+				return 1, fmt.Errorf("%s: %s", p.Name, rep.Problem)
+			}
+			// Niets veranderd (zoals een pull die faalde): de andere
+			// projecten gaan door, de fout komt in het rapport.
+			untouched = append(untouched, p.Name+": "+rep.Problem)
 		}
 		if ctx.Err() != nil {
 			return -1, ctx.Err()
 		}
+	}
+	if len(untouched) > 0 {
+		return 1, errors.New(strings.Join(untouched, "; "))
 	}
 	if d.Prune {
 		if code, err := r.step(ctx, out, nil, "docker", "image", "prune", "-f"); err != nil {
@@ -400,9 +409,10 @@ func (r *RunExecutor) updateProject(ctx context.Context, dir string, p protocol.
 		}
 	}
 
-	if _, err := r.step(ctx, out, nil, append(slices.Clone(base), "pull")...); err != nil {
+	if err := r.composePull(ctx, out, base, nil); err != nil {
 		r.restore(b, out)
-		return fail("docker compose pull mislukte; niets veranderd")
+		rep.Unchanged = true
+		return fail("docker compose pull mislukte; niets veranderd, het project draait zoals voordien")
 	}
 	images := r.serviceImages(ctx, base)
 	changed := len(rep.Edited) > 0 || d.Always
@@ -500,6 +510,81 @@ func (r *RunExecutor) recreate(ctx context.Context, out io.Writer, base []string
 
 // serviceImages geeft per dienst het image zoals de compose-bestanden het
 // nu noemen.
+// composePull haalt de images van een project op, behalve van diensten met
+// build: en van images die alleen lokaal bestaan (zelf gebouwd, zoals
+// cf-platform:local): die staan in geen registry, en een pull ervan laat de
+// hele update stranden. only beperkt tot die diensten (leeg is alle).
+func (r *RunExecutor) composePull(ctx context.Context, out io.Writer, base []string, only []string) error {
+	cfg := r.composeConfig(ctx, base)
+	var pull, skipped []string
+	for name, svc := range cfg {
+		if len(only) > 0 && !slices.Contains(only, name) {
+			continue
+		}
+		switch {
+		case svc.Build:
+			skipped = append(skipped, name+" (build)")
+		case svc.Image != "" && r.localOnlyImage(ctx, svc.Image):
+			skipped = append(skipped, name+" ("+svc.Image+", lokaal gebouwd)")
+		default:
+			pull = append(pull, name)
+		}
+	}
+	if len(skipped) == 0 {
+		// Niets over te slaan (of de config was onleesbaar): gewoon alles.
+		argv := append(slices.Clone(base), "pull", "--ignore-buildable")
+		_, err := r.step(ctx, out, nil, append(argv, only...)...)
+		return err
+	}
+	slices.Sort(skipped)
+	slices.Sort(pull)
+	_, _ = fmt.Fprintf(out, "ClusterForge: niet opgehaald, want niet uit een registry: %s\n", strings.Join(skipped, ", "))
+	if len(pull) == 0 {
+		return nil
+	}
+	_, err := r.step(ctx, out, nil, append(append(slices.Clone(base), "pull", "--ignore-buildable"), pull...)...)
+	return err
+}
+
+// localOnlyImage is true voor een image dat lokaal bestaat maar nooit uit
+// een registry kwam (geen RepoDigests).
+func (r *RunExecutor) localOnlyImage(ctx context.Context, ref string) bool {
+	data, err := r.runQuiet(ctx, "docker", "image", "inspect", "--format", "{{len .RepoDigests}}", ref)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(data)) == "0"
+}
+
+type composeService struct {
+	Image string
+	Build bool
+}
+
+// composeConfig leest de diensten uit docker compose config; leeg bij een
+// fout.
+func (r *RunExecutor) composeConfig(ctx context.Context, base []string) map[string]composeService {
+	data, err := r.runQuiet(ctx, append(slices.Clone(base), "config", "--format", "json")...)
+	out := map[string]composeService{}
+	if err != nil {
+		return out
+	}
+	var cfg struct {
+		Services map[string]struct {
+			Image string          `json:"image"`
+			Build json.RawMessage `json:"build"`
+		} `json:"services"`
+	}
+	if json.Unmarshal(jsonPart(data), &cfg) != nil {
+		return out
+	}
+	for name, s := range cfg.Services {
+		b := strings.TrimSpace(string(s.Build))
+		out[name] = composeService{Image: s.Image, Build: b != "" && b != "null"}
+	}
+	return out
+}
+
 func (r *RunExecutor) serviceImages(ctx context.Context, base []string) map[string]string {
 	data, err := r.runQuiet(ctx, append(slices.Clone(base), "config", "--format", "json")...)
 	out := map[string]string{}

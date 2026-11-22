@@ -61,7 +61,7 @@ func (s *Server) StartDatabaseMove(w http.ResponseWriter, r *http.Request) {
 		s.migrationError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, prod, slug, in.Confirm, "een database verhuizen") {
+	if !s.confirmProd(w, r, p, prod, slug, in.Confirm, "een database verhuizen") {
 		return
 	}
 	j, err := s.components.StartMove(ctx, events.User(p.User.ID), in.Source, in.Database, in.ComponentId, in.Force != nil && *in.Force)
@@ -146,7 +146,7 @@ func (s *Server) RetireDatabaseMove(w http.ResponseWriter, r *http.Request, id u
 		s.migrationError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, prod, slug, in.Confirm, "een oude database afbouwen") {
+	if !s.confirmProd(w, r, p, prod, slug, in.Confirm, "een oude database afbouwen") {
 		return
 	}
 	j, err := s.components.StartRetire(ctx, events.User(p.User.ID), id, in.Name)

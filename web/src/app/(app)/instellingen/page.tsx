@@ -12,7 +12,7 @@ import { DocsTargetCard } from "@/components/docs/DocsTargetCard";
 import { SelfLocationCard } from "@/components/risk/SelfLocationCard";
 import { Alert, Button, Card, Input, Label, PageHeader } from "@/components/ui";
 import { api, ApiError, unwrap } from "@/lib/api/client";
-import { meQueryKey, useMe } from "@/lib/auth";
+import { meQueryKey, prod2FAKey, useMe, useProd2FA } from "@/lib/auth";
 import { useIsAdmin } from "@/lib/inventory";
 import { useTheme, type Theme } from "@/lib/theme";
 import { AgentEndpointsCard } from "@/components/settings/AgentEndpointsCard";
@@ -22,6 +22,7 @@ import { SelfHostCard } from "@/components/settings/SelfHostCard";
 
 const sections: { id: string; label: string }[] = [
   { id: "tweestap", label: "Tweestapsverificatie" },
+  { id: "prod-2fa", label: "Prodacties" },
   { id: "wachtwoord", label: "Wachtwoord" },
   { id: "sessies", label: "Sessies" },
   { id: "weergave", label: "Weergave" },
@@ -56,6 +57,13 @@ export default function SettingsPage() {
             <TotpCard />
           </div>
         </Tile>
+        {isAdmin && (
+          <Tile>
+            <div id="prod-2fa" className="scroll-mt-20">
+              <Prod2FACard />
+            </div>
+          </Tile>
+        )}
         <Tile>
           <div id="wachtwoord" className="scroll-mt-20">
             <PasswordCard />
@@ -307,6 +315,77 @@ function TotpCard() {
               Uitzetten
             </Button>
           </form>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// Prod2FACard zet de eis van tweestapsverificatie voor acties op prod aan
+// of uit, voor heel de installatie. Het intikken van de clusternaam blijft.
+function Prod2FACard() {
+  const me = useMe();
+  const q = useProd2FA();
+  const qc = useQueryClient();
+  const [secret, setSecret] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const totp = me.data?.user.totp_enabled ?? false;
+  const on = q.data?.required ?? true;
+
+  async function save(required: boolean) {
+    setError(null);
+    setBusy(true);
+    try {
+      const body = required ? { required } : totp ? { required, totp_code: secret } : { required, password: secret };
+      unwrap(await api.PUT("/security/prod-2fa", { body }));
+      setSecret("");
+      await qc.invalidateQueries({ queryKey: prod2FAKey });
+      await qc.invalidateQueries({ queryKey: ["attention"] });
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Tweestapsverificatie voor prodacties">
+      <div className="space-y-4 text-sm">
+        {error && <Alert>{error}</Alert>}
+        <p className="text-slate-600 dark:text-slate-400">
+          {on
+            ? "Aan: op een prodcluster kan alleen een beheerder met tweestapsverificatie iets doen. Daarnaast tik je altijd de clusternaam in."
+            : "Uit: op een prodcluster volstaat het intikken van de clusternaam; tweestapsverificatie is niet nodig."}
+        </p>
+        {on ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save(false);
+            }}
+            className="flex flex-wrap items-end gap-3"
+          >
+            <div className="w-56">
+              <Label htmlFor="prod2fa-secret">{totp ? "Code uit de app" : "Je wachtwoord"}</Label>
+              <Input
+                id="prod2fa-secret"
+                type={totp ? "text" : "password"}
+                inputMode={totp ? "numeric" : undefined}
+                autoComplete={totp ? "one-time-code" : "current-password"}
+                required
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+              />
+            </div>
+            <Button type="submit" variant="secondary" disabled={busy || !secret}>
+              Uitzetten
+            </Button>
+          </form>
+        ) : (
+          <Button onClick={() => void save(true)} disabled={busy}>
+            Weer aanzetten
+          </Button>
         )}
       </div>
     </Card>

@@ -159,7 +159,7 @@ func (s *Service) SetMode(ctx context.Context, actor events.Actor, ids []uuid.UU
 			return nil, err
 		}
 		if mode != "off" && !n.Supported {
-			skipped = append(skipped, n.Hostname+": agent te oud (protocol 30 nodig; Nodes → Agents bijwerken)")
+			skipped = append(skipped, n.Hostname+": "+n.Unsupported)
 			continue
 		}
 		if n.Mode == mode {
@@ -363,7 +363,7 @@ func (s *Service) Refresh(ctx context.Context, id uuid.UUID) (Node, error) {
 	}
 	switch {
 	case !n.Supported:
-		return Node{}, &FieldError{n.Hostname + ": agent te oud (protocol 30 nodig; Nodes → Agents bijwerken)"}
+		return Node{}, &FieldError{n.Hostname + ": " + n.Unsupported}
 	case !n.Online:
 		return Node{}, &FieldError{n.Hostname + " is offline"}
 	case !n.Enabled():
@@ -389,7 +389,7 @@ func (s *Service) Apply(ctx context.Context, actor events.Actor, id uuid.UUID) (
 	}
 	switch {
 	case !n.Supported:
-		return uuid.Nil, &FieldError{n.Hostname + ": agent te oud (protocol 30 nodig; Nodes → Agents bijwerken)"}
+		return uuid.Nil, &FieldError{n.Hostname + ": " + n.Unsupported}
 	case !n.Online:
 		return uuid.Nil, &FieldError{n.Hostname + " is offline"}
 	case !n.Enabled():

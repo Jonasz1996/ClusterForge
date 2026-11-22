@@ -338,7 +338,7 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
-	if p.User.TotpEnabledAt == nil {
+	if s.needs2FA(ctx, p) {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}
 
