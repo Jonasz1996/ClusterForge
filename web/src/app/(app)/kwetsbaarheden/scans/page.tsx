@@ -14,7 +14,10 @@ import {
   knownLabel,
   profileLabel,
   useDeleteScan,
+  useCreateImportToken,
   useImportScan,
+  useImportTokens,
+  useRevokeImportToken,
   useLinkScanner,
   useRunScan,
   useSaveScan,
@@ -312,14 +315,14 @@ function RunDetail({ id }: { id: string }) {
             {dur !== null && ` · ${dur < 120 ? `${dur} s` : `${Math.round(dur / 60)} min`}`}
           </span>
         </div>
-        <div className="mt-1 font-mono text-xs text-slate-500">{r.targets.join(", ")}</div>
+        <div className="mt-1 font-mono text-xs text-slate-500">{(r.targets ?? []).join(", ")}</div>
         {r.status === "klaar" && (
           <div className="mt-2 text-sm">
             {r.hosts_up} hosts bereikbaar, {r.open_ports} open poorten, {r.findings} bevindingen
           </div>
         )}
         {r.error && <Alert>{r.error}</Alert>}
-        {r.result?.notes.map((n) => (
+        {(r.result?.notes ?? []).map((n) => (
           <p key={n} className="mt-2 text-sm text-amber-700 dark:text-amber-400">
             {n}
           </p>
@@ -327,12 +330,12 @@ function RunDetail({ id }: { id: string }) {
         {r.result && (
           <details className="mt-2 text-xs text-slate-500">
             <summary className="cursor-pointer">nmap {r.result.nmap}</summary>
-            <code className="block break-all">nmap {r.result.args.join(" ")}</code>
+            <code className="block break-all">nmap {(r.result.args ?? []).join(" ")}</code>
           </details>
         )}
       </Card>
       {r.status === "bezig" && <Alert kind="info">De scan loopt; deze pagina ververst vanzelf.</Alert>}
-      {r.result?.hosts.map((h) => (
+      {(r.result?.hosts ?? []).map((h) => (
         <HostCard key={h.addr} h={h} />
       ))}
     </div>
@@ -355,7 +358,7 @@ function HostCard({ h }: { h: RunHost }) {
         )}
         {(h.hostname || h.vendor) && <span className="text-xs text-slate-500">{[h.hostname, h.vendor].filter(Boolean).join(" · ")}</span>}
       </div>
-      {h.ports.length === 0 ? (
+      {(h.ports ?? []).length === 0 ? (
         <p className="mt-2 text-sm text-slate-500">Bereikbaar, geen open poorten gevonden.</p>
       ) : (
         <div className="mt-2 overflow-x-auto">
@@ -368,8 +371,8 @@ function HostCard({ h }: { h: RunHost }) {
               </tr>
             </thead>
             <tbody>
-              {h.ports.map((p, i) => {
-                const e = h.expected[i];
+              {(h.ports ?? []).map((p, i) => {
+                const e = h.expected?.[i];
                 const k = knownLabel[e?.known ?? ""];
                 const scripts = Object.entries(p.scripts ?? {});
                 return (
@@ -581,6 +584,7 @@ function ImportForm({ onClose, onDone }: { onClose: () => void; onDone: (runId: 
         {files.length > 0 && <div className="text-xs text-slate-500">{files.map((f) => f.name).join(", ")}</div>}
         {readErr && <Alert>{readErr}</Alert>}
         {imp.isError && <Alert>{imp.error.message}</Alert>}
+        <AutoImport />
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Annuleren
@@ -591,5 +595,56 @@ function ImportForm({ onClose, onDone }: { onClose: () => void; onDone: (runId: 
         </div>
       </div>
     </Modal>
+  );
+}
+
+// AutoImport (fase 43b): een importsleutel voor het pentestsysteem, dat na
+// elke run zelf zijn XML-bestanden stuurt.
+function AutoImport() {
+  const list = useImportTokens();
+  const create = useCreateImportToken();
+  const revoke = useRevokeImportToken();
+  const [name, setName] = useState("pentest-orchestrator");
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const path = create.data?.path ?? list.data?.path ?? "/api/import/v1/nmap";
+  const secret = create.data?.secret;
+  const cmd = `curl -fsS -H "Authorization: Bearer ${secret ?? "cfi_…"}" ${["02_tcp.xml", "03_udp.xml", "04_full_servers.xml"].map((f) => `-F file=@${f}`).join(" ")} ${origin}${path}`;
+  return (
+    <details className="rounded border border-slate-200 p-3 dark:border-slate-800">
+      <summary className="cursor-pointer font-medium">Automatisch importeren vanuit je pentestsysteem</summary>
+      <div className="mt-3 space-y-3">
+        <p className="text-slate-600 dark:text-slate-400">
+          Maak een importsleutel en laat het pentestsysteem na elke run zijn XML-bestanden sturen. De sleutel kan alleen rapporten inlezen. Elke
+          import staat in het logboek en verschijnt hier onder Uitvoeringen.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Naam van de sleutel" htmlFor="imp-tok">
+            <Input id="imp-tok" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Button variant="secondary" disabled={create.isPending} onClick={() => create.mutate(name)}>
+            Sleutel maken
+          </Button>
+        </div>
+        {create.isError && <Alert>{(create.error as Error).message}</Alert>}
+        {secret && <Alert kind="info">Kopieer de sleutel nu; ClusterForge toont hem niet opnieuw.</Alert>}
+        <pre className="overflow-x-auto rounded bg-slate-50 p-2 text-xs whitespace-pre-wrap break-all dark:bg-slate-800">{cmd}</pre>
+        {list.data && list.data.items.length > 0 && (
+          <ul className="divide-y divide-slate-100 text-xs dark:divide-slate-800">
+            {list.data.items.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center gap-2 py-1">
+                <span className="font-medium">{t.name}</span>
+                <span className="text-slate-500">
+                  {t.imports} imports
+                  {t.last_used_at ? `, laatst ${new Date(t.last_used_at).toLocaleString("nl-BE")} vanaf ${t.last_used_ip}` : ", nog niet gebruikt"}
+                </span>
+                <button type="button" className="text-red-600 underline" disabled={revoke.isPending} onClick={() => revoke.mutate(t.id)}>
+                  intrekken
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
   );
 }

@@ -16007,6 +16007,9 @@ type AcceptSecurityFindingJSONRequestBody = SecurityAcceptInput
 // ApplySecurityFixesJSONRequestBody defines body for ApplySecurityFixes for application/json ContentType.
 type ApplySecurityFixesJSONRequestBody = SecurityFixInput
 
+// CreateSecurityImportTokenJSONRequestBody defines body for CreateSecurityImportToken for application/json ContentType.
+type CreateSecurityImportTokenJSONRequestBody = SecurityObject
+
 // RefreshSecurityJSONRequestBody defines body for RefreshSecurity for application/json ContentType.
 type RefreshSecurityJSONRequestBody = SecurityRefreshInput
 
@@ -17236,6 +17239,15 @@ type ServerInterface interface {
 	// GetSecurityHardening Verharding per node (fase 27 M2)
 	// (GET /security/hardening)
 	GetSecurityHardening(w http.ResponseWriter, r *http.Request)
+	// ListSecurityImportTokens Importsleutels waarmee een pentestsysteem zelf rapporten stuurt (admin, fase 43b)
+	// (GET /security/import-tokens)
+	ListSecurityImportTokens(w http.ResponseWriter, r *http.Request)
+	// CreateSecurityImportToken Importsleutel maken; het geheim (cfi_…) komt maar één keer terug (admin)
+	// (POST /security/import-tokens)
+	CreateSecurityImportToken(w http.ResponseWriter, r *http.Request)
+	// RevokeSecurityImportToken Importsleutel intrekken (admin)
+	// (DELETE /security/import-tokens/{tokenId})
+	RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID)
 	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 	// (POST /security/refresh)
 	RefreshSecurity(w http.ResponseWriter, r *http.Request)
@@ -19735,6 +19747,24 @@ func (_ Unimplemented) RollbackSecurityFix(w http.ResponseWriter, r *http.Reques
 // GetSecurityHardening Verharding per node (fase 27 M2)
 // (GET /security/hardening)
 func (_ Unimplemented) GetSecurityHardening(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSecurityImportTokens Importsleutels waarmee een pentestsysteem zelf rapporten stuurt (admin, fase 43b)
+// (GET /security/import-tokens)
+func (_ Unimplemented) ListSecurityImportTokens(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateSecurityImportToken Importsleutel maken; het geheim (cfi_…) komt maar één keer terug (admin)
+// (POST /security/import-tokens)
+func (_ Unimplemented) CreateSecurityImportToken(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeSecurityImportToken Importsleutel intrekken (admin)
+// (DELETE /security/import-tokens/{tokenId})
+func (_ Unimplemented) RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -31099,6 +31129,60 @@ func (siw *ServerInterfaceWrapper) GetSecurityHardening(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ListSecurityImportTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListSecurityImportTokens(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSecurityImportTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSecurityImportToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateSecurityImportToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSecurityImportToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeSecurityImportToken operation middleware
+func (siw *ServerInterfaceWrapper) RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tokenId" -------------
+	var tokenId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tokenId", chi.URLParam(r, "tokenId"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tokenId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeSecurityImportToken(w, r, tokenId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RefreshSecurity operation middleware
 func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
 
@@ -33735,6 +33819,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/scans/import", wrapper.ImportSecurityScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/import-tokens", wrapper.ListSecurityImportTokens)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/import-tokens", wrapper.CreateSecurityImportToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/security/import-tokens/{tokenId}", wrapper.RevokeSecurityImportToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/security/scans/{scanId}", wrapper.DeleteSecurityScan)

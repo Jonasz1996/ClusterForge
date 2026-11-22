@@ -358,6 +358,10 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "methode niet toegestaan")
 		})
 	})
+	r.Route(importBase, func(api chi.Router) {
+		api.Use(middleware.NoCache)
+		api.Post("/nmap", s.importNmap)
+	})
 	r.Route(dashboardBase, func(api chi.Router) {
 		api.Use(middleware.NoCache)
 		s.dashboardRoutes(api)

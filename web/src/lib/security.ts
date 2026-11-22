@@ -623,3 +623,30 @@ export function useSecurityReport(scopeId: string) {
     queryFn: async () => unwrap(await api.GET("/security/report", { params: { query: { scope_id: scopeId } } })) as unknown as SecurityReport,
   });
 }
+
+// Fase 43b: importsleutels voor een pentestsysteem dat zelf rapporten stuurt.
+export type ImportToken = { id: string; name: string; created_at: string; last_used_at: string | null; last_used_ip: string; imports: number };
+
+export function useImportTokens() {
+  return useQuery({
+    queryKey: [...key, "import-tokens"],
+    queryFn: async () => unwrap(await api.GET("/security/import-tokens")) as unknown as { items: ImportToken[]; path: string },
+  });
+}
+
+export function useCreateImportToken() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (name: string) =>
+      unwrap(await api.POST("/security/import-tokens", { body: { name } })) as unknown as { token: ImportToken; secret: string; path: string },
+    onSuccess: done,
+  });
+}
+
+export function useRevokeImportToken() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await api.DELETE("/security/import-tokens/{tokenId}", { params: { path: { tokenId: id } } })),
+    onSuccess: done,
+  });
+}

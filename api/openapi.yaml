@@ -6626,6 +6626,46 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /security/import-tokens:
+    get:
+      operationId: listSecurityImportTokens
+      summary: Importsleutels waarmee een pentestsysteem zelf rapporten stuurt (admin, fase 43b)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSecurityImportToken
+      summary: Importsleutel maken; het geheim (cfi_…) komt maar één keer terug (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityObject" }
+      responses:
+        "201":
+          description: Gemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/import-tokens/{tokenId}:
+    parameters:
+      - { name: tokenId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: revokeSecurityImportToken
+      summary: Importsleutel intrekken (admin)
+      responses:
+        "204": { description: Ingetrokken }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /security/scans/{scanId}:
     parameters:
       - { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }

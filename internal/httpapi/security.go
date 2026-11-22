@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -549,4 +550,131 @@ func (s *Server) ImportSecurityScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, run)
+}
+
+// --- importsleutels (fase 43b) ---
+
+func (s *Server) ListSecurityImportTokens(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok || !s.securityReady(w) {
+		return
+	}
+	list, err := s.security.ImportTokens(r.Context())
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "path": importBase + "/nmap"})
+}
+
+func (s *Server) CreateSecurityImportToken(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	t, secret, err := s.security.CreateImportToken(r.Context(), events.User(p.User.ID), &p.User.ID, in.Name)
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"token": t, "secret": secret, "path": importBase + "/nmap"})
+}
+
+func (s *Server) RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	if err := s.security.RevokeImportToken(r.Context(), events.User(p.User.ID), id); err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// importBase is de API voor pentestsystemen: alleen rapporten inlezen, met
+// een importsleutel in plaats van een sessie.
+const importBase = "/api/import/v1"
+
+// importNmap neemt een of meer XML-bestanden van nmap aan, als multipart
+// (curl -F file=@02_tcp.xml -F file=@03_udp.xml) of als ruwe XML in de body.
+func (s *Server) importNmap(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.securityReady(w) {
+		return
+	}
+	ip := clientIP(r)
+	secret, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if secret == "" {
+		secret = r.Header.Get("X-API-Key")
+	}
+	t, ok, err := s.security.CheckImportToken(r.Context(), strings.TrimSpace(secret), ip)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if !ok {
+		if !s.loginLimiter.allow(ip) {
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "te veel foute sleutels; probeer het straks opnieuw")
+			return
+		}
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "onbekende of ingetrokken importsleutel (Authorization: Bearer cfi_…)")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, security.MaxImportBytes)
+	var files []security.ImportFile
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "upload niet te lezen of te groot (hoogstens 64 MB): "+err.Error())
+			return
+		}
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
+		for _, list := range r.MultipartForm.File {
+			for _, fh := range list {
+				f, err := fh.Open()
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+					return
+				}
+				b, err := io.ReadAll(f)
+				_ = f.Close()
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+					return
+				}
+				files = append(files, security.ImportFile{Name: filepath.Base(fh.Filename), XML: string(b)})
+			}
+		}
+	} else {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "body niet te lezen of te groot (hoogstens 64 MB)")
+			return
+		}
+		name := r.URL.Query().Get("file")
+		if name == "" {
+			name = "rapport.xml"
+		}
+		files = append(files, security.ImportFile{Name: filepath.Base(name), XML: string(b)})
+	}
+	if len(files) > 20 {
+		writeError(w, http.StatusBadRequest, "bad_request", "hoogstens 20 bestanden per keer")
+		return
+	}
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = t.Name + " " + time.Now().In(time.Local).Format("02/01 15:04")
+	}
+	run, err := s.security.ImportNmap(r.Context(), events.Actor{Type: events.System().Type, ID: "importsleutel:" + t.Name}, name, files)
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"run_id": run.ID, "hosts_up": run.HostsUp, "open_ports": run.OpenPorts, "findings": run.Findings,
+		"url": "/kwetsbaarheden/scans?tab=uitvoeringen&run=" + run.ID.String()})
 }

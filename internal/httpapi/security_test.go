@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -399,5 +402,65 @@ func TestSecurityImportNmap(t *testing.T) {
 	}
 	if s := c.do("POST", "/api/v1/security/scans/import", map[string]any{"files": []map[string]any{{"name": "x.xml", "xml": "geen xml"}}}, nil); s != http.StatusBadRequest {
 		t.Fatalf("slechte xml: %d", s)
+	}
+}
+
+func TestSecurityImportToken(t *testing.T) {
+	_, c := adminClient(t)
+	var made struct {
+		Secret string `json:"secret"`
+		Path   string `json:"path"`
+	}
+	if s := c.do("POST", "/api/v1/security/import-tokens", map[string]any{"name": "orchestrator"}, &made); s != http.StatusCreated || !strings.HasPrefix(made.Secret, "cfi_") {
+		t.Fatalf("sleutel: %d %+v", s, made)
+	}
+	xml := `<nmaprun><host><status state="up"/><address addr="192.168.77.20" addrtype="ipv4"/><ports>
+<port protocol="tcp" portid="3306"><state state="open"/><service name="mysql"/></port></ports></host></nmaprun>`
+	post := func(secret, ctype string, body io.Reader) (int, map[string]any) {
+		req, _ := http.NewRequest("POST", c.base+made.Path, body)
+		req.Header.Set("Content-Type", ctype)
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	// Multipart, zoals curl -F file=@02_tcp.xml.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "02_tcp.xml")
+	_, _ = fw.Write([]byte(xml))
+	_ = mw.Close()
+	if s, out := post(made.Secret, mw.FormDataContentType(), &buf); s != http.StatusCreated || out["findings"] == nil {
+		t.Fatalf("multipart: %d %v", s, out)
+	}
+	// Ruwe XML.
+	if s, out := post(made.Secret, "application/xml", strings.NewReader(xml)); s != http.StatusCreated {
+		t.Fatalf("ruw: %d %v", s, out)
+	}
+	if s, _ := post("cfi_fout", "application/xml", strings.NewReader(xml)); s != http.StatusUnauthorized {
+		t.Fatalf("foute sleutel: %d", s)
+	}
+	var list struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Imports int    `json:"imports"`
+		} `json:"items"`
+	}
+	c.do("GET", "/api/v1/security/import-tokens", nil, &list)
+	if len(list.Items) != 1 || list.Items[0].Imports != 2 {
+		t.Fatalf("lijst: %+v", list)
+	}
+	if s := c.do("DELETE", "/api/v1/security/import-tokens/"+list.Items[0].ID, nil, nil); s != http.StatusNoContent {
+		t.Fatalf("intrekken: %d", s)
+	}
+	if s, _ := post(made.Secret, "application/xml", strings.NewReader(xml)); s != http.StatusUnauthorized {
+		t.Fatalf("na intrekken: %d", s)
 	}
 }

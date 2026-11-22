@@ -98,6 +98,18 @@ func (s *Service) ImportNmap(ctx context.Context, actor events.Actor, name strin
 	if err != nil {
 		return ScanRun{}, err
 	}
+	// De webinterface verwacht lijsten, nooit null.
+	if out.Args == nil {
+		out.Args = []string{}
+	}
+	for i := range out.Hosts {
+		if out.Hosts[i].Ports == nil {
+			out.Hosts[i].Ports = []protocol.ScanPort{}
+		}
+		if out.Hosts[i].Expected == nil {
+			out.Hosts[i].Expected = []RunPort{}
+		}
+	}
 	out.Notes = append(out.Notes, "Ingelezen uit "+strings.Join(names, ", ")+".")
 	if skipped > 0 {
 		out.Notes = append(out.Notes, fmt.Sprintf("%d poorten zonder antwoord (open|filtered, meestal UDP) overgeslagen: nmap vermoedt die alleen. Zo vallen de valse meldingen voor SNMP, UPnP en CoAP weg.", skipped))
