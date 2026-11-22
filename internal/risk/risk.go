@@ -91,6 +91,9 @@ type Finding struct {
 	Severity Severity `json:"severity"`
 	Subject  Subject  `json:"subject"`
 	Text     string   `json:"text"`
+	// Title is de korte naam van de check uit de catalogus; de API vult
+	// hem in, zodat de interface per oorzaak kan groeperen (fase 47).
+	Title string `json:"title,omitempty"`
 	// Link is het scherm waar je het oplost.
 	Link string `json:"link"`
 	// Points is wat de bevinding van haar kaart aftrekt; 0 als ze

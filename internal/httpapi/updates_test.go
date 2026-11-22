@@ -175,6 +175,46 @@ func TestUpdatesAndCommands(t *testing.T) {
 		t.Fatalf("alles: %+v", j)
 	}
 
+	// Hervatten na een fout (fase 47): een update die op web01 stopte, gaat
+	// daar verder met dezelfde keuzes.
+	var failedID string
+	if err := e.pool.QueryRow(context.Background(), `INSERT INTO jobs (kind, title, status, cluster_id, params, finished_at)
+		VALUES ('updates.run', 'Pakketten bijwerken in Web', 'failed', $1,
+		  jsonb_build_object('apt', '{}'::jsonb, 'no_failover', true, 'nodes', jsonb_build_array(
+		    jsonb_build_object('id', $2::text, 'hostname', 'web02'), jsonb_build_object('id', $3::text, 'hostname', 'web01', 'vip_holder', true))),
+		  now()) RETURNING id`, lab.ID, web02.ID, web01.ID).Scan(&failedID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO job_steps (job_id, seq, name, status, finished_at, state, log, error) VALUES
+		($1, 0, 'web02: voorbereiden', 'succeeded', now(), '{}', '{}', ''),
+		($1, 1, 'web02: pakketten (apt)', 'succeeded', now(), '{}', '{}', ''),
+		($1, 2, 'web02: gezond terug', 'succeeded', now(), '{}', '{}', ''),
+		($1, 3, 'web01 (VIP-houder): voorbereiden', 'succeeded', now(), '{}', '{}', ''),
+		($1, 4, 'web01 (VIP-houder): pakketten (apt)', 'failed', now(), '{}', '{}', 'kapot')`, failedID); err != nil {
+		t.Fatal(err)
+	}
+	var hint struct {
+		NodeID   string   `json:"node_id"`
+		Hostname string   `json:"hostname"`
+		Done     []string `json:"done"`
+	}
+	if s := c.do("GET", "/api/v1/updates/resume/"+failedID, nil, &hint); s != http.StatusOK || hint.NodeID != web01.ID || len(hint.Done) != 1 || hint.Done[0] != "web02" {
+		t.Fatalf("waar verder: %d %+v", s, hint)
+	}
+	if s := c.do("POST", "/api/v1/updates/resume/"+failedID, map[string]any{"skip_projects": []string{"x"}}, nil); s != http.StatusBadRequest {
+		t.Fatalf("overslaan zonder Docker: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/updates/resume/"+failedID, map[string]any{}, &started); s != http.StatusAccepted || len(started.Jobs) != 1 {
+		t.Fatalf("verder: %d %+v", s, started)
+	}
+	j = waitJob(t, c, started.Jobs[0].ID)
+	if j.Status != "succeeded" || len(j.Steps) != 3 || !strings.HasPrefix(j.Steps[0].Name, "web01") || n2.got("apt-get upgrade") != 2 || n1.got("apt-get upgrade") != 4 {
+		t.Fatalf("verder: %+v", j)
+	}
+	if s := c.do("GET", "/api/v1/updates/resume/"+started.Jobs[0].ID, nil, nil); s != http.StatusConflict {
+		t.Fatalf("gelukte taak hervatten: %d", s)
+	}
+
 	// Een eigen commando: maken, wijzigen (nieuwe revisie), draaien.
 	script := "grep -v -e '^HANodeName' /etc/zabbix/cf-zabbix_server.conf > /root/zbx-upgrade.conf && zabbix_server -f -c /root/zbx-upgrade.conf"
 	var cmd struct {

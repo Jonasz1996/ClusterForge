@@ -12901,6 +12901,9 @@ type RiskFinding struct {
 	Severity RiskSeverity `json:"severity"`
 	Subject  RiskSubject  `json:"subject"`
 	Text     string       `json:"text"`
+
+	// Title De korte naam van de check (fase 47), om per oorzaak te groeperen
+	Title *string `json:"title,omitempty"`
 }
 
 // RiskGuestOutcome defines model for RiskGuestOutcome.
@@ -12979,6 +12982,9 @@ type RiskPlacedFinding struct {
 	Severity RiskSeverity `json:"severity"`
 	Subject  RiskSubject  `json:"subject"`
 	Text     string       `json:"text"`
+
+	// Title De korte naam van de check (fase 47), om per oorzaak te groeperen
+	Title *string `json:"title,omitempty"`
 }
 
 // RiskPoint defines model for RiskPoint.
@@ -14247,6 +14253,29 @@ type UpdatePolicyInput struct {
 
 	// Window Zoals "zo 03:00-05:00" of "dagelijks 02:00-04:00"
 	Window string `json:"window"`
+}
+
+// UpdateResumeHint defines model for UpdateResumeHint.
+type UpdateResumeHint struct {
+	ClusterSlug string `json:"cluster_slug"`
+
+	// Done De nodes die al bijgewerkt waren
+	Done     []string `json:"done"`
+	Hostname string   `json:"hostname"`
+
+	// NodeId De node waar de update stopte
+	NodeId openapi_types.UUID `json:"node_id"`
+	Prod   bool               `json:"prod"`
+
+	// Projects De Compose-projecten die op die node mislukten
+	Projects []string `json:"projects"`
+}
+
+// UpdateResumeInput defines model for UpdateResumeInput.
+type UpdateResumeInput struct {
+	Confirm      *string             `json:"confirm,omitempty"`
+	FromNodeId   *openapi_types.UUID `json:"from_node_id,omitempty"`
+	SkipProjects *[]string           `json:"skip_projects,omitempty"`
 }
 
 // User defines model for User.
@@ -16235,6 +16264,9 @@ type SetClusterUpdatePolicyJSONRequestBody = ClusterUpdatePolicyInput
 // SetEnvUpdatePolicyJSONRequestBody defines body for SetEnvUpdatePolicy for application/json ContentType.
 type SetEnvUpdatePolicyJSONRequestBody = UpdatePolicyInput
 
+// ResumeUpdateJSONRequestBody defines body for ResumeUpdate for application/json ContentType.
+type ResumeUpdateJSONRequestBody = UpdateResumeInput
+
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
 
@@ -17551,6 +17583,12 @@ type ServerInterface interface {
 	// SetEnvUpdatePolicy Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
 	// (PUT /updates/policies/environments/{environment})
 	SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, environment string)
+	// GetUpdateResume Waar een gestopte clusterupdate kan hervatten (fase 47)
+	// (GET /updates/resume/{jobId})
+	GetUpdateResume(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// ResumeUpdate Een gestopte clusterupdate hervatten (admin, fase 47)
+	// (POST /updates/resume/{jobId})
+	ResumeUpdate(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -20206,6 +20244,18 @@ func (_ Unimplemented) SetClusterUpdatePolicy(w http.ResponseWriter, r *http.Req
 // SetEnvUpdatePolicy Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
 // (PUT /updates/policies/environments/{environment})
 func (_ Unimplemented) SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, environment string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetUpdateResume Waar een gestopte clusterupdate kan hervatten (fase 47)
+// (GET /updates/resume/{jobId})
+func (_ Unimplemented) GetUpdateResume(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResumeUpdate Een gestopte clusterupdate hervatten (admin, fase 47)
+// (POST /updates/resume/{jobId})
+func (_ Unimplemented) ResumeUpdate(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -32352,6 +32402,58 @@ func (siw *ServerInterfaceWrapper) SetEnvUpdatePolicy(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// GetUpdateResume operation middleware
+func (siw *ServerInterfaceWrapper) GetUpdateResume(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUpdateResume(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeUpdate operation middleware
+func (siw *ServerInterfaceWrapper) ResumeUpdate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeUpdate(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -33686,6 +33788,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/updates", wrapper.StartUpdates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/updates/resume/{jobId}", wrapper.GetUpdateResume)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates/resume/{jobId}", wrapper.ResumeUpdate)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/updates/all", wrapper.StartUpdatesAll)

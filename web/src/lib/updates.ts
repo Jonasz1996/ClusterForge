@@ -16,6 +16,9 @@ export type Command = components["schemas"]["Command"];
 export type CommandDetail = components["schemas"]["CommandDetail"];
 export type CommandInput = components["schemas"]["CommandInput"];
 export type CommandRunInput = components["schemas"]["CommandRunInput"];
+export type CommandOnceInput = components["schemas"]["CommandOnceInput"];
+export type UpdateAllInput = components["schemas"]["UpdateAllInput"];
+export type UpdateAllResult = components["schemas"]["UpdateAllResult"];
 
 export function useUpdates() {
   return useQuery({
@@ -144,6 +147,24 @@ export function useRunCommand() {
       void qc.invalidateQueries({ queryKey: ["commands"] });
       void qc.invalidateQueries({ queryKey: ["jobs"] });
     },
+  });
+}
+
+// useRunOnce draait een commando zonder het te bewaren (fase 47).
+export function useRunOnce() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: CommandOnceInput) => unwrap(await api.POST("/commands/once", { body })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+}
+
+// useUpdateAll is "Alles bijwerken" (fase 47); met dry_run alleen het plan.
+export function useUpdateAll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: UpdateAllInput) => unwrap(await api.POST("/updates/all", { body })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
 }
 

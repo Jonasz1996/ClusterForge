@@ -548,3 +548,75 @@ func (s *Server) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
 	out.Job = &aj
 	writeJSON(w, http.StatusAccepted, out)
 }
+
+// GetUpdateResume zegt waar een gestopte clusterupdate kan hervatten
+// (fase 47): de node waar ze stopte en de projecten die daar mislukten.
+func (s *Server) GetUpdateResume(w http.ResponseWriter, r *http.Request, jobID uuid.UUID) {
+	ctx := r.Context()
+	h, err := s.updates.ResumeHint(ctx, jobID)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	out := gen.UpdateResumeHint{NodeId: h.NodeID, Hostname: h.Hostname, Done: h.Done, Projects: h.Projects}
+	if out.Done == nil {
+		out.Done = []string{}
+	}
+	if out.Projects == nil {
+		out.Projects = []string{}
+	}
+	if row, err := s.q.GetJob(ctx, jobID); err == nil && row.Job.ClusterID != nil {
+		if c, err := s.q.GetCluster(ctx, *row.Job.ClusterID); err == nil {
+			out.ClusterSlug, out.Prod = c.Slug, c.Environment == store.EnvironmentProd
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ResumeUpdate hervat een gestopte clusterupdate met dezelfde keuzes.
+func (s *Server) ResumeUpdate(w http.ResponseWriter, r *http.Request, jobID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.UpdateResumeInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	var skip []string
+	if in.SkipProjects != nil {
+		skip = *in.SkipProjects
+	}
+	req, err := s.updates.ResumeRequest(ctx, jobID, in.FromNodeId, skip)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	nodes, err := s.updates.Select(ctx, req)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	for _, n := range nodes {
+		if n.Prod() {
+			if !confirmProd(w, p, true, n.ClusterSlug, in.Confirm, "bijwerken") {
+				return
+			}
+			break
+		}
+	}
+	started, skipped, err := s.updates.Resume(ctx, events.User(p.User.ID), req, nodes)
+	if err != nil {
+		s.updateError(w, r, err)
+		return
+	}
+	out := gen.AgentUpgradeStarted{Jobs: make([]gen.Job, 0, len(started)), Skipped: skipped}
+	if out.Skipped == nil {
+		out.Skipped = []string{}
+	}
+	for _, j := range started {
+		out.Jobs = append(out.Jobs, toAPIJob(j, &p.User.Username))
+	}
+	writeJSON(w, http.StatusAccepted, out)
+}

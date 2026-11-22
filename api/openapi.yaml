@@ -4237,6 +4237,41 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /updates/resume/{jobId}:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getUpdateResume
+      summary: Waar een gestopte clusterupdate kan hervatten (fase 47)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateResumeHint" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: resumeUpdate
+      summary: Een gestopte clusterupdate hervatten (admin, fase 47)
+      description: |
+        Dezelfde keuzes als de gestopte update, vanaf from_node_id (leeg: de node waar ze stopte). skip_projects slaat die
+        Compose-projecten deze keer over. Op prod tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateResumeInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /updates/all:
     post:
       operationId: startUpdatesAll
@@ -13551,6 +13586,7 @@ components:
         severity: { $ref: "#/components/schemas/RiskSeverity" }
         subject: { $ref: "#/components/schemas/RiskSubject" }
         text: { type: string }
+        title: { type: string, description: "De korte naam van de check (fase 47), om per oorzaak te groeperen" }
         link: { type: string, description: Het scherm waar je het oplost }
         points: { type: integer, description: Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is }
         gain: { type: number, description: Hoeveel de score van het cluster (of de kaart Platform) stijgt als ze opgelost is }
@@ -14903,6 +14939,22 @@ components:
         failover: { type: boolean, description: De VIP-houder eerst failoveren naar een bijgewerkte node (standaard aan) }
         confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
         start_from: { type: string, format: uuid, description: "Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id" }
+    UpdateResumeHint:
+      type: object
+      required: [node_id, hostname, done, projects, cluster_slug, prod]
+      properties:
+        node_id: { type: string, format: uuid, description: De node waar de update stopte }
+        hostname: { type: string }
+        done: { type: array, items: { type: string }, description: De nodes die al bijgewerkt waren }
+        projects: { type: array, items: { type: string }, description: De Compose-projecten die op die node mislukten }
+        cluster_slug: { type: string }
+        prod: { type: boolean }
+    UpdateResumeInput:
+      type: object
+      properties:
+        from_node_id: { type: string, format: uuid }
+        skip_projects: { type: array, items: { type: string } }
+        confirm: { type: string }
     UpdateAllInput:
       type: object
       properties:

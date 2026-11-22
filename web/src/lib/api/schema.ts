@@ -3971,6 +3971,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/updates/resume/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Waar een gestopte clusterupdate kan hervatten (fase 47) */
+        get: operations["getUpdateResume"];
+        put?: never;
+        /**
+         * Een gestopte clusterupdate hervatten (admin, fase 47)
+         * @description Dezelfde keuzes als de gestopte update, vanaf from_node_id (leeg: de node waar ze stopte). skip_projects slaat die
+         *     Compose-projecten deze keer over. Op prod tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["resumeUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/updates/all": {
         parameters: {
             query?: never;
@@ -12962,6 +12986,8 @@ export interface components {
             severity: components["schemas"]["RiskSeverity"];
             subject: components["schemas"]["RiskSubject"];
             text: string;
+            /** @description De korte naam van de check (fase 47), om per oorzaak te groeperen */
+            title?: string;
             /** @description Het scherm waar je het oplost */
             link: string;
             /** @description Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is */
@@ -14176,6 +14202,26 @@ export interface components {
              * @description Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id
              */
             start_from?: string;
+        };
+        UpdateResumeHint: {
+            /**
+             * Format: uuid
+             * @description De node waar de update stopte
+             */
+            node_id: string;
+            hostname: string;
+            /** @description De nodes die al bijgewerkt waren */
+            done: string[];
+            /** @description De Compose-projecten die op die node mislukten */
+            projects: string[];
+            cluster_slug: string;
+            prod: boolean;
+        };
+        UpdateResumeInput: {
+            /** Format: uuid */
+            from_node_id?: string;
+            skip_projects?: string[];
+            confirm?: string;
         };
         UpdateAllInput: {
             apt?: {
@@ -22726,6 +22772,60 @@ export interface operations {
         };
         responses: {
             /** @description Taken aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getUpdateResume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateResumeHint"];
+                };
+            };
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    resumeUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateResumeInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
             202: {
                 headers: {
                     [name: string]: unknown;

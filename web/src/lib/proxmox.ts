@@ -138,7 +138,15 @@ export function useVmAction() {
   });
 }
 
-export type JobFilter = { node_id?: string; proxmox_id?: string; cluster_id?: string; limit?: number };
+export type JobFilter = {
+  node_id?: string;
+  proxmox_id?: string;
+  cluster_id?: string;
+  limit?: number;
+  // Fase 47: wie de taak startte en de status.
+  who?: "me" | "people" | "all";
+  status?: JobStatus;
+};
 
 // Taken verversen snel zolang er een loopt.
 export function useJobs(filter: JobFilter = {}, enabled = true) {

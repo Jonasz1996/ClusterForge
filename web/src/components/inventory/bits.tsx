@@ -16,7 +16,7 @@ export function LifecycleBadge({ lifecycle }: { lifecycle: string }) {
 export function StatusBadge({ status, reason }: { status: Status; reason?: string }) {
   const st = statuses[status] ?? statuses.unknown;
   return (
-    <span title={reason || undefined}>
+    <span title={[st.impact, reason].filter(Boolean).join(": ") || undefined}>
       <Badge tone={st.tone}>
         <span className="mr-1 inline-block size-1.5 rounded-full bg-current" aria-hidden />
         {st.label}
@@ -33,7 +33,9 @@ export function StatusNote({ status, reason, since }: { status: Status; reason: 
   const st = statuses[status];
   return (
     <Alert kind={status === "degraded" ? "info" : "error"}>
-      <span className="font-medium">{st.label}</span>
+      <span className="font-medium">
+        {st.impact}. {st.label}
+      </span>
       {since && <span> sinds {sinceFmt.format(new Date(since))}</span>}: {reason}
     </Alert>
   );
