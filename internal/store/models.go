@@ -2141,6 +2141,34 @@ type UpdatePolicy struct {
 	UpdatedBy     *uuid.UUID
 }
 
+type UpkeepPolicy struct {
+	Scope     string
+	ClusterID *uuid.UUID
+	Policy    []byte
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
+}
+
+type UpkeepResult struct {
+	ID        int64
+	JobID     uuid.UUID
+	NodeID    uuid.UUID
+	ClusterID *uuid.UUID
+	Hostname  string
+	Mode      string
+	At        time.Time
+	Ok        bool
+	Freed     int64
+	Result    []byte
+}
+
+type UpkeepRun struct {
+	Scope     string
+	StartedAt time.Time
+	JobID     *uuid.UUID
+	Note      string
+}
+
 type User struct {
 	ID            uuid.UUID
 	Username      string
