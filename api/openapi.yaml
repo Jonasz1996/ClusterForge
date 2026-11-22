@@ -6560,6 +6560,24 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /security/scans/import:
+    post:
+      operationId: importSecurityScan
+      summary: Een nmap-rapport (XML, -oX) van buiten inlezen, zoals van de Kali-VM; zelfde analyse als een eigen scan (admin, fase 43)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityImportInput" }
+      responses:
+        "201":
+          description: Ingelezen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /security/scans/{scanId}:
     parameters:
       - { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -16660,6 +16678,21 @@ components:
         exclude: { type: array, items: { type: string } }
         public_confirm: { type: string }
         public_note: { type: string, maxLength: 300 }
+    SecurityImportInput:
+      type: object
+      required: [files]
+      properties:
+        name: { type: string, maxLength: 60 }
+        files:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            required: [name, xml]
+            properties:
+              name: { type: string }
+              xml: { type: string }
     SecurityScanInput:
       type: object
       required: [name, scope_id, profile, schedule]

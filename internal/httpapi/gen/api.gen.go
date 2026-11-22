@@ -13060,6 +13060,15 @@ type SecurityFixInput struct {
 	Rules           []string `json:"rules"`
 }
 
+// SecurityImportInput defines model for SecurityImportInput.
+type SecurityImportInput struct {
+	Files []struct {
+		Name string `json:"name"`
+		Xml  string `json:"xml"`
+	} `json:"files"`
+	Name *string `json:"name,omitempty"`
+}
+
 // SecurityObject Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security.
 type SecurityObject map[string]interface{}
 
@@ -15998,6 +16007,9 @@ type RefreshSecurityJSONRequestBody = SecurityRefreshInput
 // CreateSecurityScanJSONRequestBody defines body for CreateSecurityScan for application/json ContentType.
 type CreateSecurityScanJSONRequestBody = SecurityScanInput
 
+// ImportSecurityScanJSONRequestBody defines body for ImportSecurityScan for application/json ContentType.
+type ImportSecurityScanJSONRequestBody = SecurityImportInput
+
 // UpdateSecurityScanJSONRequestBody defines body for UpdateSecurityScan for application/json ContentType.
 type UpdateSecurityScanJSONRequestBody = SecurityScanInput
 
@@ -17227,6 +17239,9 @@ type ServerInterface interface {
 	// CreateSecurityScan Netwerkscan aanmaken (admin)
 	// (POST /security/scans)
 	CreateSecurityScan(w http.ResponseWriter, r *http.Request)
+	// ImportSecurityScan Een nmap-rapport (XML, -oX) van buiten inlezen, zoals van de Kali-VM; zelfde analyse als een eigen scan (admin, fase 43)
+	// (POST /security/scans/import)
+	ImportSecurityScan(w http.ResponseWriter, r *http.Request)
 	// DeleteSecurityScan Netwerkscan verwijderen (admin)
 	// (DELETE /security/scans/{scanId})
 	DeleteSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID)
@@ -19723,6 +19738,12 @@ func (_ Unimplemented) GetSecurityScans(w http.ResponseWriter, r *http.Request) 
 // CreateSecurityScan Netwerkscan aanmaken (admin)
 // (POST /security/scans)
 func (_ Unimplemented) CreateSecurityScan(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ImportSecurityScan Een nmap-rapport (XML, -oX) van buiten inlezen, zoals van de Kali-VM; zelfde analyse als een eigen scan (admin, fase 43)
+// (POST /security/scans/import)
+func (_ Unimplemented) ImportSecurityScan(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -31106,6 +31127,20 @@ func (siw *ServerInterfaceWrapper) CreateSecurityScan(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ImportSecurityScan operation middleware
+func (siw *ServerInterfaceWrapper) ImportSecurityScan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportSecurityScan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteSecurityScan operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSecurityScan(w http.ResponseWriter, r *http.Request) {
 
@@ -33601,6 +33636,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/scans", wrapper.CreateSecurityScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/scans/import", wrapper.ImportSecurityScan)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/security/scans/{scanId}", wrapper.DeleteSecurityScan)

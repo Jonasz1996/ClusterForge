@@ -74,6 +74,17 @@ var riskyPorts = map[int]riskyPort{
 	111:   {SevLow, "rpcbind staat open", "Zonder NFS is rpcbind overbodig: systemctl disable --now rpcbind.socket rpcbind."},
 }
 
+// Fase 43: r-diensten en databases die vanaf het netwerk bereikbaar zijn.
+// Een database die het firewallplan bewust openzet, telt niet.
+var (
+	rPorts = map[int]riskyPort{
+		512: {SevHigh, "rexec staat open", "rexec stuurt wachtwoorden onversleuteld. Zet de dienst uit (rsh-server verwijderen) en gebruik SSH."},
+		513: {SevHigh, "rlogin staat open", "rlogin stuurt wachtwoorden onversleuteld. Zet de dienst uit (rsh-server verwijderen) en gebruik SSH."},
+		514: {SevMedium, "Poort 514/tcp staat open (rsh of syslog via TCP)", "Kijk met ss -tlnp wat er luistert. Is het rsh: verwijderen. Is het rsyslog: beperk de poort in Firewall tot de toestellen die logs sturen."},
+	}
+	dbPorts = map[int]string{2379: "etcd", 2380: "etcd (peers)", 3306: "MySQL/MariaDB", 3307: "MariaDB (Galera)", 5432: "PostgreSQL", 5433: "PostgreSQL (Patroni)", 8008: "REST-API van Patroni"}
+)
+
 var (
 	reOldTLS   = regexp.MustCompile(`(?m)^\s*(SSLv2|SSLv3|TLSv1\.0|TLSv1\.1):`)
 	reWeakTLS  = regexp.MustCompile(`least strength: ([D-F])`)
@@ -94,6 +105,16 @@ func portDrafts(p protocol.ScanPort, kn *knownNode, known string, now time.Time)
 		out = append(out, Draft{Kind: KindNetwork, Key: "poort:" + pp, Severity: r.Severity, Title: r.Title + " (" + pp + ")",
 			Summary: "De scanner bereikte " + pp + " (" + svc + ").", Fix: r.Fix, Detail: detail})
 	}
+	if r, ok := rPorts[p.Port]; ok && p.Proto == "tcp" {
+		out = append(out, Draft{Kind: KindNetwork, Key: "poort:" + pp, Severity: r.Severity, Title: r.Title + " (" + pp + ")",
+			Summary: "De scanner bereikte " + pp + " (" + svc + ").", Fix: r.Fix, Detail: detail})
+	}
+	if what, ok := dbPorts[p.Port]; ok && p.Proto == "tcp" && known != "firewall" {
+		out = append(out, Draft{Kind: KindNetwork, Key: "db:" + pp, Severity: SevMedium, Title: what + " bereikbaar over het netwerk (" + pp + ")",
+			Summary: "De scanner bereikte " + pp + " (" + svc + "). Een database hoort alleen bereikbaar te zijn voor de eigen clusternodes en de apps die hem gebruiken.",
+			Fix:     "Zet in Firewall een regel die " + pp + " alleen openzet voor de clusternodes en de app-nodes (of het VIP).", Detail: detail})
+	}
+	out = append(out, scriptDrafts(p, pp, detail)...)
 	if kn != nil {
 		switch known {
 		case "dicht":
@@ -409,4 +430,47 @@ func probeTargets(res *protocol.ScanResult) []protocol.ProbeTarget {
 		}
 	}
 	return out
+}
+
+// scriptDrafts: wat de NSE-scripts van een ingelezen rapport tonen (fase 43).
+func scriptDrafts(p protocol.ScanPort, pp string, detail map[string]any) []Draft {
+	var out []Draft
+	if g := p.Scripts["http-git"]; strings.Contains(g, ".git") {
+		out = append(out, Draft{Kind: KindNetwork, Key: "http-git:" + pp, Severity: SevHigh, Title: "Publieke .git-map op de webserver (" + pp + ")",
+			Summary: "Via " + pp + " is de .git-map van de site te downloaden, met de broncode en vaak wachtwoorden in de geschiedenis.",
+			Fix:     "Blokkeer de map in de webserver (nginx: location ~ /\\.git { deny all; }) of zet hem buiten de webroot. Verander daarna de wachtwoorden die erin stonden.", Detail: detail})
+	}
+	for _, id := range []string{"smb2-security-mode", "smb-security-mode"} {
+		if m := strings.ToLower(p.Scripts[id]); strings.Contains(m, "not required") || strings.Contains(m, "disabled") {
+			out = append(out, Draft{Kind: KindNetwork, Key: "smb-signing:" + pp, Severity: SevMedium, Title: "SMB signing niet verplicht (" + pp + ")",
+				Summary: "De SMB-server aanvaardt verbindingen zonder ondertekening; dat laat relay-aanvallen toe.",
+				Fix:     "Zet server signing = mandatory (Samba) of in TrueNAS bij SMB: Enable SMB signing/verplicht.", Detail: detail})
+			break
+		}
+	}
+	if p.Proto == "udp" && p.Port == 161 && (p.Scripts["snmp-info"] != "" || p.Scripts["snmp-sysdescr"] != "") {
+		out = append(out, Draft{Kind: KindNetwork, Key: "snmp:" + pp, Severity: SevHigh, Title: "SNMP antwoordt zonder echte sleutel (" + pp + ")",
+			Summary: "De scanner kreeg systeeminformatie via SNMP met een standaard community.",
+			Fix:     "Zet SNMP uit als niemand het gebruikt, of gebruik SNMPv3 met gebruiker en wachtwoord (TrueNAS: Services → SNMP).", Detail: detail})
+	}
+	if n := p.Scripts["nfs-showmount"]; strings.TrimSpace(n) != "" || strings.Contains(p.Scripts["rpcinfo"], "mountd") {
+		if strings.TrimSpace(n) == "" {
+			n = "mountd is bereikbaar via rpcbind"
+		}
+		out = append(out, Draft{Kind: KindNetwork, Key: "nfs:" + pp, Severity: SevMedium, Title: "NFS-exports zichtbaar (" + pp + ")",
+			Summary: "Iedereen op het netwerk ziet welke mappen via NFS gedeeld zijn: " + firstLine(n) + ".",
+			Fix:     "Beperk elke export tot de IP's die hem nodig hebben (Authorized Networks of /etc/exports) en zet de poorten dicht voor de rest.", Detail: detail})
+	}
+	return out
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i > 0 {
+		s = s[:i]
+	}
+	if len(s) > 120 {
+		s = s[:120] + "…"
+	}
+	return s
 }

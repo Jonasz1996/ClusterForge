@@ -520,3 +520,33 @@ func (s *Server) SetSecurityToolSchedule(w http.ResponseWriter, r *http.Request,
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ImportSecurityScan leest een nmap-rapport van buiten in (fase 43). De
+// bestanden zijn groter dan een gewone vraag; daarom een eigen grens.
+func (s *Server) ImportSecurityScan(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	var in gen.SecurityImportInput
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, security.MaxImportBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "ongeldige vraag of te groot (hoogstens 64 MB): "+err.Error())
+		return
+	}
+	files := make([]security.ImportFile, 0, len(in.Files))
+	for _, f := range in.Files {
+		files = append(files, security.ImportFile{Name: f.Name, XML: f.Xml})
+	}
+	name := ""
+	if in.Name != nil {
+		name = *in.Name
+	}
+	run, err := s.security.ImportNmap(r.Context(), events.User(p.User.ID), name, files)
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, run)
+}

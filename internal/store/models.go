@@ -1956,7 +1956,7 @@ type SecurityScan struct {
 
 type SecurityScanRun struct {
 	ID          uuid.UUID
-	ScanID      uuid.UUID
+	ScanID      *uuid.UUID
 	ScannerID   *uuid.UUID
 	ScannerName string
 	Trigger     string

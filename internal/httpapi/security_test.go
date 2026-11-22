@@ -355,3 +355,49 @@ func TestSecurityEndToEnd(t *testing.T) {
 		t.Fatalf("verwijderen: %d", s)
 	}
 }
+
+func TestSecurityImportNmap(t *testing.T) {
+	_, c := adminClient(t)
+	xml := `<nmaprun><host><status state="up"/><address addr="192.168.77.10" addrtype="ipv4"/><ports>
+<port protocol="tcp" portid="5432"><state state="open"/><service name="postgresql"/></port>
+<port protocol="tcp" portid="80"><state state="open"/><service name="http" product="nginx"/><script id="http-git" output="&#xa;  192.168.77.10:80/.git/&#xa;    Git repository found!"/><script id="http-vuln-cve2011-3192" output="VULNERABLE"/></port>
+</ports></host><host><status state="up"/><address addr="192.168.77.11" addrtype="ipv4"/><ports>
+<port protocol="udp" portid="161"><state state="open|filtered"/><service name="snmp"/></port>
+</ports></host></nmaprun>`
+	var run struct {
+		ID      string `json:"id"`
+		Trigger string `json:"trigger"`
+		Status  string `json:"status"`
+	}
+	if s := c.do("POST", "/api/v1/security/scans/import", map[string]any{"name": "Kali 17/11", "files": []map[string]any{{"name": "02_tcp.xml", "xml": xml}}}, &run); s != http.StatusCreated {
+		t.Fatalf("import: %d", s)
+	}
+	if run.Trigger != "import" || run.Status != "klaar" {
+		t.Fatalf("run = %+v", run)
+	}
+	var net struct {
+		Items []struct {
+			Key string `json:"key"`
+		} `json:"items"`
+	}
+	c.do("GET", "/api/v1/security/findings?kind=netwerk", nil, &net)
+	keys := map[string]bool{}
+	for _, f := range net.Items {
+		keys[f.Key] = true
+	}
+	if !keys["db:5432/tcp"] || !keys["http-git:80/tcp"] || keys["snmp:161/udp"] {
+		t.Fatalf("bevindingen = %v", keys)
+	}
+	var det struct {
+		Result struct {
+			Notes []string `json:"notes"`
+		} `json:"result"`
+	}
+	c.do("GET", "/api/v1/security/scan-runs/"+run.ID, nil, &det)
+	if !strings.Contains(strings.Join(det.Result.Notes, " "), "1 poorten zonder antwoord") {
+		t.Fatalf("notes = %v", det.Result.Notes)
+	}
+	if s := c.do("POST", "/api/v1/security/scans/import", map[string]any{"files": []map[string]any{{"name": "x.xml", "xml": "geen xml"}}}, nil); s != http.StatusBadRequest {
+		t.Fatalf("slechte xml: %d", s)
+	}
+}

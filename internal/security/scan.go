@@ -76,8 +76,9 @@ type ScanInput struct {
 }
 
 type ScanRun struct {
-	ID          uuid.UUID  `json:"id"`
-	ScanID      uuid.UUID  `json:"scan_id"`
+	ID uuid.UUID `json:"id"`
+	// ScanID is leeg bij een ingelezen rapport (fase 43).
+	ScanID      *uuid.UUID `json:"scan_id"`
 	ScanName    string     `json:"scan_name"`
 	ScannerID   *uuid.UUID `json:"scanner_id"`
 	ScannerName string     `json:"scanner_name"`
@@ -193,10 +194,10 @@ LEFT JOIN nodes n ON n.id = s.scanner_id
 `
 
 const runsSQL = `
-SELECT r.id, r.scan_id, s.name, r.scanner_id, r.scanner_name, r.trigger, r.status, r.error, r.started_at, r.finished_at, r.targets,
+SELECT r.id, r.scan_id, coalesce(s.name, r.scanner_name), r.scanner_id, r.scanner_name, r.trigger, r.status, r.error, r.started_at, r.finished_at, r.targets,
        r.hosts_up, r.open_ports, r.findings
 FROM security_scan_runs r
-JOIN security_scans s ON s.id = r.scan_id
+LEFT JOIN security_scans s ON s.id = r.scan_id
 `
 
 func (s *Service) scans(ctx context.Context, where string, args ...any) ([]Scan, error) {
@@ -259,7 +260,7 @@ func (s *Service) Scans(ctx context.Context) (ScansOverview, error) {
 	}
 	for i := range o.Scans {
 		for j := range o.Runs {
-			if o.Runs[j].ScanID == o.Scans[i].ID {
+			if o.Runs[j].ScanID != nil && *o.Runs[j].ScanID == o.Scans[i].ID {
 				o.Scans[i].LastRun = &o.Runs[j]
 				break
 			}

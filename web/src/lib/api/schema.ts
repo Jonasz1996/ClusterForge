@@ -6183,6 +6183,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security/scans/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een nmap-rapport (XML, -oX) van buiten inlezen, zoals van de Kali-VM; zelfde analyse als een eigen scan (admin, fase 43) */
+        post: operations["importSecurityScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/security/scans/{scanId}": {
         parameters: {
             query?: never;
@@ -15973,6 +15990,13 @@ export interface components {
             exclude?: string[];
             public_confirm?: string;
             public_note?: string;
+        };
+        SecurityImportInput: {
+            name?: string;
+            files: {
+                name: string;
+                xml: string;
+            }[];
         };
         SecurityScanInput: {
             name: string;
@@ -25966,6 +25990,33 @@ export interface operations {
         };
         responses: {
             /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    importSecurityScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityImportInput"];
+            };
+        };
+        responses: {
+            /** @description Ingelezen */
             201: {
                 headers: {
                     [name: string]: unknown;

@@ -418,11 +418,11 @@ export function scoreTone(score: number | null): Tone {
 
 export type ScanRun = {
   id: string;
-  scan_id: string;
+  scan_id: string | null;
   scan_name: string;
   scanner_id: string | null;
   scanner_name: string;
-  trigger: "schema" | "hand";
+  trigger: "schema" | "hand" | "import";
   status: "bezig" | "klaar" | "mislukt";
   error: string;
   started_at: string;
@@ -544,6 +544,16 @@ export function useRunScan() {
   return useMutation({
     mutationFn: async (id: string) =>
       unwrap(await api.POST("/security/scans/{scanId}/run", { params: { path: { scanId: id } } })) as unknown as { run_id: string },
+    onSuccess: done,
+  });
+}
+
+// Fase 43: een nmap-rapport van een eigen pentest (bv. Kali) inlezen.
+export function useImportScan() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: components["schemas"]["SecurityImportInput"]) =>
+      unwrap(await api.POST("/security/scans/import", { body })) as unknown as ScanRun,
     onSuccess: done,
   });
 }

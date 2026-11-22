@@ -14,6 +14,7 @@ import {
   knownLabel,
   profileLabel,
   useDeleteScan,
+  useImportScan,
   useLinkScanner,
   useRunScan,
   useSaveScan,
@@ -57,6 +58,7 @@ function Scans() {
   const scopes = useSecurityScopes();
   const isAdmin = useIsAdmin();
   const [edit, setEdit] = useState<SecurityScan | "new" | null>(null);
+  const [importing, setImporting] = useState(false);
   const go = (t: Tab, run?: string) => router.replace(`/kwetsbaarheden/scans?tab=${t}${run ? `&run=${run}` : ""}`);
   const noScopes = scopes.data && scopes.data.items.length === 0;
   return (
@@ -66,9 +68,14 @@ function Scans() {
         description="Een scanner zoekt met nmap welke poorten open staan binnen je eigen scopes, met de versies en de TLS- en SSH-instellingen van wat er luistert. Alleen veilige scripts: geen brute force, geen exploits. ClusterForge vergelijkt het resultaat met wat de agents en de firewall weten."
         actions={
           isAdmin && (
-            <Button onClick={() => setEdit("new")} disabled={!scopes.data || noScopes}>
-              Scan toevoegen
-            </Button>
+            <>
+              <Button variant="secondary" onClick={() => setImporting(true)}>
+                Rapport importeren
+              </Button>
+              <Button onClick={() => setEdit("new")} disabled={!scopes.data || noScopes}>
+                Scan toevoegen
+              </Button>
+            </>
           )
         }
       />
@@ -91,6 +98,15 @@ function Scans() {
       )}
       {tab === "bevindingen" && <NetworkFindings isAdmin={isAdmin} />}
       {data.data && tab === "uitvoeringen" && <Runs o={data.data} selected={runParam} onSelect={(id) => go("uitvoeringen", id)} />}
+      {importing && (
+        <ImportForm
+          onClose={() => setImporting(false)}
+          onDone={(id) => {
+            setImporting(false);
+            go("uitvoeringen", id);
+          }}
+        />
+      )}
       {edit && scopes.data && data.data && (
         <ScanForm scan={edit === "new" ? null : edit} scopes={scopes.data.items} o={data.data} onClose={() => setEdit(null)} />
       )}
@@ -292,7 +308,7 @@ function RunDetail({ id }: { id: string }) {
           <span className="font-medium">{r.scan_name}</span>
           <Badge tone={runTone(r)}>{r.status}</Badge>
           <span className="text-sm text-slate-500">
-            {r.trigger === "schema" ? "volgens schema" : "met de hand"} · {r.scanner_name}
+            {r.trigger === "schema" ? "volgens schema" : r.trigger === "import" ? "ingelezen rapport" : "met de hand"} · {r.scanner_name}
             {dur !== null && ` · ${dur < 120 ? `${dur} s` : `${Math.round(dur / 60)} min`}`}
           </span>
         </div>
@@ -522,6 +538,55 @@ function ScanForm({ scan, scopes, o, onClose }: { scan: SecurityScan | null; sco
           </Button>
           <Button onClick={submit} disabled={save.isPending || !name.trim() || !scope}>
             Bewaren
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Fase 43: een nmap-rapport van een eigen pentest (bv. de Kali-VM) inlezen.
+// De bestanden worden als tekst gelezen en in één keer verstuurd; de server
+// legt de hosts naast de nodes en maakt er bevindingen van.
+function ImportForm({ onClose, onDone }: { onClose: () => void; onDone: (runId: string) => void }) {
+  const [name, setName] = useState("");
+  const [files, setFiles] = useState<{ name: string; xml: string }[]>([]);
+  const [readErr, setReadErr] = useState("");
+  const imp = useImportScan();
+  const pick = async (list: FileList | null) => {
+    setReadErr("");
+    if (!list) return;
+    const arr = Array.from(list).slice(0, 20);
+    if (arr.some((f) => f.size > 64 << 20)) {
+      setReadErr("Een bestand is groter dan 64 MB.");
+      return;
+    }
+    setFiles(await Promise.all(arr.map(async (f) => ({ name: f.name, xml: await f.text() }))));
+  };
+  const submit = () => imp.mutate({ name: name.trim() || undefined, files }, { onSuccess: (r) => onDone(r.id) });
+  return (
+    <Modal title="Rapport importeren" onClose={onClose}>
+      <div className="space-y-4 text-sm">
+        <p className="text-slate-600 dark:text-slate-400">
+          Lees de XML-bestanden van nmap in (gemaakt met <code>-oX</code>), bijvoorbeeld van je Kali-VM. Kies alle bestanden van één pentest samen,
+          zoals 02_tcp.xml, 03_udp.xml en 04_full_servers.xml. Poorten die alleen &quot;open|filtered&quot; zijn, worden overgeslagen; zo vallen de
+          meeste valse UDP-meldingen weg.
+        </p>
+        <Field label="Naam (optioneel)" htmlFor="imp-name">
+          <Input id="imp-name" value={name} placeholder="Pentest Kali" onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="XML-bestanden" htmlFor="imp-files">
+          <input id="imp-files" type="file" accept=".xml,text/xml" multiple onChange={(e) => void pick(e.target.files)} />
+        </Field>
+        {files.length > 0 && <div className="text-xs text-slate-500">{files.map((f) => f.name).join(", ")}</div>}
+        {readErr && <Alert>{readErr}</Alert>}
+        {imp.isError && <Alert>{imp.error.message}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Annuleren
+          </Button>
+          <Button onClick={submit} disabled={imp.isPending || files.length === 0}>
+            {imp.isPending ? "Bezig met inlezen…" : "Importeren"}
           </Button>
         </div>
       </div>
