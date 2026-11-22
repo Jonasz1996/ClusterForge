@@ -1930,6 +1930,17 @@ type SecurityHardening struct {
 	ErrorAt     *time.Time
 }
 
+type SecurityImportToken struct {
+	ID         uuid.UUID
+	Name       string
+	TokenHash  []byte
+	CreatedBy  *uuid.UUID
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	LastUsedIp string
+	Imports    int32
+}
+
 type SecurityInventory struct {
 	NodeID      uuid.UUID
 	CollectedAt *time.Time
