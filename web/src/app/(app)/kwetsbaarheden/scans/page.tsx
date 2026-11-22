@@ -630,6 +630,10 @@ function AutoImport() {
         {create.isError && <Alert>{(create.error as Error).message}</Alert>}
         {secret && <Alert kind="info">Kopieer de sleutel nu; ClusterForge toont hem niet opnieuw.</Alert>}
         <pre className="overflow-x-auto rounded bg-slate-50 p-2 text-xs whitespace-pre-wrap break-all dark:bg-slate-800">{cmd}</pre>
+        <p className="text-xs text-slate-500">
+          Het antwoord geeft een run_id. Met dezelfde sleutel leest het pentestsysteem de stand: <code>GET /api/import/v1/runs/&lt;run_id&gt;</code>{" "}
+          (notities, ook wat de automatische fixes deden, en de bevindingen per status) en <code>GET /api/import/v1/runs</code> (laatste imports).
+        </p>
         {list.data && list.data.items.length > 0 && (
           <ul className="divide-y divide-slate-100 text-xs dark:divide-slate-800">
             {list.data.items.map((t) => (

@@ -139,3 +139,52 @@ func (s *Service) AddRunNotes(ctx context.Context, id uuid.UUID, notes []string)
 		coalesce(result->'notes', '[]'::jsonb) || $2::jsonb) WHERE id = $1`, id, raw)
 	return err
 }
+
+// ImportRuns geeft de laatste ingelezen rapporten, nieuwste eerst.
+func (s *Service) ImportRuns(ctx context.Context, limit int) ([]ScanRun, error) {
+	return s.runs(ctx, "WHERE r.trigger = 'import'", limit)
+}
+
+// ImportStatus is de stand van één ingelezen rapport voor een pentestsysteem:
+// de uitvoering, de notities (ook van de automatische fixes) en de
+// bevindingen van de gescande adressen zoals ze nu zijn.
+type ImportStatus struct {
+	Run      ScanRun   `json:"run"`
+	Notes    []string  `json:"notes"`
+	Findings []Finding `json:"findings"`
+	// Counts telt de bevindingen per status (open, aanvaard, opgelost).
+	Counts map[string]int `json:"counts"`
+}
+
+// ImportRunStatus geeft de stand van een ingelezen rapport; een uitvoering
+// die geen import is, bestaat voor deze API niet.
+func (s *Service) ImportRunStatus(ctx context.Context, id uuid.UUID) (ImportStatus, error) {
+	d, err := s.ScanRunDetail(ctx, id)
+	if err != nil {
+		return ImportStatus{}, err
+	}
+	if d.Trigger != "import" {
+		return ImportStatus{}, ErrNotFound
+	}
+	out := ImportStatus{Run: d.ScanRun, Notes: []string{}, Findings: []Finding{}, Counts: map[string]int{StatusOpen: 0, StatusAccepted: 0, StatusResolved: 0}}
+	subjects := []string{}
+	if d.Result != nil {
+		if d.Result.Notes != nil {
+			out.Notes = d.Result.Notes
+		}
+		for _, h := range d.Result.Hosts {
+			subjects = append(subjects, "ip:"+h.Addr)
+		}
+	}
+	if len(subjects) > 0 {
+		fs, err := s.Findings(ctx, FindingFilter{Status: "alle", Kind: KindNetwork, Subjects: subjects})
+		if err != nil {
+			return ImportStatus{}, err
+		}
+		out.Findings = fs
+		for _, f := range fs {
+			out.Counts[f.Status]++
+		}
+	}
+	return out, nil
+}

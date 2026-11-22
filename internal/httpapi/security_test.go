@@ -446,8 +446,37 @@ func TestSecurityImportToken(t *testing.T) {
 		t.Fatalf("multipart: %d %v", s, out)
 	}
 	// Ruwe XML.
-	if s, out := post(made.Secret, "application/xml", strings.NewReader(xml)); s != http.StatusCreated {
+	s, out := post(made.Secret, "application/xml", strings.NewReader(xml))
+	if s != http.StatusCreated {
 		t.Fatalf("ruw: %d %v", s, out)
+	}
+	runID, _ := out["run_id"].(string)
+	// Stand lezen met dezelfde sleutel.
+	get := func(secret, path string) (int, map[string]any) {
+		req, _ := http.NewRequest("GET", c.base+"/api/import/v1"+path, nil)
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if s, out := get(made.Secret, "/runs/"+runID); s != http.StatusOK || len(out["notes"].([]any)) == 0 || len(out["findings"].([]any)) == 0 || out["counts"] == nil {
+		t.Fatalf("stand: %d %v", s, out)
+	}
+	if s, out := get(made.Secret, "/runs"); s != http.StatusOK || len(out["runs"].([]any)) < 2 {
+		t.Fatalf("lijst runs: %d %v", s, out)
+	}
+	if s, _ := get("", "/runs/"+runID); s != http.StatusUnauthorized {
+		t.Fatalf("stand zonder sleutel: %d", s)
+	}
+	if s, _ := get(made.Secret, "/runs/00000000-0000-0000-0000-000000000001"); s != http.StatusNotFound {
+		t.Fatalf("onbekende run: %d", s)
 	}
 	if s, _ := post("cfi_fout", "application/xml", strings.NewReader(xml)); s != http.StatusUnauthorized {
 		t.Fatalf("foute sleutel: %d", s)

@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -602,6 +604,73 @@ func (s *Server) RevokeSecurityImportToken(w http.ResponseWriter, r *http.Reques
 // een importsleutel in plaats van een sessie.
 const importBase = "/api/import/v1"
 
+// importAuth controleert de importsleutel (Bearer cfi_… of X-API-Key).
+func (s *Server) importAuth(w http.ResponseWriter, r *http.Request, count bool) (security.ImportToken, bool) {
+	ip := clientIP(r)
+	secret, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if secret == "" {
+		secret = r.Header.Get("X-API-Key")
+	}
+	t, ok, err := s.security.CheckImportToken(r.Context(), strings.TrimSpace(secret), ip, count)
+	if err != nil {
+		s.internalError(w, r, err)
+		return t, false
+	}
+	if !ok {
+		if !s.loginLimiter.allow(ip) {
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "te veel foute sleutels; probeer het straks opnieuw")
+			return t, false
+		}
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "onbekende of ingetrokken importsleutel (Authorization: Bearer cfi_…)")
+		return t, false
+	}
+	return t, true
+}
+
+// importRuns geeft de laatste ingelezen rapporten (?limit=, standaard 20).
+func (s *Server) importRuns(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.securityReady(w) {
+		return
+	}
+	if _, ok := s.importAuth(w, r, false); !ok {
+		return
+	}
+	limit := 20
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	runs, err := s.security.ImportRuns(r.Context(), limit)
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+// importRun geeft de stand van één ingelezen rapport: notities (ook wat de
+// automatische fixes deden) en de bevindingen van de gescande adressen.
+func (s *Server) importRun(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.securityReady(w) {
+		return
+	}
+	if _, ok := s.importAuth(w, r, false); !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "Niet gevonden.")
+		return
+	}
+	st, err := s.security.ImportRunStatus(r.Context(), id)
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
 // importNmap neemt een of meer XML-bestanden van nmap aan, als multipart
 // (curl -F file=@02_tcp.xml -F file=@03_udp.xml) of als ruwe XML in de body.
 func (s *Server) importNmap(w http.ResponseWriter, r *http.Request) {
@@ -609,22 +678,8 @@ func (s *Server) importNmap(w http.ResponseWriter, r *http.Request) {
 	if !s.securityReady(w) {
 		return
 	}
-	ip := clientIP(r)
-	secret, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if secret == "" {
-		secret = r.Header.Get("X-API-Key")
-	}
-	t, ok, err := s.security.CheckImportToken(r.Context(), strings.TrimSpace(secret), ip)
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
+	t, ok := s.importAuth(w, r, true)
 	if !ok {
-		if !s.loginLimiter.allow(ip) {
-			writeError(w, http.StatusTooManyRequests, "rate_limited", "te veel foute sleutels; probeer het straks opnieuw")
-			return
-		}
-		writeError(w, http.StatusUnauthorized, "unauthenticated", "onbekende of ingetrokken importsleutel (Authorization: Bearer cfi_…)")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, security.MaxImportBytes)

@@ -371,6 +371,8 @@ func (s *Server) Handler() http.Handler {
 	r.Route(importBase, func(api chi.Router) {
 		api.Use(middleware.NoCache)
 		api.Post("/nmap", s.importNmap)
+		api.Get("/runs", s.importRuns)
+		api.Get("/runs/{runId}", s.importRun)
 	})
 	r.Route(dashboardBase, func(api chi.Router) {
 		api.Use(middleware.NoCache)

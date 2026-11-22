@@ -94,13 +94,14 @@ func (s *Service) RevokeImportToken(ctx context.Context, actor events.Actor, id 
 }
 
 // CheckImportToken zoekt de sleutel bij een geheim; ok=false als die niet bestaat.
-func (s *Service) CheckImportToken(ctx context.Context, secret, ip string) (ImportToken, bool, error) {
+// Alleen bij count telt het als een import (lezen telt niet).
+func (s *Service) CheckImportToken(ctx context.Context, secret, ip string, count bool) (ImportToken, bool, error) {
 	if !strings.HasPrefix(secret, ImportTokenPrefix) {
 		return ImportToken{}, false, nil
 	}
 	var t ImportToken
-	err := s.pool.QueryRow(ctx, `UPDATE security_import_tokens SET last_used_at = now(), last_used_ip = $2, imports = imports + 1
-		WHERE token_hash = $1 RETURNING id, name, created_at, last_used_at, last_used_ip, imports`, hashImportToken(secret), ip).
+	err := s.pool.QueryRow(ctx, `UPDATE security_import_tokens SET last_used_at = now(), last_used_ip = $2, imports = imports + CASE WHEN $3 THEN 1 ELSE 0 END
+		WHERE token_hash = $1 RETURNING id, name, created_at, last_used_at, last_used_ip, imports`, hashImportToken(secret), ip, count).
 		Scan(&t.ID, &t.Name, &t.CreatedAt, &t.LastUsedAt, &t.LastUsedIP, &t.Imports)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ImportToken{}, false, nil

@@ -124,6 +124,8 @@ type FindingFilter struct {
 	Status string
 	NodeID *uuid.UUID
 	Kind   string
+	// Subjects: alleen deze onderwerpen (bv. "ip:192.168.10.5").
+	Subjects []string
 }
 
 const findingsSQL = `
@@ -163,6 +165,9 @@ func (s *Service) Findings(ctx context.Context, f FindingFilter) ([]Finding, err
 	}
 	if f.Kind != "" {
 		add("f.kind = ?", f.Kind)
+	}
+	if f.Subjects != nil {
+		add("f.subject = ANY(?)", f.Subjects)
 	}
 	q := findingsSQL
 	if len(where) > 0 {
