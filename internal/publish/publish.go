@@ -118,7 +118,7 @@ type Defaults struct {
 // eigen login.
 func DefaultDefaults() Defaults {
 	return Defaults{SSLForced: true, HTTP2: true, Websockets: true, BlockExploits: true, Authentik: true, AuthentikAutoRepair: true, LetsEncrypt: true,
-		AuthentikSkip: []string{"vaultwarden", "vaultx", "homeassistant", "home-assistant", "plex", "nextcloud", "authentik", "proxmox", "opnsense", "jellyfin"}}
+		AuthentikSkip: []string{"vaultwarden", "vaultx", "rustdesk", "homeassistant", "home-assistant", "plex", "nextcloud", "authentik", "proxmox", "opnsense", "jellyfin"}}
 }
 
 // Settings zijn de instellingen, zonder geheimen.

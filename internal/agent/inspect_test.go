@@ -291,6 +291,7 @@ var sampleParams = map[string]map[string]any{
 		"db_password": "Wachtwoord-123", "office_jwt_secret": "officegeheim1", "office_link_secret": "linkgeheim12",
 		"media_worker_key": "mediasleutel1"},
 	"nginx-proxy-manager": {"vip": "10.0.20.100", "vrid": 57, "auth_pass": "geheim12"},
+	"rustdesk":            {"vip": "10.0.20.140", "vrid": 63, "auth_pass": "geheim12", "public_host": "rustdesk.example.org", "admin_password": "Wachtwoord-123", "jwt_key": "jwt-sleutel-123"},
 	"home-assistant":      {"vip": "10.0.20.100", "vrid": 58, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"authentik":           {"vip": "10.0.20.100", "db_vip": "10.0.20.101", "vrid": 59, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"vaultx":              {"vip": "10.0.20.110", "db_vip": "10.0.20.111", "vrid": 60, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},

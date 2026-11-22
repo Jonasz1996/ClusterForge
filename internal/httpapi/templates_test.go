@@ -37,7 +37,7 @@ func TestTemplatesFleet(t *testing.T) {
 			} `json:"services"`
 		}
 	}
-	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 14 {
+	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 15 {
 		t.Fatalf("templates: %d %+v", s, tpls)
 	}
 	var list []string
@@ -46,7 +46,7 @@ func TestTemplatesFleet(t *testing.T) {
 	}
 	if got := strings.Join(list, ", "); got != "authentik 1.0.0 generic Authentik (HA), cron 1.0.0 cron Cron-cluster, cssthema 1.0.0 generic cssthema (HA), docker 1.0.0 docker Docker-hosts, docker-ha 1.0.0 docker Docker-hosts met containers (HA), "+
 		"generic 1.0.0 generic Eigen applicatie, home-assistant 1.0.0 generic Home Assistant (HA), homepage 1.0.0 generic Homepage (HA), keepalived-nginx 1.1.0 keepalived Nginx met keepalived, kubernetes 1.1.0 kubernetes Kubernetes (k3s), "+
-		"media-platform 1.0.0 generic Bestanden-, office- en mediaplatform, nginx-proxy-manager 1.0.0 generic Nginx Proxy Manager (HA), vaultx 1.0.0 generic VaultX (HA), zabbix 1.0.0 generic Zabbix met HA" {
+		"media-platform 1.0.0 generic Bestanden-, office- en mediaplatform, nginx-proxy-manager 1.0.0 generic Nginx Proxy Manager (HA), rustdesk 1.0.0 generic RustDesk-server (HA), vaultx 1.0.0 generic VaultX (HA), zabbix 1.0.0 generic Zabbix met HA" {
 		t.Fatalf("templatelijst: %s", got)
 	}
 	app := tpls.Items[5].Services[0]

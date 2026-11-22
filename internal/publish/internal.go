@@ -29,6 +29,7 @@ var internalRules = []internalRule{
 	{names: []string{"etcd"}, why: "etcd"},
 	{names: []string{"node_exporter", "node-exporter", "prometheus-node-exporter"}, why: "metrics"},
 	{names: []string{"nginx-proxy-manager"}, ports: []int{80, 443}, why: "NPM zelf (poort 80/443)"},
+	{names: []string{"rustdesk-server", "hbbs", "hbbr", "cf-rustdesk-hbbs", "cf-rustdesk-hbbr"}, why: "RustDesk ID/relay (rechtstreeks via NAT, niet via NPM)"},
 	{names: []string{"server", "authentik"}, ports: []int{9300}, why: "metrics van Authentik"},
 }
 

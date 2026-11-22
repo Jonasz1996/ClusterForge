@@ -1,0 +1,403 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# RustDesk als cluster: hbbs (ID, hole punching), hbbr (relay) en de
+# API-server draaien alleen op de node met het VIP ({{ .params.vip }}). Elke
+# paar minuten maakt die node een consistente kopie van de sleutels en de
+# databases (snapshot) en zet ClusterForge die met de sync "RustDesk-sleutels
+# en data" op de andere nodes, in $IN. Krijgt een node het VIP, dan zet hij
+# eerst de nieuwste geldige kopie op zijn plaats en start dan RustDesk. Zo is
+# de sleutel na een failover dezelfde en merken de clients niets.
+#
+#   rustdesk-ctl.sh up | down        RustDesk starten of stoppen (via cf-rustdesk)
+#   rustdesk-ctl.sh snapshot         de kopie voor de sync maken (alleen op de VIP-node)
+#   rustdesk-ctl.sh check            keepalived: mag deze node het VIP hebben?
+#   rustdesk-ctl.sh master | backup  keepalived: deze node kreeg of verloor het VIP
+#   rustdesk-ctl.sh status           wat er op deze node staat, met de sleutel
+#   rustdesk-ctl.sh sleutel          alleen de publieke sleutel (Key in de client)
+#   rustdesk-ctl.sh pull | pulled    de images halen / staan ze er?
+#   rustdesk-ctl.sh unchanged        draait RustDesk hier met de huidige images en compose.yaml?
+#   rustdesk-ctl.sh restart-if-changed
+#   rustdesk-ctl.sh oude-stoppen | geen-oude
+#                                    hbbs/hbbr-containers van vóór het cluster
+#                                    stoppen (ze starten niet meer vanzelf)
+#   rustdesk-ctl.sh overnemen [<map>]
+#                                    sleutel en database van een bestaande
+#                                    RustDesk overnemen; zonder map uit de
+#                                    oude containers. Node 1 doet dit bij de
+#                                    eerste start vanzelf.
+set -u
+# CF_RD_BASE en CF_RD_STATE zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_RD_BASE:-/opt/cf-rustdesk}
+DATA=$BASE/data
+API=$BASE/api
+DB=$DATA/db_v2.sqlite3
+APIDB=$API/rustdeskapi.db
+KEY=$DATA/id_ed25519
+STATE=${CF_RD_STATE:-/var/lib/cf-rustdesk}
+CONF=${CF_RD_CONF:-/etc/cf-rustdesk}
+OUT=$STATE/outgoing
+IN=$STATE/incoming
+# STAMP: tot wanneer de data hier zeker actueel is (seconden sinds 1970). Een
+# ontvangen kopie die niet nieuwer is, komt er niet in.
+STAMP=$STATE/stamp
+HASH=${CF_RD_HASH:-/run/cf-rustdesk.hash}
+VIP='{{ .params.vip }}'
+SERVER_IMAGE='{{ .params.server_image }}'
+API_IMAGE='{{ .params.api_image }}'
+STARTED=$STATE/started
+UNHEALTHY=$STATE/unhealthy
+GRACE=180
+# Alleen node 1 mag zonder kopie starten: met de sleutel van de oude
+# containers, of met een nieuwe sleutel voor een nieuw cluster. Een andere
+# node zonder kopie zou een nieuwe sleutel maken en die naar de rest syncen.
+INDEX='{{ .node.index }}'
+IFACE='{{ .node.interface }}'
+BETTER='{{ range .peers }}{{ if lt .index $.node.index }}{{ .address }} {{ end }}{{ end }}'
+YIELD=$STATE/yielded
+
+compose() { docker compose -p cf-rustdesk --project-directory "$BASE" -f "$BASE/compose.yaml" "$@"; }
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+running() { [ "$(docker inspect -f '{{"{{"}}.State.Running{{"}}"}}' "$1" 2>/dev/null)" = true ]; }
+all_running() { running cf-rustdesk-hbbs && running cf-rustdesk-hbbr && running cf-rustdesk-api; }
+any_running() { running cf-rustdesk-hbbs || running cf-rustdesk-hbbr || running cf-rustdesk-api; }
+say() { echo "== $*"; }
+warn() { echo "WAARSCHUWING: $*" >&2; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
+field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+log() { logger -t cf-rustdesk "$*" 2>/dev/null; echo "$*" >&2; }
+integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
+listening() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
+# Draaien de drie containers en antwoorden hbbs en de API?
+healthy() {
+  all_running && listening 21116 && listening 21117 &&
+    curl -fsS -m 4 -o /dev/null "http://127.0.0.1:21114/_admin/" 2>/dev/null
+}
+better_has_vip() {
+  [ -n "$BETTER" ] || return 1
+  macs=$(arping -D -c 2 -w 3 -I "$IFACE" "$VIP" 2>/dev/null |
+    sed -n 's/.*\[\([0-9A-Fa-f:]*\)\].*/\1/p' | tr 'A-F' 'a-f')
+  [ -n "$macs" ] || return 1
+  for p in $BETTER; do
+    ping -c 1 -W 1 "$p" >/dev/null 2>&1
+    mac=$(ip neigh show "$p" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "lladdr") print tolower($(i + 1))}')
+    if [ -n "$mac" ] && echo "$macs" | grep -qx "$mac"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+# Containers van een RustDesk-server die niet van dit cluster zijn (de
+# hbbs/hbbr van vóór ClusterForge). Met -a ook de gestopte.
+foreign() {
+  docker ps ${1:-} --format '{{"{{"}}.ID{{"}}"}} {{"{{"}}.Image{{"}}"}} {{"{{"}}.Label "com.docker.compose.project"{{"}}"}}' 2>/dev/null |
+    awk '$2 ~ /rustdesk-server/ && $3 != "cf-rustdesk" {print $1}'
+}
+# De map met id_ed25519 van een oude container (mount op /root of /data).
+foreign_dir() {
+  for c in $(foreign -a); do
+    for d in $(docker inspect -f '{{"{{"}}range .Mounts{{"}}"}}{{"{{"}}.Destination{{"}}"}}={{"{{"}}.Source{{"}}"}} {{"{{"}}end{{"}}"}}' "$c" 2>/dev/null); do
+      case "${d%%=*}" in
+        /root | /data)
+          if [ -s "${d#*=}/id_ed25519" ]; then
+            echo "${d#*=}"
+            return 0
+          fi
+          ;;
+      esac
+    done
+  done
+  return 1
+}
+fingerprint() {
+  {
+    cat "$BASE/compose.yaml" "$CONF/api.env" 2>/dev/null
+    docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$SERVER_IMAGE" "$API_IMAGE" 2>/dev/null
+  } | sha256sum | cut -d' ' -f1
+}
+pubkey() { cat "$KEY.pub" 2>/dev/null; }
+
+# Kan deze node RustDesk bedienen? Met een sleutel, een ontvangen kopie, of
+# als node 1 (die neemt de oude containers over of begint nieuw).
+can_serve() {
+  [ -s "$KEY" ] || [ -f "$IN/MANIFEST" ] || [ "$INDEX" = 1 ] || [ -f "$STATE/allow-empty" ]
+}
+
+# Sleutel en database uit een map overnemen (de map van een oude hbbs).
+import_dir() {
+  src=${1%/}
+  [ -s "$src/id_ed25519" ] && [ -s "$src/id_ed25519.pub" ] || fail "geen sleutel (id_ed25519 en id_ed25519.pub) in $src"
+  say "Sleutel en database overnemen uit $src"
+  cp -p "$src/id_ed25519" "$src/id_ed25519.pub" "$DATA/" || fail "sleutel kopiëren"
+  chmod 0600 "$KEY"
+  rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal"
+  if [ -f "$src/db_v2.sqlite3" ]; then
+    sqlite3 "$src/db_v2.sqlite3" '.timeout 30000' ".backup '$DB'" || fail "sqlite3 .backup van $src/db_v2.sqlite3"
+    integrity "$DB" || fail "de overgenomen database is niet in orde (integrity_check)"
+  fi
+  date +%s > "$STAMP"
+  echo "Overgenomen; de clients houden hun sleutel: $(pubkey)"
+}
+
+# De ontvangen kopie op zijn plaats zetten, als ze nieuwer is dan wat hier
+# staat en volledig klopt. Anders start RustDesk met wat hier staat.
+install_incoming() {
+  if [ ! -f "$IN/MANIFEST" ]; then
+    echo "Geen ontvangen kopie; RustDesk start met wat hier staat."
+    return 0
+  fi
+  created=$(field created "$IN/MANIFEST")
+  from=$(field host "$IN/MANIFEST")
+  case "$created" in
+    '' | *[!0-9]*) warn "ongeldige $IN/MANIFEST; RustDesk start met wat hier staat"; return 0 ;;
+  esac
+  stamp=$(cat "$STAMP" 2>/dev/null || echo 0)
+  case "$stamp" in '' | *[!0-9]*) stamp=0 ;; esac
+  if [ "$created" -le "$stamp" ]; then
+    echo "De data hier ($(when "$stamp")) is niet ouder dan de kopie van $from ($(when "$created")); niets overgezet."
+    return 0
+  fi
+  if ! (cd "$IN" && sha256sum --quiet --strict -c SHA256SUMS >/dev/null 2>&1); then
+    warn "de kopie van $from ($(when "$created")) is onvolledig (sync onderbroken?); RustDesk start met wat hier staat"
+    return 0
+  fi
+  [ -s "$IN/data/id_ed25519" ] || { warn "de kopie van $from heeft geen sleutel; RustDesk start met wat hier staat"; return 0; }
+  for f in "$IN/data/db_v2.sqlite3" "$IN/api/rustdeskapi.db"; do
+    if [ -f "$f" ] && ! integrity "$f"; then
+      warn "$f in de kopie van $from is niet in orde (integrity_check); RustDesk start met wat hier staat"
+      return 0
+    fi
+  done
+  if [ -s "$KEY.pub" ] && [ "$(pubkey)" != "$(cat "$IN/data/id_ed25519.pub")" ]; then
+    warn "de sleutel hier verschilt van die van $from; de sleutel van $from (de VIP-node) wint"
+  fi
+  say "Kopie van $from ($(when "$created")) op zijn plaats zetten"
+  # De -wal, -shm en -journal horen bij de vorige database: weg.
+  rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal" "$APIDB-wal" "$APIDB-shm" "$APIDB-journal"
+  cp -p "$IN/data/id_ed25519" "$IN/data/id_ed25519.pub" "$DATA/" || fail "sleutel kopiëren"
+  chmod 0600 "$KEY"
+  [ -f "$IN/data/db_v2.sqlite3" ] && { cp -p "$IN/data/db_v2.sqlite3" "$DB" || fail "db_v2.sqlite3 kopiëren"; }
+  if [ -f "$IN/api/rustdeskapi.db" ]; then
+    rm -f "$APIDB"
+    cp -p "$IN/api/rustdeskapi.db" "$APIDB" || fail "rustdeskapi.db kopiëren"
+  fi
+  if [ -f "$IN/api/.cf-admin-pw" ]; then cp -p "$IN/api/.cf-admin-pw" "$API/"; else rm -f "$API/.cf-admin-pw"; fi
+  echo "$created" > "$STAMP"
+}
+
+# Een consistente kopie maken in $OUT, voor de sync. Alleen op de VIP-node
+# waar RustDesk draait; faalt er iets, dan houden de andere nodes hun vorige.
+snapshot() {
+  has_vip || fail "deze node heeft het VIP $VIP niet; alleen de VIP-node maakt de kopie"
+  systemctl is-active --quiet cf-rustdesk || fail "RustDesk draait hier niet (systemctl status cf-rustdesk); geen kopie, de andere nodes houden hun vorige"
+  [ -s "$KEY" ] || fail "$KEY ontbreekt; is hbbs al eens gestart?"
+  t=$(date +%s)
+  new=$STATE/outgoing.new
+  rm -rf "$new" && mkdir -p "$new/data" "$new/api" && chmod 0700 "$new" || fail "map $new"
+  cp -p "$KEY" "$KEY.pub" "$new/data/" || fail "sleutel kopiëren"
+  # Online backup van SQLite: klopt ook terwijl hbbs of de API schrijft.
+  if [ -f "$DB" ]; then
+    sqlite3 "$DB" '.timeout 30000' ".backup '$new/data/db_v2.sqlite3'" || fail "sqlite3 .backup van db_v2.sqlite3"
+    integrity "$new/data/db_v2.sqlite3" || fail "de kopie van db_v2.sqlite3 is niet in orde (integrity_check)"
+  fi
+  if [ -f "$APIDB" ]; then
+    sqlite3 "$APIDB" '.timeout 30000' ".backup '$new/api/rustdeskapi.db'" || fail "sqlite3 .backup van rustdeskapi.db"
+    integrity "$new/api/rustdeskapi.db" || fail "de kopie van rustdeskapi.db is niet in orde (integrity_check)"
+  fi
+  [ -f "$API/.cf-admin-pw" ] && cp -p "$API/.cf-admin-pw" "$new/api/"
+  printf 'created=%s\nhost=%s\nkey=%s\n' "$t" "$(hostname)" "$(pubkey)" > "$new/MANIFEST"
+  (cd "$new" && find data api MANIFEST -type f -print0 | sort -z | xargs -0 -r sha256sum) > "$new/SHA256SUMS" || fail "sha256sum"
+  rm -rf "$OUT.old"
+  if [ -d "$OUT" ]; then mv "$OUT" "$OUT.old" || fail "mv $OUT"; fi
+  mv "$new" "$OUT" || fail "mv $new"
+  rm -rf "$OUT.old"
+  echo "$t" > "$STAMP"
+  echo "Kopie van $(when "$t"): $(wc -l < "$OUT/SHA256SUMS") bestanden."
+}
+
+# Het wachtwoord van admin in de API zetten als het in ClusterForge
+# veranderde. De stempel reist mee met de kopie, dus een failover zet een
+# wachtwoord dat je in de API zelf veranderde niet terug.
+admin_password() {
+  [ -s "$CONF/admin.pw" ] || return 0
+  want=$(sha256sum < "$CONF/admin.pw" | cut -d' ' -f1)
+  [ "$(cat "$API/.cf-admin-pw" 2>/dev/null)" = "$want" ] && return 0
+  pw=$(head -n 1 "$CONF/admin.pw")
+  if docker exec -w /app cf-rustdesk-api ./apimain reset-admin-pwd "$pw" >/dev/null 2>&1; then
+    echo "$want" > "$API/.cf-admin-pw"
+    log "wachtwoord van admin (API) gezet"
+  fi
+  return 0
+}
+
+stop_old() {
+  old=$(foreign)
+  for c in $(foreign -a); do docker update --restart=no "$c" >/dev/null 2>&1; done
+  if [ -n "$old" ]; then
+    say "Oude RustDesk-containers stoppen: $(echo $old); ze starten niet meer vanzelf"
+    # shellcheck disable=SC2086
+    docker stop $old >/dev/null || fail "oude containers stoppen"
+  fi
+  return 0
+}
+
+overnemen() {
+  if [ -n "${1:-}" ]; then
+    src=$1
+  else
+    src=$(foreign_dir) || fail "geen oude RustDesk-container met een sleutel gevonden; geef de map: $0 overnemen <map met id_ed25519>"
+  fi
+  has_vip || fail "doe dit op de node met het VIP ($VIP)"
+  say "RustDesk van het cluster stoppen"
+  systemctl stop cf-rustdesk
+  stop_old
+  import_dir "$src"
+  say "RustDesk van het cluster starten"
+  systemctl start cf-rustdesk || fail "systemctl start cf-rustdesk (journalctl -u cf-rustdesk)"
+  echo "Binnen enkele minuten staat de eerste kopie op de andere nodes (Cronjobs, RustDesk-sleutels en data)."
+}
+
+status() {
+  echo "node:      $(hostname) (node $INDEX)"
+  if has_vip; then echo "VIP:       $VIP staat hier"; else echo "VIP:       $VIP staat elders"; fi
+  echo "cf-rustdesk: $(systemctl is-active cf-rustdesk 2>/dev/null)"
+  if any_running; then
+    if healthy; then echo "RustDesk:  hbbs, hbbr en API draaien en antwoorden"; else echo "RustDesk:  draait, maar niet alles antwoordt (21116, 21117, 21114)"; fi
+  fi
+  [ -n "$(foreign)" ] && echo "LET OP:    oude RustDesk-containers draaien hier nog: $(foreign | tr '\n' ' ')"
+  if [ -s "$KEY.pub" ]; then echo "sleutel:   $(pubkey)"; else echo "sleutel:   (nog geen)"; fi
+  if d=$(foreign_dir) && [ -s "$KEY.pub" ] && [ "$(cat "$d/id_ed25519.pub")" != "$(pubkey)" ]; then
+    echo "LET OP:    de oude sleutel in $d verschilt van die van het cluster"
+  fi
+  echo "data:      actueel tot $(when "$(cat "$STAMP" 2>/dev/null || echo 0)")"
+  [ -f "$OUT/MANIFEST" ] && echo "verstuurd: kopie van $(when "$(field created "$OUT/MANIFEST")")"
+  [ -f "$IN/MANIFEST" ] && echo "ontvangen: kopie van $(field host "$IN/MANIFEST") van $(when "$(field created "$IN/MANIFEST")")"
+  return 0
+}
+
+case "${1:-}" in
+  up)
+    # Oude containers houden de poorten vast: niet starten.
+    if [ -n "$(foreign)" ]; then
+      fail "hier draaien nog oude RustDesk-containers ($(foreign | tr '\n' ' ')); stop ze met: $0 oude-stoppen"
+    fi
+    compose rm -sf >/dev/null 2>&1
+    install_incoming
+    if [ ! -s "$KEY" ]; then
+      if [ "$INDEX" = 1 ] && d=$(foreign_dir); then
+        import_dir "$d"
+      elif [ "$INDEX" != 1 ] && [ ! -f "$STATE/allow-empty" ]; then
+        fail "hier staat nog geen sleutel (geen kopie ontvangen); RustDesk start niet met een nieuwe sleutel op deze node. Wil je dat toch: touch $STATE/allow-empty"
+      else
+        echo "Nieuw cluster: hbbs maakt een nieuwe sleutel."
+      fi
+    fi
+    fingerprint > "$HASH"
+    date +%s > "$STARTED"
+    rm -f "$UNHEALTHY"
+    exec docker compose -p cf-rustdesk --project-directory "$BASE" -f "$BASE/compose.yaml" up --no-build --remove-orphans
+    ;;
+  down)
+    if any_running; then date +%s > "$STAMP"; fi
+    compose stop
+    rm -f "$HASH"
+    ;;
+  snapshot)
+    snapshot
+    ;;
+  check)
+    systemctl is-active --quiet docker || exit 1
+    systemctl is-failed --quiet cf-rustdesk && exit 1
+    # Zonder sleutel of kopie zou deze node een nieuwe sleutel maken.
+    can_serve || exit 1
+    if has_vip || [ -f "$YIELD" ]; then
+      if peer=$(better_has_vip); then
+        [ -f "$YIELD" ] || log "split-brain: $peer heeft het VIP $VIP ook, deze node geeft het af"
+        date +%s > "$YIELD"
+        exit 1
+      fi
+      rm -f "$YIELD"
+    fi
+    if ! has_vip; then
+      if systemctl is-active --quiet cf-rustdesk; then
+        log "RustDesk draait hier zonder het VIP; stoppen"
+        systemctl stop --no-block cf-rustdesk
+      elif any_running; then
+        log "RustDesk draait hier zonder het VIP en buiten cf-rustdesk.service; stoppen"
+        compose stop >/dev/null 2>&1
+      fi
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    if ! systemctl is-active --quiet cf-rustdesk; then
+      [ -z "$(foreign)" ] && systemctl start --no-block cf-rustdesk
+      exit 0
+    fi
+    started=$(cat "$STARTED" 2>/dev/null || echo 0)
+    if [ $(($(date +%s) - started)) -lt "$GRACE" ]; then
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    if healthy; then
+      rm -f "$UNHEALTHY"
+      admin_password
+      exit 0
+    fi
+    n=$(($(cat "$UNHEALTHY" 2>/dev/null || echo 0) + 1))
+    echo "$n" > "$UNHEALTHY"
+    if [ "$n" -ge 3 ]; then
+      log "RustDesk draait niet of antwoordt niet ($n checks); deze node geeft het VIP af"
+      exit 1
+    fi
+    exit 0
+    ;;
+  master)
+    [ -z "$(foreign)" ] && systemctl start --no-block cf-rustdesk
+    exit 0
+    ;;
+  backup)
+    systemctl stop --no-block cf-rustdesk
+    rm -f "$UNHEALTHY"
+    systemctl reset-failed cf-rustdesk 2>/dev/null
+    exit 0
+    ;;
+  status)
+    status
+    ;;
+  sleutel)
+    pubkey || fail "nog geen sleutel op deze node"
+    ;;
+  pull)
+    docker pull "$SERVER_IMAGE" && docker pull "$API_IMAGE"
+    ;;
+  pulled)
+    docker image inspect "$SERVER_IMAGE" >/dev/null 2>&1 && docker image inspect "$API_IMAGE" >/dev/null 2>&1
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-rustdesk || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    systemctl try-restart cf-rustdesk
+    ;;
+  oude-stoppen)
+    stop_old
+    ;;
+  geen-oude)
+    [ -z "$(foreign)" ] || exit 1
+    for c in $(foreign -a); do
+      [ "$(docker inspect -f '{{"{{"}}.HostConfig.RestartPolicy.Name{{"}}"}}' "$c" 2>/dev/null)" = no ] || exit 1
+    done
+    exit 0
+    ;;
+  overnemen)
+    shift
+    overnemen "$@"
+    ;;
+  *)
+    echo "gebruik: $0 up|down|snapshot|check|master|backup|status|sleutel|pull|pulled|unchanged|restart-if-changed|oude-stoppen|geen-oude|overnemen" >&2
+    exit 2
+    ;;
+esac

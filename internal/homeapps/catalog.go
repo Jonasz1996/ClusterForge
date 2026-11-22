@@ -68,6 +68,7 @@ var Catalog = []Entry{
 	{Slug: "vaultx", Name: "VaultX", Group: GroupSecurity, Icon: "vault.png", Images: []string{"vaultx"}, Templates: []string{"vaultx"}},
 	{Slug: "authentik", Name: "Authentik", Group: GroupSecurity, Icon: "authentik.png", Images: []string{"authentik", "server"}, Templates: []string{"authentik"}, Port: 9000},
 	{Slug: "crowdsec", Name: "CrowdSec", Group: GroupSecurity, Icon: "crowdsec.png", Images: []string{"crowdsec"}},
+	{Slug: "rustdesk", Name: "RustDesk", Group: GroupNetwork, Icon: "rustdesk.png", Images: []string{"rustdesk-api", "rustdesk-server"}, Templates: []string{"rustdesk"}, Port: 21114},
 	{Slug: "npm", Name: "Nginx Proxy Manager", Group: GroupNetwork, Icon: "nginx-proxy-manager.png", Images: []string{"nginx-proxy-manager"}, Templates: []string{"nginx-proxy-manager"}, Port: 81},
 	{Slug: "adguard", Name: "AdGuard Home", Group: GroupNetwork, Icon: "adguard-home.png", Images: []string{"adguardhome"}, Units: []string{"adguardhome", "AdGuardHome"}, Stats: "adguard"},
 	{Slug: "pihole", Name: "Pi-hole", Group: GroupNetwork, Icon: "pi-hole.png", Images: []string{"pihole"}, Units: []string{"pihole-FTL"}},
