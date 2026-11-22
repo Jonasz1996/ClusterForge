@@ -32,7 +32,7 @@ const (
   "decisions": [{"id": 42, "origin": "cscli", "type": "ban", "scope": "Ip", "value": "198.51.100.9", "duration": "-3s", "scenario": "hand"}]}
 ]`
 	csMetrics = `{"acquisition": {"journalctl:journalctl-_SYSTEMD_UNIT=ssh.service": {"reads": 120, "parsed": 118, "unparsed": 2, "pour": 6}},
- "decisions": {"crowdsecurity/ssh-bf": {"crowdsec": {"ban": 1}}, "http:scan": {"CAPI": {"ban": 15000}}, "firehol": {"lists": {"ban": 250}}}}`
+ "decisions": {"crowdsecurity/ssh-bf": {"crowdsec": {"ban": 1}}, "http:scan": {"CAPI": {"ban": 15000}}, "firehol": {"lists": {"ban": 250}}, "cf-list:eigen:7": {"cscli-import": {"ban": 3}}}}`
 	csCollections = `{"collections": [{"name": "crowdsecurity/sshd", "status": "enabled", "local_version": "0.9"}, {"name": "crowdsecurity/linux", "status": "enabled", "local_version": "0.4"}]}`
 	csBouncers    = `[{"name": "cs-firewall-bouncer-1", "ip_address": "127.0.0.1", "type": "crowdsec-firewall-bouncer", "version": "v0.0.31", "valid": true, "last_pull": "2026-11-15T19:02:00Z"}]`
 	csDocker      = `[{"Name": "/cf-npm", "Config": {"Image": "jc21/nginx-proxy-manager:latest"},
@@ -66,7 +66,7 @@ func crowdSecAgent(t *testing.T) (*Agent, *[]string) {
 			return []byte("2026/11/15 version: v1.6.4-debian-pragmatic-amd64-523164f6\nCodename: alphaga\n"), nil
 		case strings.HasPrefix(cmd, "cscli alerts list"):
 			return []byte(csAlerts), nil
-		case cmd == "cscli decisions list -o json":
+		case strings.HasPrefix(cmd, "cscli decisions list -o json"):
 			return []byte(csDecisions), nil
 		case cmd == "cscli metrics -o json":
 			return []byte(csMetrics), nil
@@ -82,6 +82,16 @@ func crowdSecAgent(t *testing.T) (*Agent, *[]string) {
 			return []byte("active\n"), nil
 		case strings.HasPrefix(cmd, "cscli decisions delete"):
 			return []byte("level=info msg=\"2 decision(s) deleted\"\n"), nil
+		case strings.HasPrefix(cmd, "cscli decisions import -i "):
+			f := strings.Fields(cmd)[4]
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Errorf("importbestand: %v", err)
+			}
+			calls = append(calls, "bestand: "+strings.TrimSpace(string(b)))
+			return []byte("Imported\n"), nil
+		case cmd == "cscli console disable --all":
+			return nil, nil
 		case strings.HasPrefix(cmd, "cscli decisions add"):
 			return []byte("Decision successfully added\n"), nil
 		case strings.HasPrefix(cmd, "cscli console enroll"):
@@ -224,5 +234,50 @@ func TestCrowdSecEnroll(t *testing.T) {
 		if res := a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpEnroll, Enroll: &e})); res.Error == "" {
 			t.Errorf("%+v werd aanvaard", e)
 		}
+	}
+}
+
+func TestCrowdSecLists(t *testing.T) {
+	a, calls := crowdSecAgent(t)
+	res := a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpPoll}))
+	if res.Error != "" || res.Poll.Lists["cf-list:eigen:7"] != 3 || len(res.Poll.Lists) != 1 {
+		t.Fatalf("lijsten %+v", res)
+	}
+	res = a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpListImport, List: &protocol.CrowdSecListChunk{
+		Tag: "cf-list:eigen:8", Duration: "168h", Values: []string{"203.0.113.7", "198.51.100.0/24", "2001:db8::/32", "192.0.2.1/32"}}}))
+	if res.Error != "" || res.Count != 4 {
+		t.Fatalf("import %+v", res)
+	}
+	for _, want := range []string{
+		"bestand: 203.0.113.7\n192.0.2.1",
+		"bestand: 198.51.100.0/24\n2001:db8::/32",
+	} {
+		if !slices.Contains(*calls, want) {
+			t.Errorf("mist %q in %v", want, *calls)
+		}
+	}
+	found := false
+	for _, c := range *calls {
+		found = found || (strings.Contains(c, "--scope range --duration 168h --reason cf-list:eigen:8 --type ban"))
+	}
+	if !found {
+		t.Errorf("aanroepen %v", *calls)
+	}
+	res = a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpListDrop, Drop: []string{"cf-list:eigen:7"}}))
+	if res.Error != "" || !slices.Contains(*calls, "cscli decisions delete --origin cscli-import --scenario cf-list:eigen:7") {
+		t.Fatalf("drop %+v %v", res, *calls)
+	}
+	for _, bad := range []protocol.CrowdSecRequest{
+		{Op: protocol.CrowdSecOpListDrop, Drop: []string{"crowdsecurity/ssh-bf"}},
+		{Op: protocol.CrowdSecOpListImport, List: &protocol.CrowdSecListChunk{Tag: "cf-list:eigen:8", Duration: "168h", Values: []string{"1.2.3.4\n5.6.7.8"}}},
+		{Op: protocol.CrowdSecOpListImport, List: &protocol.CrowdSecListChunk{Tag: "manual", Duration: "168h", Values: []string{"1.2.3.4"}}},
+	} {
+		if res := a.handleCrowdSec(csRequest(t, bad)); res.Error == "" {
+			t.Errorf("%+v moet geweigerd worden", bad)
+		}
+	}
+	res = a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpConsoleOff}))
+	if res.Error != "" || !slices.Contains(*calls, "cscli console disable --all") {
+		t.Fatalf("console off %+v", res)
 	}
 }
