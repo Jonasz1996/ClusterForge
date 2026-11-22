@@ -298,6 +298,7 @@ var sampleParams = map[string]map[string]any{
 	"cssthema":            {"vip": "10.0.20.120", "db_vip": "10.0.20.121", "vrid": 61, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"homepage":            {"vip": "10.0.20.130", "db_vip": "10.0.20.131", "vrid": 62, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"docker-ha":           {"vip": "10.0.20.130", "vrid": 62, "auth_pass": "geheim12"},
+	"clusterforge":        {"vip": "10.0.20.130", "db_vip": "10.0.20.131", "vrid": 62, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {
