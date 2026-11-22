@@ -15,6 +15,11 @@ const CrowdSecSince = 28
 // CrowdSec Console aanmeldt (op enroll).
 const CrowdSecEnrollSince = 31
 
+// CrowdSecListsSince is de eerste protocolversie die centrale blocklists van
+// ClusterForge importeert en weghaalt (list_import, list_drop), de Console
+// loskoppelt (console_off) en bij poll de lijsten per tag meldt (fase 47).
+const CrowdSecListsSince = 57
+
 // SubjectCrowdSec draagt de CrowdSec-verzoeken: cf.node.<id>.crowdsec.
 const SubjectCrowdSec = "crowdsec"
 
@@ -37,7 +42,70 @@ const (
 	// (cscli console enroll). De sleutel gaat alleen in dit verzoek mee en
 	// komt niet in een script, log of bestand van ClusterForge.
 	CrowdSecOpEnroll = "enroll"
+	// CrowdSecOpListImport zet één stuk van een centrale lijst op de node
+	// (cscli decisions import, reden = de tag).
+	CrowdSecOpListImport = "list_import"
+	// CrowdSecOpListDrop haalt de bans van de tags in Drop weg.
+	CrowdSecOpListDrop = "list_drop"
+	// CrowdSecOpConsoleOff zet het delen met de CrowdSec Console uit
+	// (cscli console disable --all) en herstart CrowdSec. De community-
+	// blocklist (CAPI) blijft.
+	CrowdSecOpConsoleOff = "console_off"
 )
+
+// MaxCrowdSecListChunk is het grootste aantal waarden per list_import.
+const MaxCrowdSecListChunk = 5000
+
+// CrowdSecListPrefix begint de reden (in CrowdSec: scenario) van elke ban
+// uit een centrale lijst: cf-list:<lijst>:<generatie>.
+const CrowdSecListPrefix = "cf-list:"
+
+var crowdSecListTag = regexp.MustCompile(`^cf-list:[a-z0-9][a-z0-9-]{0,39}:[0-9]{1,15}$`)
+
+// ValidListTag zegt of een tag van een centrale lijst geldig is.
+func ValidListTag(t string) bool { return crowdSecListTag.MatchString(t) }
+
+// CrowdSecListChunk is een stuk van een centrale lijst.
+type CrowdSecListChunk struct {
+	Tag      string   `json:"tag"`
+	Duration string   `json:"duration"`
+	Values   []string `json:"values"`
+}
+
+// Validate controleert een stuk; de waarden gaan naar een bestand voor
+// cscli, de tag en de duur als argumenten.
+func (c CrowdSecListChunk) Validate() error {
+	if !ValidListTag(c.Tag) {
+		return fmt.Errorf("ongeldige lijst-tag %q", c.Tag)
+	}
+	if !crowdSecDuration.MatchString(c.Duration) {
+		return fmt.Errorf("ongeldige duur %q", c.Duration)
+	}
+	if len(c.Values) == 0 || len(c.Values) > MaxCrowdSecListChunk {
+		return fmt.Errorf("een stuk heeft 1 tot %d waarden", MaxCrowdSecListChunk)
+	}
+	for _, v := range c.Values {
+		if _, _, err := ListValue(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListValue leest een IP of range; scope is ip of range.
+func ListValue(v string) (scope, norm string, err error) {
+	if a, err := netip.ParseAddr(v); err == nil && a.Zone() == "" {
+		return "ip", a.String(), nil
+	}
+	if p, err := netip.ParsePrefix(v); err == nil {
+		p = p.Masked()
+		if p.IsSingleIP() {
+			return "ip", p.Addr().String(), nil
+		}
+		return "range", p.String(), nil
+	}
+	return "", "", fmt.Errorf("ongeldig IP-adres of range %q", v)
+}
 
 // CrowdSecRequestTimeout is hoe lang een CrowdSec-verzoek mag duren.
 const CrowdSecRequestTimeout = 60 * time.Second
@@ -60,9 +128,12 @@ type CrowdSecRequest struct {
 	// bestaan, zoals /var/www/*/data/nextcloud.log.
 	Probes []string `json:"probes,omitempty"`
 	// Since hoort bij poll; nul is het afgelopen uur.
-	Since  time.Time         `json:"since,omitzero"`
-	Decide *CrowdSecDecision `json:"decide,omitempty"`
-	Enroll *CrowdSecEnroll   `json:"enroll,omitempty"`
+	Since  time.Time          `json:"since,omitzero"`
+	Decide *CrowdSecDecision  `json:"decide,omitempty"`
+	Enroll *CrowdSecEnroll    `json:"enroll,omitempty"`
+	List   *CrowdSecListChunk `json:"list,omitempty"`
+	// Drop hoort bij list_drop: de tags die weg moeten.
+	Drop []string `json:"drop,omitempty"`
 }
 
 // CrowdSecEnroll meldt een node aan bij de CrowdSec Console.
@@ -224,6 +295,9 @@ type CrowdSecPoll struct {
 	// Blocklist is het aantal bans uit de community-blocklist en lijsten,
 	// of -1 als het niet te zien is.
 	Blocklist int `json:"blocklist"`
+	// Lists is het aantal actieve bans per tag van een centrale lijst
+	// (protocol 57); nil als het niet te zien is.
+	Lists map[string]int `json:"lists,omitempty"`
 }
 
 type CrowdSecAlert struct {

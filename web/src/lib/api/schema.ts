@@ -4601,6 +4601,217 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/crowdsec/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Centrale blocklists (fase 47) met hun stand op de nodes, en de catalogus met publieke lijsten */
+        get: operations["listCrowdSecLists"];
+        put?: never;
+        /**
+         * Publieke lijst aanzetten - uit de catalogus of een eigen https-URL (admin)
+         * @description De lijst wordt bij de volgende ronde (meteen) opgehaald en naar de nodes gebracht. Privé-, multicast- en eigen
+         *     netwerken laat ClusterForge altijd weg.
+         */
+        post: operations["addCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een publieke lijst ophalen zonder te bewaren - aantal en wat wegvalt (admin) */
+        post: operations["previewCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Lijst aan/uit, naam, bereik of verversing (admin) */
+        put: operations["updateCrowdSecList"];
+        post?: never;
+        /** Publieke lijst weghalen; de nodes verliezen de bans bij de volgende ronde (admin) */
+        delete: operations["deleteCrowdSecList"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        /** Waarden van een lijst, nieuwste eerst */
+        get: operations["listCrowdSecListEntries"];
+        put?: never;
+        /** Waarden toevoegen of weghalen in de eigen of de automatische lijst; dry_run geeft het voorbeeld (admin) */
+        post: operations["changeCrowdSecListEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publieke lijst nu ophalen; zet een vastgezette lijst weer op automatisch (admin) */
+        post: operations["refreshCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        /** Bewaarde versies van een lijst, nieuwste eerst */
+        get: operations["listCrowdSecListVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lijst terugdraaien naar een versie; dry_run geeft het voorbeeld (admin) */
+        post: operations["rollbackCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/auto-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Regels voor automatisch blokkeren over alle nodes (admin) */
+        put: operations["updateCrowdSecAutoRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Meldingen en kanalen (ntfy, Discord, Slack, Telegram, webhook) (admin)
+         * @description Adressen en tokens worden versleuteld bewaard en nooit teruggegeven; leeg bij een bestaand kanaal houdt ze.
+         */
+        put: operations["updateCrowdSecNotify"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/notify/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Testmelding naar alle kanalen (admin) */
+        post: operations["testCrowdSecNotify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/console/off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * CrowdSec Console loskoppelen (on) of weer toelaten (admin)
+         * @description Loskoppelen haalt de enroll-sleutel weg en zet op elke node het delen met de Console uit (agent protocol 57).
+         *     Detectie, bans en de community-blocklist blijven lokaal werken.
+         */
+        put: operations["setCrowdSecConsoleOff"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve-hosts": {
         parameters: {
             query?: never;
@@ -15548,6 +15759,10 @@ export interface components {
             console_key_set: boolean;
             /** @description De server heeft een masterkey om de sleutel te bewaren */
             console_available: boolean;
+            auto_rules: components["schemas"]["CrowdSecAutoRules"];
+            notify: components["schemas"]["CrowdSecNotify"];
+            /** @description Het delen met de CrowdSec Console staat uit (fase 47) */
+            console_off: boolean;
         };
         CrowdSecConsoleKeyInput: {
             /** @description Leeg haalt de sleutel weg */
@@ -15592,11 +15807,201 @@ export interface components {
             node_ids?: string[];
             /** Format: uuid */
             cluster_id?: string;
+            /** @description Ook in de eigen blocklist (blijft, ook op nieuwe nodes) */
+            central?: boolean;
+            /** @description Met central - zonder einddatum */
+            permanent?: boolean;
         };
         CrowdSecBanResult: {
             count: number;
             nodes: string[];
             errors: string[];
+        };
+        CrowdSecAutoRules: {
+            enabled: boolean;
+            /** @description IP met alerts op zoveel nodes (0 is uit) */
+            multi_nodes: number;
+            multi_window_minutes: number;
+            /** @description IP met zoveel alerts (0 is uit) */
+            repeat_alerts: number;
+            repeat_window_hours: number;
+            duration_hours: number;
+            /** @description Duur verdubbelt bij elke herhaling */
+            escalate: boolean;
+            max_hours: number;
+        };
+        CrowdSecNotifyChannel: {
+            id: string;
+            /** @enum {string} */
+            kind: "ntfy" | "discord" | "slack" | "telegram" | "webhook";
+            name: string;
+            /** @description Adres zonder geheim deel */
+            target: string;
+        };
+        CrowdSecNotify: {
+            channels: components["schemas"]["CrowdSecNotifyChannel"][];
+            auto_block: boolean;
+            new_alerts: boolean;
+            /** @description Zoveel alerts in 10 minuten (0 is uit) */
+            alert_burst: number;
+            node_problems: boolean;
+            list_problems: boolean;
+            manual_bans: boolean;
+        };
+        CrowdSecNotifyChannelInput: {
+            id?: string;
+            /** @enum {string} */
+            kind: "ntfy" | "discord" | "slack" | "telegram" | "webhook";
+            name?: string;
+            /** @description Adres (Telegram: chat-id); leeg bij een bestaand kanaal houdt het */
+            url?: string;
+            /** @description ntfy/webhook: bearer-token; Telegram: bot-token */
+            token?: string;
+        };
+        CrowdSecNotifyInput: {
+            channels: components["schemas"]["CrowdSecNotifyChannelInput"][];
+            auto_block: boolean;
+            new_alerts: boolean;
+            alert_burst: number;
+            node_problems: boolean;
+            list_problems: boolean;
+            manual_bans: boolean;
+        };
+        CrowdSecNotifyTest: {
+            /** @description Kanaal → fout (leeg is gelukt) */
+            results: {
+                [key: string]: string;
+            };
+        };
+        CrowdSecConsoleOffInput: {
+            on: boolean;
+        };
+        CrowdSecNodeError: {
+            hostname: string;
+            error: string;
+        };
+        CrowdSecList: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @enum {string} */
+            kind: "own" | "auto" | "public";
+            name: string;
+            source: string;
+            url: string;
+            enabled: boolean;
+            /** @enum {string} */
+            scope: "all" | "cluster";
+            /** Format: uuid */
+            cluster_id: string | null;
+            refresh_minutes: number;
+            /** @description Teruggedraaid; haalt niet vanzelf op */
+            pinned: boolean;
+            /** Format: int64 */
+            generation: number;
+            /** @description Waarden die echt op de nodes komen */
+            count: number;
+            /** @description Weggelaten (whitelist, eigen of speciaal netwerk) */
+            dropped: number;
+            /** Format: date-time */
+            fetched_at: string | null;
+            fetch_error: string;
+            /** Format: date-time */
+            fetch_failed_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+            info: string;
+            nodes_wanted: number;
+            nodes_synced: number;
+            failed: components["schemas"]["CrowdSecNodeError"][];
+        };
+        CrowdSecPublicSource: {
+            key: string;
+            name: string;
+            url: string;
+            info: string;
+            default_minutes: number;
+            min_minutes: number;
+            format: string;
+        };
+        CrowdSecLists: {
+            items: components["schemas"]["CrowdSecList"][];
+            catalog: components["schemas"]["CrowdSecPublicSource"][];
+        };
+        CrowdSecListInput: {
+            /** @description Sleutel uit de catalogus of custom */
+            source?: string;
+            url?: string;
+            name?: string;
+            enabled?: boolean;
+            /** @enum {string} */
+            scope?: "all" | "cluster";
+            /** Format: uuid */
+            cluster_id?: string;
+            refresh_minutes?: number;
+        };
+        CrowdSecListEntry: {
+            value: string;
+            reason: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            added_by: string;
+        };
+        CrowdSecListEntries: {
+            items: components["schemas"]["CrowdSecListEntry"][];
+            total: number;
+        };
+        CrowdSecListEntryInput: {
+            value: string;
+            reason?: string;
+            /** @description 0 of leeg is nooit */
+            expires_hours?: number;
+        };
+        CrowdSecListEntriesInput: {
+            add?: components["schemas"]["CrowdSecListEntryInput"][];
+            remove?: string[];
+            dry_run?: boolean;
+        };
+        CrowdSecDropped: {
+            value: string;
+            why: string;
+        };
+        CrowdSecListDiff: {
+            /** @description Hoogstens 50 */
+            added: string[];
+            removed: string[];
+            updated: string[];
+            refused: components["schemas"]["CrowdSecDropped"][];
+            added_count: number;
+            removed_count: number;
+            updated_count: number;
+            refused_count: number;
+            count: number;
+            nodes: number;
+            applied: boolean;
+            /** Format: int64 */
+            version_id?: number;
+        };
+        CrowdSecListVersion: {
+            /** Format: int64 */
+            id: number;
+            count: number;
+            added: number;
+            removed: number;
+            note: string;
+            actor: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CrowdSecListVersions: {
+            items: components["schemas"]["CrowdSecListVersion"][];
+        };
+        CrowdSecRollbackInput: {
+            /** Format: int64 */
+            version_id: number;
+            dry_run?: boolean;
         };
         CrowdSecProfile: {
             key: string;
@@ -15892,6 +16297,8 @@ export interface components {
             console_error: string;
             /** Format: date-time */
             console_failed_at: string | null;
+            /** @description Het delen met de Console is op deze node uitgezet */
+            console_off_done: boolean;
         };
         CrowdSecAlert: {
             /** Format: int64 */
@@ -23613,6 +24020,386 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecLists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecLists"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    addCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    previewCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecListEntries: {
+        parameters: {
+            query?: {
+                q?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListEntries"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    changeCrowdSecListEntries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListEntriesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    refreshCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecListVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListVersions"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    rollbackCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecRollbackInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecAutoRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecAutoRules"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecNotifyInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    testCrowdSecNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecNotifyTest"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setCrowdSecConsoleOff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecConsoleOffInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listPveHosts: {

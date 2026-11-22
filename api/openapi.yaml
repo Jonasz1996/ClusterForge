@@ -4943,6 +4943,253 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists:
+    get:
+      operationId: listCrowdSecLists
+      summary: Centrale blocklists (fase 47) met hun stand op de nodes, en de catalogus met publieke lijsten
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecLists" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addCrowdSecList
+      summary: Publieke lijst aanzetten - uit de catalogus of een eigen https-URL (admin)
+      description: |
+        De lijst wordt bij de volgende ronde (meteen) opgehaald en naar de nodes gebracht. Privé-, multicast- en eigen
+        netwerken laat ClusterForge altijd weg.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecListInput" }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists/preview:
+    post:
+      operationId: previewCrowdSecList
+      summary: Een publieke lijst ophalen zonder te bewaren - aantal en wat wegvalt (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecListInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecListDiff" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists/{listId}:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateCrowdSecList
+      summary: Lijst aan/uit, naam, bereik of verversing (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecListInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteCrowdSecList
+      summary: Publieke lijst weghalen; de nodes verliezen de bans bij de volgende ronde (admin)
+      responses:
+        "204": { description: Weg }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists/{listId}/entries:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listCrowdSecListEntries
+      summary: Waarden van een lijst, nieuwste eerst
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecListEntries" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: changeCrowdSecListEntries
+      summary: Waarden toevoegen of weghalen in de eigen of de automatische lijst; dry_run geeft het voorbeeld (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecListEntriesInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecListDiff" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists/{listId}/refresh:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: refreshCrowdSecList
+      summary: Publieke lijst nu ophalen; zet een vastgezette lijst weer op automatisch (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecListDiff" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists/{listId}/versions:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listCrowdSecListVersions
+      summary: Bewaarde versies van een lijst, nieuwste eerst
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecListVersions" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/lists/{listId}/rollback:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rollbackCrowdSecList
+      summary: Lijst terugdraaien naar een versie; dry_run geeft het voorbeeld (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecRollbackInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecListDiff" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/auto-rules:
+    put:
+      operationId: updateCrowdSecAutoRules
+      summary: Regels voor automatisch blokkeren over alle nodes (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecAutoRules" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/notify:
+    put:
+      operationId: updateCrowdSecNotify
+      summary: Meldingen en kanalen (ntfy, Discord, Slack, Telegram, webhook) (admin)
+      description: |
+        Adressen en tokens worden versleuteld bewaard en nooit teruggegeven; leeg bij een bestaand kanaal houdt ze.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecNotifyInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/notify/test:
+    post:
+      operationId: testCrowdSecNotify
+      summary: Testmelding naar alle kanalen (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecNotifyTest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /crowdsec/console/off:
+    put:
+      operationId: setCrowdSecConsoleOff
+      summary: CrowdSec Console loskoppelen (on) of weer toelaten (admin)
+      description: |
+        Loskoppelen haalt de enroll-sleutel weg en zet op elke node het delen met de Console uit (agent protocol 57).
+        Detectie, bans en de community-blocklist blijven lokaal werken.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecConsoleOffInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve-hosts:
     get:
       operationId: listPveHosts
@@ -16230,7 +16477,8 @@ components:
         health_error: { type: string }
     CrowdSecSettings:
       type: object
-      required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available]
+      required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available, auto_rules, notify,
+        console_off]
       properties:
         auto_apply: { type: boolean }
         bouncer_default: { type: boolean }
@@ -16239,6 +16487,9 @@ components:
         updated_at: { type: string, format: date-time }
         console_key_set: { type: boolean, description: Er is een enroll-sleutel voor de CrowdSec Console }
         console_available: { type: boolean, description: De server heeft een masterkey om de sleutel te bewaren }
+        auto_rules: { $ref: "#/components/schemas/CrowdSecAutoRules" }
+        notify: { $ref: "#/components/schemas/CrowdSecNotify" }
+        console_off: { type: boolean, description: Het delen met de CrowdSec Console staat uit (fase 47) }
     CrowdSecConsoleKeyInput:
       type: object
       required: [key]
@@ -16288,6 +16539,8 @@ components:
         reason: { type: string }
         node_ids: { type: array, items: { type: string, format: uuid } }
         cluster_id: { type: string, format: uuid }
+        central: { type: boolean, description: "Ook in de eigen blocklist (blijft, ook op nieuwe nodes)" }
+        permanent: { type: boolean, description: Met central - zonder einddatum }
     CrowdSecBanResult:
       type: object
       required: [count, nodes, errors]
@@ -16295,6 +16548,199 @@ components:
         count: { type: integer }
         nodes: { type: array, items: { type: string } }
         errors: { type: array, items: { type: string } }
+    CrowdSecAutoRules:
+      type: object
+      required: [enabled, multi_nodes, multi_window_minutes, repeat_alerts, repeat_window_hours, duration_hours, escalate, max_hours]
+      properties:
+        enabled: { type: boolean }
+        multi_nodes: { type: integer, description: IP met alerts op zoveel nodes (0 is uit) }
+        multi_window_minutes: { type: integer }
+        repeat_alerts: { type: integer, description: IP met zoveel alerts (0 is uit) }
+        repeat_window_hours: { type: integer }
+        duration_hours: { type: integer }
+        escalate: { type: boolean, description: Duur verdubbelt bij elke herhaling }
+        max_hours: { type: integer }
+    CrowdSecNotifyChannel:
+      type: object
+      required: [id, kind, name, target]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [ntfy, discord, slack, telegram, webhook] }
+        name: { type: string }
+        target: { type: string, description: Adres zonder geheim deel }
+    CrowdSecNotify:
+      type: object
+      required: [channels, auto_block, new_alerts, alert_burst, node_problems, list_problems, manual_bans]
+      properties:
+        channels: { type: array, items: { $ref: "#/components/schemas/CrowdSecNotifyChannel" } }
+        auto_block: { type: boolean }
+        new_alerts: { type: boolean }
+        alert_burst: { type: integer, description: Zoveel alerts in 10 minuten (0 is uit) }
+        node_problems: { type: boolean }
+        list_problems: { type: boolean }
+        manual_bans: { type: boolean }
+    CrowdSecNotifyChannelInput:
+      type: object
+      required: [kind]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [ntfy, discord, slack, telegram, webhook] }
+        name: { type: string }
+        url: { type: string, description: "Adres (Telegram: chat-id); leeg bij een bestaand kanaal houdt het" }
+        token: { type: string, description: "ntfy/webhook: bearer-token; Telegram: bot-token" }
+    CrowdSecNotifyInput:
+      type: object
+      required: [channels, auto_block, new_alerts, alert_burst, node_problems, list_problems, manual_bans]
+      properties:
+        channels: { type: array, items: { $ref: "#/components/schemas/CrowdSecNotifyChannelInput" } }
+        auto_block: { type: boolean }
+        new_alerts: { type: boolean }
+        alert_burst: { type: integer }
+        node_problems: { type: boolean }
+        list_problems: { type: boolean }
+        manual_bans: { type: boolean }
+    CrowdSecNotifyTest:
+      type: object
+      required: [results]
+      properties:
+        results: { type: object, additionalProperties: { type: string }, description: Kanaal → fout (leeg is gelukt) }
+    CrowdSecConsoleOffInput:
+      type: object
+      required: ["on"]
+      properties:
+        "on": { type: boolean }
+    CrowdSecNodeError:
+      type: object
+      required: [hostname, error]
+      properties:
+        hostname: { type: string }
+        error: { type: string }
+    CrowdSecList:
+      type: object
+      required: [id, slug, kind, name, source, url, enabled, scope, cluster_id, refresh_minutes, pinned, generation, count, dropped,
+        fetched_at, fetch_error, fetch_failed_at, updated_at, info, nodes_wanted, nodes_synced, failed]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        kind: { type: string, enum: [own, auto, public] }
+        name: { type: string }
+        source: { type: string }
+        url: { type: string }
+        enabled: { type: boolean }
+        scope: { type: string, enum: [all, cluster] }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        refresh_minutes: { type: integer }
+        pinned: { type: boolean, description: Teruggedraaid; haalt niet vanzelf op }
+        generation: { type: integer, format: int64 }
+        count: { type: integer, description: Waarden die echt op de nodes komen }
+        dropped: { type: integer, description: "Weggelaten (whitelist, eigen of speciaal netwerk)" }
+        fetched_at: { type: string, format: date-time, nullable: true }
+        fetch_error: { type: string }
+        fetch_failed_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
+        info: { type: string }
+        nodes_wanted: { type: integer }
+        nodes_synced: { type: integer }
+        failed: { type: array, items: { $ref: "#/components/schemas/CrowdSecNodeError" } }
+    CrowdSecPublicSource:
+      type: object
+      required: [key, name, url, info, default_minutes, min_minutes, format]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        url: { type: string }
+        info: { type: string }
+        default_minutes: { type: integer }
+        min_minutes: { type: integer }
+        format: { type: string }
+    CrowdSecLists:
+      type: object
+      required: [items, catalog]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/CrowdSecList" } }
+        catalog: { type: array, items: { $ref: "#/components/schemas/CrowdSecPublicSource" } }
+    CrowdSecListInput:
+      type: object
+      properties:
+        source: { type: string, description: Sleutel uit de catalogus of custom }
+        url: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        scope: { type: string, enum: [all, cluster] }
+        cluster_id: { type: string, format: uuid }
+        refresh_minutes: { type: integer }
+    CrowdSecListEntry:
+      type: object
+      required: [value, reason, expires_at, created_at, added_by]
+      properties:
+        value: { type: string }
+        reason: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        added_by: { type: string }
+    CrowdSecListEntries:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/CrowdSecListEntry" } }
+        total: { type: integer }
+    CrowdSecListEntryInput:
+      type: object
+      required: [value]
+      properties:
+        value: { type: string }
+        reason: { type: string }
+        expires_hours: { type: integer, description: 0 of leeg is nooit }
+    CrowdSecListEntriesInput:
+      type: object
+      properties:
+        add: { type: array, items: { $ref: "#/components/schemas/CrowdSecListEntryInput" } }
+        remove: { type: array, items: { type: string } }
+        dry_run: { type: boolean }
+    CrowdSecDropped:
+      type: object
+      required: [value, why]
+      properties:
+        value: { type: string }
+        why: { type: string }
+    CrowdSecListDiff:
+      type: object
+      required: [added, removed, updated, refused, added_count, removed_count, updated_count, refused_count, count, nodes, applied]
+      properties:
+        added: { type: array, items: { type: string }, description: Hoogstens 50 }
+        removed: { type: array, items: { type: string } }
+        updated: { type: array, items: { type: string } }
+        refused: { type: array, items: { $ref: "#/components/schemas/CrowdSecDropped" } }
+        added_count: { type: integer }
+        removed_count: { type: integer }
+        updated_count: { type: integer }
+        refused_count: { type: integer }
+        count: { type: integer }
+        nodes: { type: integer }
+        applied: { type: boolean }
+        version_id: { type: integer, format: int64 }
+    CrowdSecListVersion:
+      type: object
+      required: [id, count, added, removed, note, actor, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        count: { type: integer }
+        added: { type: integer }
+        removed: { type: integer }
+        note: { type: string }
+        actor: { type: string }
+        created_at: { type: string, format: date-time }
+    CrowdSecListVersions:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/CrowdSecListVersion" } }
+    CrowdSecRollbackInput:
+      type: object
+      required: [version_id]
+      properties:
+        version_id: { type: integer, format: int64 }
+        dry_run: { type: boolean }
     CrowdSecProfile:
       type: object
       required: [key, name, origin]
@@ -16572,7 +17018,7 @@ components:
       required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, cluster_template, online,
         protocol, supported, enabled, managed, bouncer, extra_profiles, disabled_profiles, status, status_at, plan,
         plan_hash, applied_hash, applied_at, apply_job_id, apply_running, apply_error, apply_failed_at, blocklist, poll_at,
-        poll_error, console_enrolled, console_enrolled_at, console_error, console_failed_at]
+        poll_error, console_enrolled, console_enrolled_at, console_error, console_failed_at, console_off_done]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -16610,6 +17056,7 @@ components:
         console_enrolled_at: { type: string, format: date-time, nullable: true }
         console_error: { type: string }
         console_failed_at: { type: string, format: date-time, nullable: true }
+        console_off_done: { type: boolean, description: Het delen met de Console is op deze node uitgezet }
     CrowdSecAlert:
       type: object
       required: [id, node_id, hostname, cluster_id, cluster_name, scenario, message, scope, value, country, as, events,
