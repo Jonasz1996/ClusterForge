@@ -169,8 +169,8 @@ export function Sidebar({
                 className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-sm font-semibold"
               >
                 <GroupIcon id={g.id} />
-                <span className="truncate">{g.label}</span>
-                {!open && <span className="ml-auto">{badge(count > 0 ? { count, tone } : undefined)}</span>}
+                <span className="min-w-0 leading-tight">{g.label}</span>
+                {!open && <span className="ml-auto shrink-0">{badge(count > 0 ? { count, tone } : undefined)}</span>}
               </Link>
               <button
                 type="button"
