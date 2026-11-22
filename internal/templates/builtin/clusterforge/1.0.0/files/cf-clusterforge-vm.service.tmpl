@@ -1,0 +1,16 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# VictoriaMetrics van ClusterForge, op elke node.
+[Unit]
+Description=VictoriaMetrics van ClusterForge ({{ .cluster.slug }})
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+ExecStart=/usr/bin/docker compose -p cf-clusterforge-vm --project-directory /opt/cf-clusterforge -f /opt/cf-clusterforge/vm.yaml up --no-build --remove-orphans
+ExecStop=/usr/bin/docker compose -p cf-clusterforge-vm --project-directory /opt/cf-clusterforge -f /opt/cf-clusterforge/vm.yaml stop
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

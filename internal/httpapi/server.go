@@ -59,6 +59,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/security"
+	"github.com/Jonasz1996/clusterforge/internal/selfhost"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -109,6 +110,7 @@ type Server struct {
 	version      string
 	upgrades     *agentupgrade.Service
 	agentConf    *agentconf.Service
+	selfHost     *selfhost.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	disk         *diskwatch.Service
@@ -204,6 +206,8 @@ type Deps struct {
 	Upgrades *agentupgrade.Service
 	// AgentConf bepaalt het adres voor agents en zet agents om.
 	AgentConf *agentconf.Service
+	// SelfHost: ClusterForge zelf bijwerken en verhuizen (fase 45).
+	SelfHost *selfhost.Service
 	// Updates en Commands werken de nodes bij en draaien eigen commando's
 	// (fase 10).
 	Updates  *updates.Service
@@ -273,6 +277,7 @@ func New(d Deps) *Server {
 		version:      d.Version,
 		upgrades:     d.Upgrades,
 		agentConf:    d.AgentConf,
+		selfHost:     d.SelfHost,
 		updates:      d.Updates,
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
@@ -344,6 +349,11 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Get("/aiverslag/{node}/api", s.aivGet)
 		api.With(s.requireSession).Post("/aiverslag/{node}/call", s.aivCall)
 		api.With(s.requireSession).Post("/aiverslag/{node}/install", s.aivInstall)
+		// ClusterForge zelf (fase 45), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/self", s.selfInfo)
+		api.With(s.requireSession).Post("/self/check-image", s.selfCheckImage)
+		api.With(s.requireSession).Post("/self/update", s.selfUpdate)
+		api.With(s.requireSession).Post("/self/move", s.selfMove)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},
@@ -372,6 +382,9 @@ func (s *Server) Handler() http.Handler {
 	r.Route(dashboardV2Base, func(api chi.Router) {
 		s.dashboardV2Routes(api)
 	})
+	// De nieuwe VIP-node haalt hier bij een verhuizing (fase 45) de dump en
+	// de hoofdsleutel, met de eenmalige sleutel van de taak.
+	r.Get("/selfexport/{token}/{what}", s.selfExport)
 	r.Get("/install/agent.sh", agentdist.InstallScript)
 	r.Get("/install/golden-image.sh", agentdist.GoldenImageScript)
 	r.Get("/install/ct-template.sh", agentdist.CTTemplateScript)

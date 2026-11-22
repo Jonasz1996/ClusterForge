@@ -53,12 +53,19 @@ services:
       CF_SANDBOX_BOOT_TIMEOUT: ${CF_SANDBOX_BOOT_TIMEOUT:-}
       CF_JOURNAL_SSH_LOGINS: ${CF_JOURNAL_SSH_LOGINS:-}
       CF_DOCS_USERNAMES: ${CF_DOCS_USERNAMES:-}
+      # Het eigen image: Instellingen → ClusterForge zelf toont het en
+      # bijwerken kiest de tag ernaast (fase 45).
+      CF_IMAGE: ${CF_IMAGE:-}
       # Het testvenster rekent op deze klok, met zomer- en wintertijd.
       TZ: ${TZ:-Europe/Brussels}
     volumes:
       # Gedeeld met de scannercontainer: daar zet "Scannercontainer koppelen"
       # het aanmeldbestand.
       - scanner:/var/lib/clusterforge/scanner
+      # Verhuizen naar het eigen cluster (fase 45): de agent op de host zet
+      # hier de dump; de server geeft hem (alleen lezen) aan de nieuwe
+      # VIP-node met de eenmalige sleutel van de taak.
+      - ${CF_EXPORT_DIR:-/var/lib/clusterforge-export}:/var/lib/clusterforge/export:ro
     ports:
       - "${CF_BIND:-127.0.0.1}:8080:8080"
       # Agents verbinden hier rechtstreeks mee (TLS), niet via de reverse proxy.

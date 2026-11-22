@@ -768,6 +768,18 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Agents vanzelf bijwerken aangezet op cluster " + name
 		}
 		return "Agents vanzelf bijwerken uitgezet op cluster " + name
+	case "clusterforge.update_started":
+		return "ClusterForge bijwerken naar " + str(p, "image") + " gestart (nu " + or(str(p, "from_version"), "?") + ")"
+	case "clusterforge.updated":
+		return "ClusterForge bijgewerkt naar " + str(p, "image") + " (versie " + or(str(p, "version"), "?") + ", was " + or(str(p, "from_version"), "?") + ")"
+	case "clusterforge.update_failed":
+		return "ClusterForge bijwerken naar " + str(p, "image") + " mislukt" + colon(str(p, "error"))
+	case "clusterforge.move_started":
+		return "ClusterForge verhuizen naar cluster " + or(str(p, "cluster"), "?") + " gestart"
+	case "clusterforge.moved":
+		return "ClusterForge verhuisd naar het eigen cluster, VIP " + str(p, "vip")
+	case "clusterforge.move_failed":
+		return "ClusterForge verhuizen mislukt" + colon(str(p, "error"))
 	case "settings.agent_endpoints":
 		return "Adres voor agents gewijzigd: server " + or(str(p, "server_url"), "standaard") + ", NATS " + or(str(p, "nats_url"), "standaard")
 	case "node.agent_reconfigured":

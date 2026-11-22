@@ -1,0 +1,15 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# VictoriaMetrics draait op elke node (cf-clusterforge-vm). De server op de
+# VIP-node schrijft naar alle nodes en leest van zijn eigen node. Geen login:
+# open poort 8428 alleen tussen de nodes (en naar Grafana).
+services:
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.153.0
+    container_name: cf-clusterforge-vm
+    restart: "no"
+    network_mode: host
+    command: ["-retentionPeriod={{ .params.vm_retention }}", "-httpListenAddr=:8428", "-storageDataPath=/victoria-metrics-data"]
+    volumes:
+      - /var/lib/cf-clusterforge/vm:/victoria-metrics-data

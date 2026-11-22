@@ -1,0 +1,534 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# ClusterForge zelf als cluster. De server (met NATS en de scanner) draait
+# alleen op de node met het VIP ({{ .params.vip }}); PostgreSQL (Patroni) en
+# VictoriaMetrics draaien op elke node. De hoofdsleutel, het image en de
+# instellingen van de oude server staan in /etc/cf-clusterforge; de VIP-node
+# zet een kopie in $OUT en de sync "ClusterForge-sleutel en instellingen"
+# brengt die naar de andere nodes.
+#
+#   clusterforge-ctl.sh up | down        server starten of stoppen (via cf-clusterforge)
+#   clusterforge-ctl.sh check            keepalived: mag deze node het VIP hebben?
+#   clusterforge-ctl.sh master | backup  keepalived: deze node kreeg of verloor het VIP
+#   clusterforge-ctl.sh snapshot         de kopie voor de sync maken (alleen op de VIP-node)
+#   clusterforge-ctl.sh status | rol     wat er op deze node staat
+#   clusterforge-ctl.sh overnemen <url> <sleutel> [--zonder-metrics]
+#                                        de oude server overnemen (de taak
+#                                        Verhuizen doet dit op de VIP-node)
+#   clusterforge-ctl.sh ontvang <url> <sleutel>
+#                                        hoofdsleutel en instellingen ophalen
+#                                        (de taak Verhuizen, op de andere nodes)
+#   clusterforge-ctl.sh pull <image>     image vooraf halen
+#   clusterforge-ctl.sh set-image <image>
+#                                        image zetten op een node zonder server
+#   clusterforge-ctl.sh bijwerken <image> [<seconden>]
+#                                        op de VIP-node: back-up, nieuw image,
+#                                        herstarten, gezond? anders terug
+set -u
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+# CF_CF_* zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_CF_BASE:-/opt/cf-clusterforge}
+ETC=${CF_CF_ETC:-/etc/cf-clusterforge}
+STATE=${CF_CF_STATE:-/var/lib/cf-clusterforge}
+BACKUPS=${CF_CF_BACKUPS:-/var/backups/cf-clusterforge}
+OUT=$STATE/outgoing
+IN=$STATE/incoming
+SCAN=$STATE/scanner
+KEY=$ETC/master.key
+IMG=$ETC/image.env
+OLDENV=$ETC/overgenomen.env
+SRVENV=$ETC/server.env
+STAMP=$STATE/stamp
+STARTED=$STATE/started
+UNHEALTHY=$STATE/unhealthy
+YIELD=$STATE/yielded
+HASH=${CF_CF_HASH:-/run/cf-clusterforge.hash}
+UPDATING=${CF_CF_UPDATING:-/run/cf-clusterforge-bijwerken}
+GRACE=300
+VIP='{{ .params.vip }}'
+INDEX='{{ .node.index }}'
+IFACE='{{ .node.interface }}'
+SCANNER='{{ if .params.scanner }}1{{ end }}'
+PEERS='{{ range .peers }}{{ .address }} {{ end }}'
+BETTER='{{ range .peers }}{{ if lt .index $.node.index }}{{ .address }} {{ end }}{{ end }}'
+# De server draait als nonroot (65532) in het image.
+UID_SERVER=65532
+
+say() { echo "== $*"; }
+warn() { echo "WAARSCHUWING: $*" >&2; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+log() { logger -t cf-clusterforge "$*" 2>/dev/null; echo "$*" >&2; }
+when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
+field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+envval() { sed -n "s/^$1=//p" "$2" 2>/dev/null | tail -n 1; }
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+image() { envval CF_IMAGE "$IMG"; }
+compose() { docker compose -p cf-clusterforge --project-directory "$BASE" -f "$BASE/compose.yaml" --env-file "$IMG" "$@"; }
+running() { [ "$(docker inspect -f '{{"{{"}}.State.Running{{"}}"}}' cf-clusterforge-server 2>/dev/null)" = true ]; }
+dburl() { envval CF_DATABASE_URL "$ETC/base.env"; }
+# De nieuwste pg_dump/pg_restore/psql (van Patroni), anders die uit het pad.
+pgbin() {
+  for d in $(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -t/ -k5 -n -r); do
+    [ -x "$d/$1" ] && { echo "$d/$1"; return 0; }
+  done
+  command -v "$1"
+}
+pg() { PGCONNECT_TIMEOUT=10 "$(pgbin psql)" -X -q -At -v ON_ERROR_STOP=1 "$(dburl)" "$@"; }
+schema() { pg -c "SELECT coalesce(max(version_id), 0) FROM goose_db_version WHERE is_applied" 2>/dev/null | tr -d '[:space:]'; }
+db_tables() { pg -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"; }
+# Kan deze node de server draaien? Met hoofdsleutel en image, of met een
+# ontvangen kopie.
+can_serve() { { [ -s "$KEY" ] && [ -s "$IMG" ]; } || [ -f "$IN/MANIFEST" ]; }
+healthy() { curl -fsS -m 4 -o /dev/null "http://127.0.0.1:8080/api/v1/health" 2>/dev/null; }
+
+better_has_vip() {
+  [ -n "$BETTER" ] || return 1
+  macs=$(arping -D -c 2 -w 3 -I "$IFACE" "$VIP" 2>/dev/null |
+    sed -n 's/.*\[\([0-9A-Fa-f:]*\)\].*/\1/p' | tr 'A-F' 'a-f')
+  [ -n "$macs" ] || return 1
+  for p in $BETTER; do
+    ping -c 1 -W 1 "$p" >/dev/null 2>&1
+    mac=$(ip neigh show "$p" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "lladdr") print tolower($(i + 1))}')
+    if [ -n "$mac" ] && echo "$macs" | grep -qx "$mac"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+fingerprint() {
+  {
+    cat "$BASE/compose.yaml" "$ETC/base.env" "$OLDENV" "$KEY" 2>/dev/null
+    docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$(image)" 2>/dev/null
+  } | sha256sum | cut -d' ' -f1
+}
+
+# server.env: de instellingen van de oude server, met daarover base.env
+# (database, VIP, VictoriaMetrics van dit cluster).
+make_env() {
+  new=$SRVENV.new
+  (
+    umask 077
+    {
+      echo "# Gemaakt door clusterforge-ctl.sh; niet met de hand wijzigen."
+      if [ -s "$OLDENV" ]; then
+        keys=$(grep -E '^[A-Z][A-Z0-9_]*=' "$ETC/base.env" | cut -d= -f1 | tr '\n' '|')
+        grep -E '^[A-Z][A-Z0-9_]*=' "$OLDENV" | grep -Ev "^(${keys%|})="
+      fi
+      grep -E '^[A-Z][A-Z0-9_]*=' "$ETC/base.env"
+    } > "$new"
+  ) || fail "$SRVENV maken"
+  mv "$new" "$SRVENV" || fail "mv $new"
+}
+
+mappen() {
+  mkdir -p "$SCAN" && chown "$UID_SERVER:$UID_SERVER" "$SCAN" && chmod 0755 "$SCAN"
+}
+mappen_ok() { [ -d "$SCAN" ] && [ "$(stat -c %u "$SCAN")" = "$UID_SERVER" ]; }
+
+# De ontvangen kopie op zijn plaats zetten, als ze nieuwer is dan wat hier
+# staat en volledig klopt.
+install_incoming() {
+  [ -f "$IN/MANIFEST" ] || return 0
+  created=$(field created "$IN/MANIFEST")
+  from=$(field host "$IN/MANIFEST")
+  case "$created" in '' | *[!0-9]*) warn "ongeldige $IN/MANIFEST"; return 0 ;; esac
+  stamp=$(cat "$STAMP" 2>/dev/null || echo 0)
+  case "$stamp" in '' | *[!0-9]*) stamp=0 ;; esac
+  [ "$created" -gt "$stamp" ] || return 0
+  if ! (cd "$IN" && sha256sum --quiet --strict -c SHA256SUMS >/dev/null 2>&1); then
+    warn "de kopie van $from ($(when "$created")) is onvolledig (sync onderbroken?); de server start met wat hier staat"
+    return 0
+  fi
+  [ -s "$IN/master.key" ] && [ -s "$IN/image.env" ] || { warn "de kopie van $from mist hoofdsleutel of image"; return 0; }
+  say "Kopie van $from ($(when "$created")) op zijn plaats zetten"
+  (umask 077 && cp "$IN/master.key" "$KEY" && cp "$IN/image.env" "$IMG") || fail "kopie overzetten"
+  if [ -f "$IN/overgenomen.env" ]; then (umask 077 && cp "$IN/overgenomen.env" "$OLDENV"); fi
+  if [ -d "$IN/scanner" ]; then
+    mappen
+    rsync -a --delete "$IN/scanner/" "$SCAN/" 2>/dev/null || warn "scannermap overzetten"
+  fi
+  echo "$created" > "$STAMP"
+}
+
+# Een kopie maken in $OUT, voor de sync. Alleen op de VIP-node.
+snapshot() {
+  has_vip || fail "deze node heeft het VIP $VIP niet; alleen de VIP-node maakt de kopie"
+  [ -s "$KEY" ] && [ -s "$IMG" ] || fail "hier staat nog geen hoofdsleutel of image (nog niet verhuisd)"
+  t=$(date +%s)
+  new=$STATE/outgoing.new
+  rm -rf "$new" && mkdir -p "$new" && chmod 0700 "$new" || fail "map $new"
+  cp -p "$KEY" "$IMG" "$new/" || fail "kopiëren"
+  [ -f "$OLDENV" ] && cp -p "$OLDENV" "$new/"
+  [ -d "$SCAN" ] && cp -a "$SCAN" "$new/scanner"
+  printf 'created=%s\nhost=%s\nimage=%s\n' "$t" "$(hostname)" "$(image)" > "$new/MANIFEST"
+  (cd "$new" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum) > "$new/SHA256SUMS" || fail "sha256sum"
+  rm -rf "$OUT.old"
+  if [ -d "$OUT" ]; then mv "$OUT" "$OUT.old" || fail "mv $OUT"; fi
+  mv "$new" "$OUT" || fail "mv $new"
+  rm -rf "$OUT.old"
+  echo "$t" > "$STAMP"
+  echo "Kopie van $(when "$t"): $(wc -l < "$OUT/SHA256SUMS") bestanden, image $(image)."
+}
+
+pull() {
+  img=$1
+  docker image inspect "$img" >/dev/null 2>&1 || docker pull -q "$img" >/dev/null || return 1
+  if [ -n "$SCANNER" ]; then
+    docker image inspect "$img-scanner" >/dev/null 2>&1 || docker pull -q "$img-scanner" >/dev/null || return 1
+  fi
+  return 0
+}
+
+set_image() { (umask 077 && printf 'CF_IMAGE=%s\n' "$1" > "$IMG.new" && mv "$IMG.new" "$IMG"); }
+
+valid_image() {
+  echo "$1" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
+}
+
+# Wacht tot de server hier gezond is met image-id $1 (leeg: elk image).
+wait_healthy() {
+  want=$1
+  end=$(($(date +%s) + $2))
+  last=
+  while [ "$(date +%s)" -lt "$end" ]; do
+    st=$(docker inspect -f '{{"{{"}}if .State.Health{{"}}"}}{{"{{"}}.State.Health.Status{{"}}"}}{{"{{"}}else{{"}}"}}{{"{{"}}.State.Status{{"}}"}}{{"{{"}}end{{"}}"}}' cf-clusterforge-server 2>/dev/null)
+    img=$(docker inspect -f '{{"{{"}}.Image{{"}}"}}' cf-clusterforge-server 2>/dev/null)
+    if [ "$st" != "$last" ]; then
+      echo "  server: ${st:-nog niet gestart}"
+      last=$st
+    fi
+    if [ "$st" = healthy ] && healthy && { [ -z "$want" ] || [ "$img" = "$want" ]; }; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+# Haalt de gegevens van de oude server: hoofdsleutel, image en instellingen.
+fetch_meta() {
+  url=${1%/}
+  tok=$2
+  dir=$3
+  curl -fsS -m 60 -o "$dir/meta" "$url/selfexport/$tok/meta" || fail "gegevens van de oude server ophalen ($url); loopt de taak Verhuizen nog?"
+  grep -q '^master_key=' "$dir/meta" || fail "de oude server gaf geen hoofdsleutel"
+}
+install_meta() {
+  dir=$1
+  img=$(field image "$dir/meta")
+  valid_image "$img" || fail "ongeldig image van de oude server: $img"
+  (
+    umask 077
+    field master_key "$dir/meta" > "$KEY.new" && mv "$KEY.new" "$KEY"
+    sed -n 's/^env\.//p' "$dir/meta" | grep -E '^[A-Z][A-Z0-9_]*=' > "$OLDENV"
+  ) || fail "hoofdsleutel en instellingen bewaren"
+  chown "$UID_SERVER:$UID_SERVER" "$KEY" && chmod 0400 "$KEY"
+  set_image "$img" || fail "image bewaren"
+  date +%s > "$STAMP"
+  make_env
+}
+
+# Iets ging mis tijdens de overname: database van het cluster weer leeg,
+# overgenomen gegevens weg. Aan de oude server is niets veranderd.
+back() {
+  echo "FOUT: $1" >&2
+  echo "== Terugdraaien: server stoppen, database van het cluster leegmaken" >&2
+  systemctl stop cf-clusterforge >/dev/null 2>&1
+  pg -c "DROP OWNED BY CURRENT_USER" >/dev/null 2>&1 || echo "WAARSCHUWING: de database van het cluster leegmaken mislukte" >&2
+  rm -f "$KEY" "$IMG" "$OLDENV" "$SRVENV" "$STAMP"
+  rm -rf "$OUT"
+  echo "Aan de oude server is niets veranderd; hij draait verder." >&2
+  exit 1
+}
+
+overnemen() {
+  url=${1:-}
+  tok=${2:-}
+  metrics=1
+  [ "${3:-}" = --zonder-metrics ] && metrics=
+  [ -n "$url" ] && [ -n "$tok" ] || fail "gebruik: $0 overnemen <url van de oude server> <sleutel> [--zonder-metrics]"
+  has_vip || fail "doe dit op de node met het VIP ($VIP)"
+  if [ -s "$KEY" ] && [ -n "$(schema)" ] && [ "$(schema)" != 0 ]; then
+    fail "hier is al een ClusterForge overgenomen (databaseversie $(schema)); er is niets veranderd"
+  fi
+  n=$(db_tables) || fail "de database van het cluster antwoordt niet ($(dburl | sed 's|//[^@]*@|//…@|')); is de database van het cluster klaar?"
+  [ "$n" = 0 ] || fail "de database van het cluster is niet leeg ($n tabellen); er is niets veranderd"
+  dir=$STATE/verhuizing
+  rm -rf "$dir" && mkdir -p "$dir" && chmod 0700 "$dir" || fail "map $dir"
+  say "Gegevens van de oude server ophalen"
+  fetch_meta "$url" "$tok" "$dir"
+  job=$(field job "$dir/meta")
+  sum=$(field sha256 "$dir/meta")
+  echo "  versie $(field version "$dir/meta"), image $(field image "$dir/meta"), databaseversie $(field schema "$dir/meta")"
+  say "Dump van de database ophalen"
+  curl -fsS -m 3600 -o "$dir/clusterforge.dump" "${url%/}/selfexport/$tok/dump" || fail "dump ophalen"
+  [ "$(sha256sum "$dir/clusterforge.dump" | cut -d' ' -f1)" = "$sum" ] || fail "de dump komt niet overeen met de controlesom van de oude server"
+  echo "  $(du -h "$dir/clusterforge.dump" | cut -f1), controlesom klopt"
+  say "Image halen"
+  img=$(field image "$dir/meta")
+  valid_image "$img" || fail "ongeldig image: $img"
+  pull "$img" || fail "docker pull $img"
+  say "Database terugzetten in PostgreSQL van het cluster"
+  "$(pgbin pg_restore)" --no-owner --no-privileges --exit-on-error -d "$(dburl)" "$dir/clusterforge.dump" ||
+    back "pg_restore"
+  # Wat bij de oude server nog liep, loopt daar verder: hier niet nog eens.
+  # Het adres voor agents wordt het VIP.
+  pg <<EOF >/dev/null || back "taken en adres voor agents bijwerken"
+UPDATE jobs SET status = 'succeeded', finished_at = now(), error = ''
+WHERE id = '$job'::uuid;
+UPDATE jobs SET status = 'canceled', finished_at = now(), error = 'onderbroken door de verhuizing naar het cluster'
+WHERE status IN ('queued', 'running');
+INSERT INTO agent_endpoint_settings (server_url, nats_url, updated_by)
+VALUES ('http://$VIP:8080', 'tls://$VIP:4222', NULL)
+ON CONFLICT ((true)) DO UPDATE SET server_url = EXCLUDED.server_url, nats_url = EXCLUDED.nats_url, updated_at = now();
+EOF
+  echo "  databaseversie $(schema), $(db_tables) tabellen"
+  say "Hoofdsleutel, image en instellingen bewaren"
+  install_meta "$dir"
+  mappen
+  snapshot >/dev/null || warn "kopie voor de andere nodes"
+  say "Server starten op het VIP $VIP"
+  systemctl start cf-clusterforge || back "systemctl start cf-clusterforge (journalctl -u cf-clusterforge)"
+  if ! wait_healthy "$(docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$img" 2>/dev/null)" 600; then
+    docker logs --tail 40 cf-clusterforge-server 2>&1 | sed 's/^/  | /'
+    back "de server wordt niet gezond"
+  fi
+  echo "  gezond op http://$VIP:8080"
+  rm -f "$dir/clusterforge.dump"
+  if [ -n "$metrics" ]; then
+    say "Metrics van de oude server meenemen"
+    if curl -fsS -m 3600 -o "$dir/metrics.bin" "${url%/}/selfexport/$tok/metrics"; then
+      echo "  $(du -h "$dir/metrics.bin" | cut -f1)"
+      for a in 127.0.0.1 $PEERS; do
+        if curl -fsS -m 3600 -X POST --data-binary "@$dir/metrics.bin" "http://$a:8428/api/v1/import/native" >/dev/null; then
+          echo "  VictoriaMetrics op $a: ingeladen"
+        else
+          warn "VictoriaMetrics op $a: inladen mislukte (de grafieken van vóór de verhuizing ontbreken daar)"
+        fi
+      done
+    else
+      warn "metrics van de oude server ophalen mislukte; de grafieken beginnen opnieuw"
+    fi
+    rm -f "$dir/metrics.bin"
+  fi
+  echo
+  echo "Overgenomen: ClusterForge draait op het cluster, http://$VIP:8080."
+}
+
+ontvang() {
+  url=${1:-}
+  tok=${2:-}
+  [ -n "$url" ] && [ -n "$tok" ] || fail "gebruik: $0 ontvang <url van de oude server> <sleutel>"
+  has_vip && fail "dit is de VIP-node; gebruik overnemen"
+  dir=$STATE/verhuizing
+  rm -rf "$dir" && mkdir -p "$dir" && chmod 0700 "$dir" || fail "map $dir"
+  fetch_meta "$url" "$tok" "$dir"
+  install_meta "$dir"
+  mappen
+  rm -rf "$dir"
+  pull "$(image)" || warn "image vooraf halen mislukte; het gebeurt bij een failover"
+  echo "Klaar: $(hostname) kan de server overnemen bij een failover (image $(image))."
+}
+
+bijwerken() {
+  img=${1:-}
+  wait=${2:-420}
+  valid_image "$img" || fail "ongeldig image: $img"
+  has_vip || fail "doe dit op de node met het VIP ($VIP)"
+  systemctl is-active --quiet cf-clusterforge || fail "de server draait hier niet"
+  old=$(image)
+  oldid=$(docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$old" 2>/dev/null)
+  echo "  nu:    $old"
+  echo "  nieuw: $img"
+  say "Image halen"
+  pull "$img" || fail "docker pull $img (bestaat de tag? is ghcr.io bereikbaar?)"
+  newid=$(docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$img")
+  say "Back-up van de database"
+  mkdir -p "$BACKUPS" && chmod 0700 "$BACKUPS"
+  ts=$(date +%Y%m%d-%H%M%S)
+  f=$BACKUPS/cf-$ts-voor-update.dump
+  (umask 077 && "$(pgbin pg_dump)" -Fc "$(dburl)" > "$f") && [ -s "$f" ] || fail "pg_dump (er is niets veranderd)"
+  echo "  $f ($(du -h "$f" | cut -f1))"
+  before=$(schema)
+  echo "  databaseversie: $before"
+  say "Nieuwe versie starten"
+  date +%s > "$UPDATING"
+  set_image "$img" || fail "image bewaren"
+  systemctl restart cf-clusterforge || warn "systemctl restart cf-clusterforge"
+  if wait_healthy "$newid" "$wait"; then
+    rm -f "$UPDATING"
+    snapshot >/dev/null || warn "kopie voor de andere nodes"
+    say "Bijgewerkt"
+    echo "  $(hostname) draait $img; databaseversie $(schema)."
+    ls -1t "$BACKUPS"/cf-*-voor-update.dump 2>/dev/null | tail -n +6 | xargs -r rm -f
+    return 0
+  fi
+  docker logs --tail 40 cf-clusterforge-server 2>&1 | sed 's/^/  | /'
+  say "De nieuwe versie werd niet gezond binnen ${wait}s: terug naar $old"
+  set_image "$old"
+  now=$(schema)
+  if [ -n "$before" ] && [ "$now" != "$before" ]; then
+    echo "  de nieuwe versie voerde migraties uit ($before → $now): database terugzetten uit $f"
+    systemctl stop cf-clusterforge
+    pg -c "DROP OWNED BY CURRENT_USER" >/dev/null || warn "database leegmaken mislukte"
+    "$(pgbin pg_restore)" --no-owner --no-privileges -d "$(dburl)" "$f" || warn "pg_restore meldde fouten"
+  fi
+  systemctl restart cf-clusterforge || warn "systemctl restart cf-clusterforge"
+  ok=0
+  wait_healthy "$oldid" "$wait" && ok=1
+  rm -f "$UPDATING"
+  [ $ok = 1 ] && fail "bijwerken naar $img mislukte; de server draait weer op $old. Back-up: $f"
+  fail "bijwerken mislukte en de vorige versie wordt niet gezond (journalctl -u cf-clusterforge). Back-up: $f"
+}
+
+status() {
+  echo "node:        $(hostname) (node $INDEX)"
+  if has_vip; then echo "VIP:         $VIP staat hier"; else echo "VIP:         $VIP staat elders"; fi
+  echo "server:      $(systemctl is-active cf-clusterforge 2>/dev/null)$(running && healthy && echo ', gezond')"
+  echo "metrics:     $(systemctl is-active cf-clusterforge-vm 2>/dev/null)"
+  if can_serve; then echo "verhuisd:    ja, image $(image)"; else echo "verhuisd:    nog niet (Instellingen → ClusterForge zelf → Verhuizen)"; fi
+  echo "data:        actueel tot $(when "$(cat "$STAMP" 2>/dev/null || echo 0)")"
+  [ -f "$OUT/MANIFEST" ] && echo "verstuurd:   kopie van $(when "$(field created "$OUT/MANIFEST")")"
+  [ -f "$IN/MANIFEST" ] && echo "ontvangen:   kopie van $(field host "$IN/MANIFEST") van $(when "$(field created "$IN/MANIFEST")")"
+  return 0
+}
+
+# Voor de server: één regel per veld.
+rol() {
+  echo "index=$INDEX"
+  if has_vip; then echo "vip=1"; else echo "vip=0"; fi
+  if can_serve; then echo "verhuisd=1"; else echo "verhuisd=0"; fi
+  if systemctl is-active --quiet cf-clusterforge; then echo "actief=1"; else echo "actief=0"; fi
+  echo "image=$(image)"
+}
+
+case "${1:-}" in
+  up)
+    install_incoming
+    can_serve || fail "hier staat nog geen ClusterForge (geen hoofdsleutel); verhuis eerst bij Instellingen → ClusterForge zelf"
+    make_env
+    chown "$UID_SERVER:$UID_SERVER" "$KEY" && chmod 0400 "$KEY"
+    mappen
+    pull "$(image)" || fail "docker pull $(image)"
+    compose rm -sf >/dev/null 2>&1
+    fingerprint > "$HASH"
+    date +%s > "$STARTED"
+    rm -f "$UNHEALTHY"
+    exec docker compose -p cf-clusterforge --project-directory "$BASE" -f "$BASE/compose.yaml" --env-file "$IMG" up --no-build --remove-orphans
+    ;;
+  down)
+    compose stop
+    rm -f "$HASH"
+    ;;
+  snapshot)
+    snapshot
+    ;;
+  check)
+    systemctl is-active --quiet docker || exit 1
+    systemctl is-failed --quiet cf-clusterforge && exit 1
+    if ! can_serve; then
+      # Vóór de verhuizing houdt node 1 het VIP (daar komt de server); een
+      # andere node zonder hoofdsleutel neemt het nooit.
+      [ "$INDEX" = 1 ] && exit 0
+      exit 1
+    fi
+    if has_vip || [ -f "$YIELD" ]; then
+      if peer=$(better_has_vip); then
+        [ -f "$YIELD" ] || log "split-brain: $peer heeft het VIP $VIP ook, deze node geeft het af"
+        date +%s > "$YIELD"
+        exit 1
+      fi
+      rm -f "$YIELD"
+    fi
+    if ! has_vip; then
+      if systemctl is-active --quiet cf-clusterforge; then
+        log "de server draait hier zonder het VIP; stoppen"
+        systemctl stop --no-block cf-clusterforge
+      elif running; then
+        compose stop >/dev/null 2>&1
+      fi
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    # Bijwerken herstart de server; dan niet het VIP afgeven.
+    if [ -f "$UPDATING" ] && [ $(($(date +%s) - $(cat "$UPDATING" 2>/dev/null || echo 0))) -lt 1800 ]; then
+      exit 0
+    fi
+    if ! systemctl is-active --quiet cf-clusterforge; then
+      systemctl start --no-block cf-clusterforge
+      exit 0
+    fi
+    started=$(cat "$STARTED" 2>/dev/null || echo 0)
+    if [ $(($(date +%s) - started)) -lt "$GRACE" ]; then
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    if healthy; then
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    n=$(($(cat "$UNHEALTHY" 2>/dev/null || echo 0) + 1))
+    echo "$n" > "$UNHEALTHY"
+    if [ "$n" -ge 5 ]; then
+      log "de server antwoordt niet ($n checks); deze node geeft het VIP af"
+      exit 1
+    fi
+    exit 0
+    ;;
+  master)
+    can_serve && systemctl start --no-block cf-clusterforge
+    exit 0
+    ;;
+  backup)
+    systemctl stop --no-block cf-clusterforge
+    rm -f "$UNHEALTHY"
+    systemctl reset-failed cf-clusterforge 2>/dev/null
+    exit 0
+    ;;
+  status) status ;;
+  rol) rol ;;
+  mappen) mappen ;;
+  mappen-ok) mappen_ok ;;
+  overnemen)
+    shift
+    overnemen "$@"
+    ;;
+  ontvang)
+    shift
+    ontvang "$@"
+    ;;
+  pull)
+    valid_image "${2:-}" || fail "ongeldig image: ${2:-}"
+    pull "$2" || fail "docker pull $2"
+    echo "$(hostname): $2 staat klaar"
+    ;;
+  set-image)
+    valid_image "${2:-}" || fail "ongeldig image: ${2:-}"
+    has_vip && systemctl is-active --quiet cf-clusterforge && fail "hier draait de server; gebruik bijwerken"
+    can_serve || fail "hier staat nog geen ClusterForge"
+    install_incoming
+    set_image "$2" || fail "image bewaren"
+    date +%s > "$STAMP"
+    echo "$(hostname): image $2 (bij een failover start deze node die versie)"
+    ;;
+  bijwerken)
+    shift
+    bijwerken "$@"
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-clusterforge || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    make_env
+    systemctl try-restart cf-clusterforge
+    ;;
+  *)
+    echo "gebruik: $0 up|down|check|master|backup|snapshot|status|rol|overnemen|ontvang|pull|set-image|bijwerken" >&2
+    exit 2
+    ;;
+esac

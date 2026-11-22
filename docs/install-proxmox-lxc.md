@@ -225,6 +225,20 @@ Krijgt ClusterForge een ander IP-adres, of wijzen agents nog naar een naam achte
 
 Maak eerst een back-up zoals hierboven: migraties lopen automatisch bij het starten en een oudere versie terugzetten kan alleen met die back-up.
 
+### Vanuit de webinterface (fase 45)
+
+Vanaf deze versie werkt ClusterForge zichzelf bij bij **Instellingen → ClusterForge zelf**: tag invullen (zoals `b9116ae`), **Controleren**, code van je tweestapsverificatie, **Bijwerken**. Daarvoor staat er één keer een agent op de LXC zelf (Nodes → Agent installeren, het commando op de LXC plakken). De agent doet het werk, los van de server: image halen, back-up van de database en `.env` in `/root/cf-backup`, het compose-bestand van de nieuwe versie (uit git als `deploy/` een checkout is, anders uit het image), `CF_IMAGE` in `.env`, `docker compose up -d`, wachten tot de server gezond is met het nieuwe image. Wordt hij dat niet binnen zeven minuten, dan gaan `.env` en compose terug en, als er migraties liepen, de database uit de back-up van daarnet. De taak staat bij Taken; de pagina is even weg tijdens de herstart.
+
+### ClusterForge zelf als cluster
+
+1. Templates → **ClusterForge zelf (HA)** uitrollen op drie CT's, met een vrij VIP en een vrij VIP voor de database (niet .1 tot .3 van het VLAN). PostgreSQL (Patroni) komt er vanzelf bij; VictoriaMetrics draait op elke node.
+2. Instellingen → ClusterForge zelf → **Verhuizen**: cluster en host kiezen, bevestigen. De taak maakt een dump op de host (in `/var/lib/clusterforge-export`), de VIP-node haalt dump, hoofdsleutel, instellingen en metrics bij de oude server met een eenmalige sleutel, start de server op het VIP, de andere nodes krijgen hoofdsleutel en instellingen, alle agents gaan naar `VIP:4222`/`http://VIP:8080` (elke agent test eerst en zet zijn oude adres terug als het niet lukt) en tot slot stopt de oude server (hij start niet meer vanzelf; data en dump blijven staan).
+3. Log in op `http://VIP:8080` en zet je reverse proxy naar dat adres.
+
+Daarna werkt Bijwerken in het cluster node per node: de nodes zonder VIP halen eerst het image, de VIP-node maakt een `pg_dump`, start de nieuwe versie en draait terug als ze niet gezond wordt, en daarna krijgen de andere nodes de nieuwe versie (bij een failover starten ze die). Op een node: `/usr/local/lib/clusterforge/clusterforge-ctl.sh status`.
+
+Terugweg na een verhuizing: op de oude LXC `docker update --restart=unless-stopped <server> && docker start <server>` en de agents terugzetten bij Instellingen → Adres voor agents.
+
 ### Zonder bouwen (aanbevolen op een kleine LXC)
 
 CI bouwt bij elke commit een image en zet het op ghcr.io, getagd met de korte commit (`47d7ecc`), het PR-nummer (`pr-97`) of de branch (`main`), en bij een versie met de tag (`v0.5.0`). De LXC haalt het alleen op:

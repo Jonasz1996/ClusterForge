@@ -22,6 +22,7 @@ var released = map[string][]string{
 	"home-assistant":      {"1.0.0"},
 	"authentik":           {"1.0.0"},
 	"rustdesk":            {"1.0.0"},
+	"clusterforge":        {"1.0.0"},
 	"vaultx":              {"1.0.0"},
 	"cssthema":            {"1.0.0"},
 	"homepage":            {"1.0.0"},

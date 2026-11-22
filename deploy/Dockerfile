@@ -50,6 +50,9 @@ CMD ["run"]
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=server /out/clusterforge-server /usr/local/bin/clusterforge-server
 COPY --from=server /out/agents/ /usr/share/clusterforge/agents/
+# Het compose-bestand van deze versie: bijwerken vanuit de webinterface zet
+# het op de host als die geen git-checkout heeft (fase 45).
+COPY deploy/docker-compose.yml /usr/share/clusterforge/deploy/docker-compose.yml
 COPY --from=server --chown=65532:65532 /out/scanner /var/lib/clusterforge/scanner
 # 8080: webinterface en API (achter je reverse proxy). 4222: NATS voor de agents.
 EXPOSE 8080 4222

@@ -1,0 +1,22 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De server van ClusterForge (met NATS en de scanner). Niet enabled:
+# keepalived start hem op de node met het VIP (clusterforge-ctl.sh master of
+# check). Vóór de start zet clusterforge-ctl.sh up de nieuwste kopie van de
+# hoofdsleutel, het image en de instellingen van de vorige VIP-node op zijn
+# plaats.
+[Unit]
+Description=ClusterForge {{ .cluster.slug }} (actief op de node met het VIP)
+Requires=docker.service
+# Stopt keepalived, dan stopt de server ook: anders draait hij zonder VIP.
+BindsTo=keepalived.service
+After=docker.service keepalived.service network-online.target cf-clusterforge-vm.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+ExecStart=/usr/local/lib/clusterforge/clusterforge-ctl.sh up
+ExecStop=/usr/local/lib/clusterforge/clusterforge-ctl.sh down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=600
+TimeoutStopSec=90

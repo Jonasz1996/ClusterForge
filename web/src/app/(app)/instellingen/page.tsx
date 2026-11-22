@@ -18,6 +18,7 @@ import { useTheme, type Theme } from "@/lib/theme";
 import { AgentEndpointsCard } from "@/components/settings/AgentEndpointsCard";
 import { PublishSettingsCard } from "@/components/settings/PublishSettingsCard";
 import { DiskWatchSettingsCard } from "@/components/settings/DiskWatchSettingsCard";
+import { SelfHostCard } from "@/components/settings/SelfHostCard";
 
 const sections: { id: string; label: string }[] = [
   { id: "tweestap", label: "Tweestapsverificatie" },
@@ -26,6 +27,7 @@ const sections: { id: string; label: string }[] = [
   { id: "weergave", label: "Weergave" },
   { id: "assistent", label: "Assistent" },
   { id: "documentatie-github", label: "Documentatie naar GitHub" },
+  { id: "clusterforge-zelf", label: "ClusterForge zelf (bijwerken, cluster)" },
   { id: "locatie", label: "Locatie van ClusterForge" },
   { id: "agents-bijwerken", label: "Agents bijwerken" },
   { id: "schijfbewaking", label: "Schijfbewaking" },
@@ -77,6 +79,11 @@ export default function SettingsPage() {
         <Tile>
           <div id="documentatie-github" className="scroll-mt-20">
             <DocsTargetCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile wide>
+          <div id="clusterforge-zelf" className="scroll-mt-20">
+            <SelfHostCard isAdmin={isAdmin} />
           </div>
         </Tile>
         <Tile>

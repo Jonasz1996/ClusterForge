@@ -53,6 +53,30 @@ type Ingester struct {
 	pending []byte
 	labels  map[uuid.UUID]cachedLabels
 	flush   chan struct{}
+
+	// mirrors zijn andere VictoriaMetrics (de andere nodes van het eigen
+	// cluster, fase 45), elk met wat er nog naartoe moet. Een spiegel die
+	// faalt, houdt de hoofdschrijver niet op.
+	mirrors []*mirror
+}
+
+type mirror struct {
+	url     string
+	pending []byte
+	failing bool
+}
+
+// SetMirrors zet de andere VictoriaMetrics (komma-gescheiden URL's) waar
+// alles ook heen gaat.
+func (i *Ingester) SetMirrors(list string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.mirrors = nil
+	for _, u := range strings.Split(list, ",") {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" && u != i.url {
+			i.mirrors = append(i.mirrors, &mirror{url: u})
+		}
+	}
 }
 
 type cachedLabels struct {
@@ -277,6 +301,7 @@ func (i *Ingester) Flush(ctx context.Context) {
 	if len(data) == 0 {
 		return
 	}
+	i.flushMirrors(ctx, data)
 	if err := i.send(ctx, data); err != nil {
 		i.log.Warn("metrics naar VictoriaMetrics schrijven mislukt", "err", err, "bytes", len(data))
 		i.mu.Lock()
@@ -287,8 +312,46 @@ func (i *Ingester) Flush(ctx context.Context) {
 	}
 }
 
-func (i *Ingester) send(ctx context.Context, data []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.url+"/api/v1/import/prometheus", bytes.NewReader(data))
+// flushMirrors stuurt data (en wat nog wachtte) naar elke spiegel, tegelijk.
+func (i *Ingester) flushMirrors(ctx context.Context, data []byte) {
+	i.mu.Lock()
+	ms := slices.Clone(i.mirrors)
+	i.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, m := range ms {
+		wg.Add(1)
+		go func(m *mirror) {
+			defer wg.Done()
+			i.mu.Lock()
+			out := append(m.pending, data...)
+			m.pending = nil
+			i.mu.Unlock()
+			err := i.post(ctx, m.url, out)
+			i.mu.Lock()
+			defer i.mu.Unlock()
+			if err != nil {
+				if !m.failing {
+					i.log.Warn("metrics naar een andere VictoriaMetrics schrijven mislukt", "url", m.url, "err", err)
+				}
+				m.failing = true
+				if len(out)+len(m.pending) <= maxPending {
+					m.pending = append(out, m.pending...)
+				}
+				return
+			}
+			if m.failing {
+				i.log.Info("andere VictoriaMetrics weer bereikbaar", "url", m.url)
+			}
+			m.failing = false
+		}(m)
+	}
+	wg.Wait()
+}
+
+func (i *Ingester) send(ctx context.Context, data []byte) error { return i.post(ctx, i.url, data) }
+
+func (i *Ingester) post(ctx context.Context, base string, data []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/import/prometheus", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}

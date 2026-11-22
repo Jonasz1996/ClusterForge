@@ -77,6 +77,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/security"
+	"github.com/Jonasz1996/clusterforge/internal/selfhost"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/status"
@@ -176,6 +177,9 @@ func serve() error {
 
 	eval := status.NewEvaluator(pool, ev, log)
 	ingest := metrics.NewIngester(cfg.VictoriaMetricsURL, q, log)
+	// In het eigen cluster (fase 45) schrijft de server ook naar
+	// VictoriaMetrics op de andere nodes.
+	ingest.SetMirrors(os.Getenv("CF_VICTORIAMETRICS_MIRRORS"))
 	if !ingest.Enabled() {
 		log.Warn("CF_VICTORIAMETRICS_URL is niet gezet; metrics van agents worden niet bewaard")
 	}
@@ -231,6 +235,12 @@ func serve() error {
 	acf.Advertise, acf.HTTPPort, acf.NATSPort = cfg.NATSAdvertise, agentconf.PortOf(cfg.Listen, 8080), bus.Port()
 	acf.HTTPLoopback = cfg.HTTPBindLoopback()
 	acf.Changed = eval.Kick
+	// Fase 45: ClusterForge werkt zichzelf bij vanuit de webinterface en
+	// verhuist naar een eigen cluster (template clusterforge).
+	self := selfhost.NewService(pool, ev, log, runner, bus, bus, box, acf)
+	self.Version, self.Image, self.Cluster, self.Advertise = version, os.Getenv("CF_IMAGE"), os.Getenv("CF_SELF_CLUSTER"), cfg.NATSAdvertise
+	self.MasterKey, self.VMURL = cfg.MasterKey, cfg.VictoriaMetricsURL
+	self.LoadSettings()
 	// Fase 10: pakketten en Docker bijwerken, en eigen commando's draaien.
 	upd := updates.NewService(pool, ev, runner, bus)
 	cmds := commands.NewService(pool, ev, runner, bus, upd)
@@ -500,7 +510,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

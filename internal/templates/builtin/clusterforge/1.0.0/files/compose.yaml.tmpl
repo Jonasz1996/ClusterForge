@@ -1,0 +1,39 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Start alleen via cf-clusterforge (systemd), op de node met het VIP. Docker
+# start het nooit zelf (restart: "no"). Het image staat in
+# /etc/cf-clusterforge/image.env (CF_IMAGE); bijwerken zet het daar.
+# network_mode host: de server luistert op 8080 (web) en 4222 (NATS) op elk
+# adres van de node, dus ook op het VIP.
+services:
+  server:
+    image: ${CF_IMAGE:?geen image in /etc/cf-clusterforge/image.env}
+    container_name: cf-clusterforge-server
+    restart: "no"
+    network_mode: host
+    stop_grace_period: 30s
+    env_file: /etc/cf-clusterforge/server.env
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clusterforge-server", "healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    volumes:
+      - /etc/cf-clusterforge/master.key:/etc/clusterforge/master.key:ro
+      - /var/lib/cf-clusterforge/scanner:/var/lib/clusterforge/scanner
+{{- if .params.scanner }}
+  scanner:
+    image: ${CF_IMAGE}-scanner
+    container_name: cf-clusterforge-scanner
+    restart: "no"
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      TZ: "{{ .params.timezone }}"
+    volumes:
+      - /var/lib/cf-clusterforge/scanner:/etc/clusterforge
+    depends_on:
+      - server
+{{- end }}
