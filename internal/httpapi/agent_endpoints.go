@@ -85,16 +85,20 @@ func (s *Server) ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request) {
 		prod = prod || a.Prod()
 	}
 	if prod {
-		if p.User.TotpEnabledAt == nil {
+		if s.needs2FA(ctx, p) {
 			writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie agents omzetten; zet die aan bij Instellingen")
 			return
 		}
-		if in.TotpCode == nil || *in.TotpCode == "" {
-			writeError(w, http.StatusConflict, "needs_confirmation", "dit raakt prod; geef de code van je tweestapsverificatie")
-			return
-		}
-		if s.authError(w, r, s.auth.Confirm(ctx, p, "", *in.TotpCode, "agent_reconfigure_prod")) {
-			return
+		// Met tweestapsverificatie de code; zonder (prodacties zonder
+		// tweestapsverificatie toegestaan) is er geen code om te vragen.
+		if p.User.TotpEnabledAt != nil {
+			if in.TotpCode == nil || *in.TotpCode == "" {
+				writeError(w, http.StatusConflict, "needs_confirmation", "dit raakt prod; geef de code van je tweestapsverificatie")
+				return
+			}
+			if s.authError(w, r, s.auth.Confirm(ctx, p, "", *in.TotpCode, "agent_reconfigure_prod")) {
+				return
+			}
 		}
 	}
 	started, skipped, err := s.agentConf.Start(ctx, events.User(p.User.ID), agents, e)

@@ -33,6 +33,10 @@ type fakeDocker struct {
 	state    string
 	imageID  string
 	ref      string
+	// localOnly zijn images zonder registry (zelf gebouwd).
+	localOnly map[string]bool
+	// pullFails laat pull mislukken.
+	pullFails bool
 }
 
 func newFakeDocker(t *testing.T, compose, env string) *fakeDocker {
@@ -117,7 +121,10 @@ func (f *fakeDocker) cmd(_ context.Context, _ string, argv, _ []string, out io.W
 	case strings.HasPrefix(c, "docker inspect"):
 		b, _ := json.Marshal(f.container())
 		_, _ = out.Write(b)
-	case sub == "pull":
+	case strings.HasPrefix(sub, "pull") && f.pullFails:
+		_, _ = io.WriteString(out, "pull access denied\n")
+		return 1, nil
+	case strings.HasPrefix(sub, "pull"):
 		if f.pulled != "" {
 			f.images[f.composeImage()] = f.pulled
 		}
@@ -136,6 +143,13 @@ func (f *fakeDocker) cmd(_ context.Context, _ string, argv, _ []string, out io.W
 		f.ups++
 	case strings.HasPrefix(sub, "logs"):
 		_, _ = io.WriteString(out, "app-1  | 2026-11-15T21:00:00Z started\napp-1  | DB_PASSWORD=hunter2\n")
+	case strings.HasPrefix(c, "docker image inspect --format {{len .RepoDigests}}"):
+		ref := argv[len(argv)-1]
+		if f.localOnly[ref] {
+			_, _ = io.WriteString(out, "0\n")
+		} else {
+			_, _ = io.WriteString(out, "1\n")
+		}
 	case strings.HasPrefix(c, "docker image inspect --format"):
 		id, ok := f.images[argv[len(argv)-1]]
 		if !ok {
@@ -385,5 +399,34 @@ func TestDiscoverComposeMissingFile(t *testing.T) {
 	st, _ := dockerRun(t, f, &protocol.DockerRun{})
 	if st.State != protocol.RunFailed || f.called(" pull") != 0 {
 		t.Errorf("project zonder compose-bestand: %+v", st)
+	}
+}
+
+// TestDockerSmartLocalImage: een zelf gebouwd image (zonder registry) wordt
+// niet opgehaald; de rest van de update loopt gewoon.
+func TestDockerSmartLocalImage(t *testing.T) {
+	f := newFakeDocker(t, composeWeb, "")
+	f.localOnly = map[string]bool{f.composeImage(): true}
+	f.pullFails = true // een pull zou falen: dat mag niet gebeuren
+	st, out := dockerRun(t, f, &protocol.DockerRun{})
+	if st.State != protocol.RunOK || len(st.Docker) != 1 || st.Docker[0].Result != protocol.DockerUpToDate {
+		t.Fatalf("stand %+v\n%s", st, out)
+	}
+	if f.called(" pull") != 0 || !strings.Contains(out, "lokaal gebouwd") {
+		t.Errorf("pull van een lokaal image: %v\n%s", f.calls, out)
+	}
+}
+
+// TestDockerSmartPullFails: een pull die faalt verandert niets; het rapport
+// zegt dat (Unchanged), zodat de update van het cluster doorgaat.
+func TestDockerSmartPullFails(t *testing.T) {
+	f := newFakeDocker(t, composeWeb, "")
+	f.pullFails = true
+	st, out := dockerRun(t, f, &protocol.DockerRun{})
+	if st.State != protocol.RunFailed || len(st.Docker) != 1 || !st.Docker[0].Unchanged || st.Docker[0].Result != protocol.DockerFailed {
+		t.Fatalf("stand %+v\n%s", st, out)
+	}
+	if f.called(" down") != 0 || f.called(" up -d") != 0 {
+		t.Errorf("na een mislukte pull toch aangeraakt: %v", f.calls)
 	}
 }

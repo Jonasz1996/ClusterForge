@@ -44,7 +44,7 @@ func (s *Server) RunHeal(w http.ResponseWriter, r *http.Request) {
 		s.healError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, rep.ClusterEnv == string(store.EnvironmentProd), rep.ClusterSlug, in.Confirm, "een database herstellen") {
+	if !s.confirmProd(w, r, p, rep.ClusterEnv == string(store.EnvironmentProd), rep.ClusterSlug, in.Confirm, "een database herstellen") {
 		return
 	}
 	j, err := s.heal.RunPlan(ctx, events.User(p.User.ID), in.Key, in.Hash)

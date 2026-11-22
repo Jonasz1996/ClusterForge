@@ -59,6 +59,8 @@ export type FirewallDiff = { add: FirewallRule[]; adopt: FirewallRule[]; remove:
 
 export type FirewallNode = {
   node_id: string;
+  /** Waarom de firewall hier niet kan (agent te oud, OPNsense, TrueNAS). */
+  unsupported?: string;
   hostname: string;
   address: string;
   cluster_id: string | null;
@@ -287,7 +289,7 @@ export type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
 /** De stand van de firewall op een node in een paar woorden. */
 export function firewallState(n: FirewallNode): { label: string; tone: Tone } {
-  if (!n.supported) return { label: `agent te oud (protocol ${n.protocol})`, tone: "amber" };
+  if (!n.supported) return { label: n.unsupported?.split(";")[0] ?? `agent te oud (protocol ${n.protocol})`, tone: n.unsupported?.includes("eigen firewall") ? "slate" : "amber" };
   if (n.mode === "off") return { label: "niet beheerd", tone: "slate" };
   if (n.apply_running) return { label: "wordt toegepast…", tone: "blue" };
   if (!n.online) return { label: "offline", tone: "red" };

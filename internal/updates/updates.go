@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -77,6 +79,9 @@ type Service struct {
 	ReadyTimeout  time.Duration
 	RebootTimeout time.Duration
 	Now           func() time.Time
+	// HTTPGet haalt een pagina op voor de webtest na de VIP-wissel; nil
+	// gebruikt HTTP.
+	HTTPGet func(ctx context.Context, url string) (int, string, error)
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus Commander) *Service {
@@ -117,7 +122,8 @@ type Node struct {
 // Prod is true voor een node in een prodcluster.
 func (n Node) Prod() bool { return n.ClusterEnv == string(store.EnvironmentProd) }
 
-// Overview geeft elke node met een agent.
+// Overview geeft elke node met een agent, behalve appliances (OPNsense,
+// TrueNAS).
 func (s *Service) Overview(ctx context.Context) ([]Node, error) {
 	rows, err := s.q.ListUpdateNodes(ctx)
 	if err != nil {
@@ -137,6 +143,12 @@ func (s *Service) Overview(ctx context.Context) ([]Node, error) {
 		if len(r.Facts) > 0 {
 			var f protocol.Facts
 			if json.Unmarshal(r.Facts, &f) == nil {
+				if f.Appliance() != "" {
+					// OPNsense en TrueNAS werken zichzelf bij; apt en het
+					// automatische beleid horen daar niet (die zouden elke
+					// keer opnieuw mislukken).
+					continue
+				}
 				n.Upgrades, n.RebootRequired, n.AptUpdatedAt, n.Docker = f.Upgrades, f.RebootRequired, f.AptUpdatedAt, f.Docker
 			}
 		}
@@ -426,6 +438,19 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 					st.Logf("dit cluster heeft een database: de databasepakketten blijven staan; werk die bij met Bijwerken op de databasekaart")
 				}
 				res, err := s.runOne(ctx, j, st, n, spec)
+				if err != nil && runLost(res) {
+					// Bijvoorbeeld een upgrade van systemd of een herstart
+					// midden in dpkg: de volgende run maakt dpkg eerst af
+					// (dpkg --configure -a) en gaat verder.
+					st.Logf("de run op %s viel weg; ClusterForge wacht op de agent en hervat de update (dpkg --configure -a eerst)", n.Hostname)
+					_ = st.Flush(ctx)
+					if werr := s.waitAgent(ctx, n); werr != nil {
+						return fmt.Errorf("%w; %w", err, werr)
+					}
+					again := spec
+					again.ID = spec.ID + "-hervat"
+					res, err = s.runOne(ctx, j, st, n, again)
+				}
 				aptRes, aptDone = res, true
 				return err
 			}); err != nil {
@@ -445,6 +470,16 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			if err := j.Step(ctx, name+": Docker", func(ctx context.Context, st *jobs.Step) error {
 				res, err := s.runOne(ctx, j, st, n, spec)
 				s.saveReports(ctx, j, n, res.Docker)
+				if err != nil && onlyUnchanged(res.Docker) {
+					// Eén project kon zijn images niet halen, maar er
+					// veranderde niets: de rest van het cluster gaat door.
+					for _, d := range res.Docker {
+						if d.Unchanged {
+							st.Logf("let op: %s op %s niet bijgewerkt: %s", d.Project, n.Hostname, d.Problem)
+						}
+					}
+					return nil
+				}
 				if err != nil && p.Auto && s.Assist != nil {
 					for _, d := range res.Docker {
 						if d.Result == protocol.DockerFailed || d.Result == protocol.DockerRolledBack {
@@ -525,6 +560,14 @@ func (s *Service) prepare(ctx context.Context, st *jobs.Step, n jobNode) (prep, 
 		}
 	}
 	slices.Sort(active)
+	if i := slices.Index(active, "ufw"); i >= 0 && !s.ufwOn(ctx, n.ID) {
+		// ufw.service is een oneshot die ook "active" is met een
+		// uitgeschakelde firewall; na de update kan hij "inactive" zijn
+		// zonder dat er iets veranderde. Alleen een ufw die echt filterde,
+		// moet terugkomen.
+		active = slices.Delete(active, i, i+1)
+		st.Logf("ufw stond vóór de update uit; daar wacht ClusterForge niet op")
+	}
 	if len(active) > 0 {
 		st.Logf("draait nu: %s; daar wacht ClusterForge na de update op", strings.Join(active, ", "))
 	}
@@ -569,6 +612,135 @@ func (s *Service) runOne(ctx context.Context, j *jobs.Job, st *jobs.Step, n jobN
 		return res, errors.New(noderun.Describe(res))
 	}
 	return res, nil
+}
+
+// webTemplates zijn de templates waarvan het VIP een webserver is.
+var webTemplates = []string{"nginx-proxy-manager", "keepalived-nginx"}
+
+// webCheck vraagt na de VIP-wissel echt een pagina op het VIP op: een node
+// waar NPM niet kon starten (poort 80 bezet door nginx op de host) geeft
+// "Welcome to nginx!" voor elke site, terwijl keepalived tevreden is.
+// Onbereikbaar vanaf de server is alleen een waarschuwing (een firewall
+// kan dat verkeer tegenhouden).
+func (s *Service) webCheck(ctx context.Context, clusterID uuid.UUID, vips []string, progress func(string)) error {
+	var tpl string
+	if err := s.pool.QueryRow(ctx, `SELECT coalesce(template_name, '') FROM clusters WHERE id = $1`, clusterID).Scan(&tpl); err != nil || !slices.Contains(webTemplates, tpl) {
+		return nil
+	}
+	get := s.HTTPGet
+	if get == nil {
+		get = httpGet
+	}
+	for _, vip := range vips {
+		url := "http://" + vip + "/"
+		var last error
+		hard := false
+		for try := 0; try < 6; try++ {
+			if try > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+			}
+			code, body, err := get(ctx, url)
+			switch {
+			case err != nil:
+				last, hard = err, false
+				continue
+			case strings.Contains(body, "Welcome to nginx!"):
+				hard = true
+				last = fmt.Errorf("%s geeft de standaardpagina van nginx (\"Welcome to nginx!\"): NPM draait niet op de node met het VIP; kijk of poort 80 daar bezet is door nginx op de host", url)
+				continue
+			case code >= 500:
+				hard = true
+				last = fmt.Errorf("%s antwoordt met HTTP %d", url, code)
+				continue
+			}
+			last = nil
+			progress(fmt.Sprintf("%s antwoordt (HTTP %d)", url, code))
+			break
+		}
+		if last == nil {
+			continue
+		}
+		if hard {
+			return fmt.Errorf("%w; de taak stopt hier", last)
+		}
+		progress(fmt.Sprintf("let op: %s is vanaf ClusterForge niet te bereiken (%v); de webtest is overgeslagen", url, last))
+	}
+	return nil
+}
+
+// httpGet haalt een pagina op (hoogstens 64 KiB).
+func httpGet(ctx context.Context, url string) (int, string, error) {
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	return res.StatusCode, string(body), nil
+}
+
+// onlyUnchanged is true als er projecten mislukten en geen ervan iets
+// veranderde.
+func onlyUnchanged(reps []protocol.DockerReport) bool {
+	failed := 0
+	for _, d := range reps {
+		if d.Result == protocol.DockerFailed || d.Result == protocol.DockerRolledBack {
+			if !d.Unchanged {
+				return false
+			}
+			failed++
+		}
+	}
+	return failed > 0
+}
+
+// ufwOn zegt of ufw volgens de laatste firewallstand van de node aan
+// stond. Zonder stand telt ufw als aan.
+func (s *Service) ufwOn(ctx context.Context, nodeID uuid.UUID) bool {
+	var raw []byte
+	err := s.pool.QueryRow(ctx, `SELECT status FROM firewall_nodes WHERE node_id = $1`, nodeID).Scan(&raw)
+	if err != nil || len(raw) == 0 {
+		return true
+	}
+	var fs protocol.FirewallStatus
+	if json.Unmarshal(raw, &fs) != nil || !fs.Installed {
+		return true
+	}
+	return fs.Active
+}
+
+// runLost is true voor een run die op de node wegviel zonder eindstand.
+func runLost(res protocol.RunStatus) bool {
+	return res.State == protocol.RunFailed && strings.Contains(res.Error, protocol.RunLostError)
+}
+
+// waitAgent wacht op een verse heartbeat van de agent.
+func (s *Service) waitAgent(ctx context.Context, n jobNode) error {
+	since := s.Now()
+	wctx, cancel := context.WithTimeout(ctx, s.RebootTimeout)
+	defer cancel()
+	err := health.Poll(wctx, 2*time.Second, func(ctx context.Context) (bool, error) {
+		rt, err := s.q.GetNodeRuntime(ctx, n.ID)
+		if err != nil {
+			return false, err
+		}
+		return rt.HeartbeatAt != nil && rt.HeartbeatAt.After(since), nil
+	})
+	if err != nil {
+		return fmt.Errorf("de agent van %s kwam niet binnen %s terug: %w", n.Hostname, s.RebootTimeout, err)
+	}
+	return nil
 }
 
 // reboot herstart de node en wacht tot hij terug is.
@@ -629,6 +801,9 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, n jobNode, pr prep)
 			cancel()
 			if err != nil {
 				return fmt.Errorf("de VIP's hebben geen vaste houder: %w; de taak stopt hier", err)
+			}
+			if err := s.webCheck(ctx, *rt.ClusterID, vips, progress); err != nil {
+				return err
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,6 +136,9 @@ func (r *RunExecutor) Main(ctx context.Context, id string) int {
 	}
 	st.State = protocol.RunRunning
 	_ = writeRunStatus(dir, st)
+	// De agent kijkt naar dit proces als systemctl even niets zegt (zoals
+	// tijdens een upgrade van systemd).
+	_ = os.WriteFile(filepath.Join(dir, runPIDFile), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
 
 	out, err := os.OpenFile(filepath.Join(dir, "output.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -372,8 +376,16 @@ func (r *RunExecutor) apt(ctx context.Context, id string, a *protocol.AptRun, ou
 		}
 	}
 	if audit, _, _ := r.capture(ctx, "dpkg", "--audit"); len(bytes.TrimSpace(audit)) > 0 {
-		_, _ = out.Write(audit)
-		return -1, errors.New("dpkg is na de update niet in orde (dpkg --audit); kijk de uitvoer hierboven na")
+		// Een upgrade van systemd (daemon-reexec in de triggers) kan dpkg
+		// half geconfigureerd laten; dat maken we eerst zelf af.
+		_, _ = fmt.Fprintf(out, "ClusterForge: dpkg is na de update niet af; dpkg --configure -a\n")
+		if code, err := r.repair(ctx, out, true); err != nil {
+			return code, err
+		}
+		if audit, _, _ := r.capture(ctx, "dpkg", "--audit"); len(bytes.TrimSpace(audit)) > 0 {
+			_, _ = out.Write(audit)
+			return -1, errors.New("dpkg is na de update niet in orde (dpkg --audit); kijk de uitvoer hierboven na")
+		}
 	}
 	st.ConfNew = r.newConfFiles(began)
 	for _, f := range st.ConfNew {
@@ -508,14 +520,18 @@ func (r *RunExecutor) docker(ctx context.Context, d *protocol.DockerRun, out io.
 	if len(todo) == 0 {
 		_, _ = fmt.Fprintf(out, "ClusterForge: geen Docker Compose-projecten op deze node\n")
 	}
+	var pullFailed []string
 	for _, p := range todo {
 		base := []string{"docker", "compose", "-p", p.Name}
 		for _, f := range p.ConfigFiles {
 			base = append(base, "-f", f)
 		}
 		_, _ = fmt.Fprintf(out, "\n== %s\n", p.Name)
-		if code, err := r.step(ctx, out, nil, append(slices.Clone(base), "pull")...); err != nil {
-			return code, fmt.Errorf("%s: %w", p.Name, err)
+		if err := r.composePull(ctx, out, base, nil); err != nil {
+			// Niets veranderd: de andere projecten gaan door.
+			_, _ = fmt.Fprintf(out, "ClusterForge: %s: pull mislukte (%v); dit project blijft zoals het was\n", p.Name, err)
+			pullFailed = append(pullFailed, p.Name)
+			continue
 		}
 		if code, err := r.step(ctx, out, nil, append(slices.Clone(base), "up", "-d")...); err != nil {
 			return code, fmt.Errorf("%s: %w", p.Name, err)
@@ -525,6 +541,9 @@ func (r *RunExecutor) docker(ctx context.Context, d *protocol.DockerRun, out io.
 		if code, err := r.step(ctx, out, nil, "docker", "image", "prune", "-f"); err != nil {
 			return code, err
 		}
+	}
+	if len(pullFailed) > 0 {
+		return 1, fmt.Errorf("docker compose pull mislukte voor %s; die projecten draaien zoals voordien", strings.Join(pullFailed, ", "))
 	}
 	return 0, nil
 }

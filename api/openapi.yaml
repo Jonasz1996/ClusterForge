@@ -145,6 +145,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Attention" }
         "401": { $ref: "#/components/responses/Error" }
+  /security/prod-2fa:
+    get:
+      operationId: getProd2FA
+      summary: Of acties op prodclusters tweestapsverificatie vragen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Prod2FA" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setProd2FA
+      summary: Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Prod2FAInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Prod2FA" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /disk/settings:
     get:
       operationId: getDiskWatchSettings
@@ -11458,6 +11486,19 @@ components:
         href: { type: string, description: Pagina waar je het oplost }
         count: { type: integer }
         help: { type: string, description: "Wat kun je doen, in gewone taal (fase 41)" }
+    Prod2FA:
+      type: object
+      required: [required, updated_at]
+      properties:
+        required: { type: boolean, description: "Acties op prodclusters vragen een account met tweestapsverificatie. Het intikken van de clusternaam blijft altijd." }
+        updated_at: { type: string, format: date-time, nullable: true }
+    Prod2FAInput:
+      type: object
+      required: [required]
+      properties:
+        required: { type: boolean }
+        password: { type: string, description: "Om uit te zetten: je wachtwoord (zonder tweestapsverificatie)" }
+        totp_code: { type: string, description: "Om uit te zetten: je code (met tweestapsverificatie)" }
     DiskWatchSettings:
       type: object
       required: [warn_pct, crit_pct, ignore_mounts]

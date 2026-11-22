@@ -94,7 +94,7 @@ func (s *Server) AddClusterComponent(w http.ResponseWriter, r *http.Request, clu
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database toevoegen") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database toevoegen") {
 		return
 	}
 	j, err := s.components.Add(ctx, events.User(p.User.ID), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.VipAddress, in.Settings), in.Hash)
@@ -121,7 +121,7 @@ func (s *Server) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request,
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw toepassen") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw toepassen") {
 		return
 	}
 	j, err := s.components.Reapply(ctx, events.User(p.User.ID), clusterID, componentID)
@@ -191,7 +191,7 @@ func (s *Server) RecoverClusterComponent(w http.ResponseWriter, r *http.Request,
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw starten") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw starten") {
 		return
 	}
 	j, err := s.components.Recover(ctx, events.User(p.User.ID), clusterID, componentID, in.Hash)
@@ -232,7 +232,7 @@ func (s *Server) ManageClusterComponent(w http.ResponseWriter, r *http.Request, 
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database beheren") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database beheren") {
 		return
 	}
 	j, err := s.components.ManageAct(ctx, events.User(p.User.ID), clusterID, componentID, components.ManageInput{

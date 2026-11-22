@@ -41,6 +41,34 @@ pgdump_() { if [ -n "${CF_VXB_PGDUMP:-}" ]; then $CF_VXB_PGDUMP "$@"; else runus
 sysctl_() { ${CF_VXB_SYSTEMCTL:-systemctl} "$@"; }
 q() { psql_ -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 stopped() { ! sysctl_ is-active --quiet "$UNIT"; }
+# De poort van de oude VaultX (uit de unit; 8000 als er niets staat).
+oud_port() {
+  p=$(sysctl_ cat "$UNIT" 2>/dev/null | grep -o -- '--port[ =][0-9]*' | grep -o '[0-9]*$' | head -n 1)
+  echo "${p:-8000}"
+}
+# PID van wie die poort nog bezet; leeg als niemand (of zonder ss).
+port_pid() {
+  [ -n "${CF_VXB_TEST:-}" ] && { echo "${CF_VXB_PORT_PID:-}"; return 0; }
+  ss -ltnpH "sport = :$1" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1
+}
+# Na het stoppen van de unit kan een proces (een worker van uvicorn of een
+# VaultX buiten de unit) de poort vasthouden; dat moet ook weg, anders
+# crasht VaultX van het cluster op een bezette poort.
+port_free() {
+  port=$(oud_port)
+  pid=$(port_pid "$port")
+  [ -n "$pid" ] || return 0
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-80)
+  case "$cmd" in
+    *uvicorn*|*vaultx*|*gunicorn*)
+      kill "$pid" 2>/dev/null
+      sleep 2
+      [ -z "$(port_pid "$port")" ] || kill -9 "$pid" 2>/dev/null
+      sleep 1 ;;
+  esac
+  pid=$(port_pid "$port")
+  [ -z "$pid" ] || fail "oude VaultX bezet poort $port nog (pid $pid: $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-80)); stop dat proces en probeer opnieuw"
+}
 
 # Dezelfde telling als vaultx-ctl.sh op het cluster: vaste sessie-instellingen
 # zodat de tekst van een rij op beide kanten gelijk is.
@@ -78,6 +106,7 @@ case "$cmd" in
     fi
     sysctl_ disable --now "$UNIT" >/dev/null 2>&1 || sysctl_ stop "$UNIT" || fail "VaultX stoppen"
     stopped || fail "VaultX draait nog"
+    port_free
     logger -t cf-vaultx-bron "VaultX gestopt voor een overname naar ClusterForge" 2>/dev/null
     echo "VaultX gestopt op $(hostname)"
     ;;

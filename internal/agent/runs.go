@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,13 +135,16 @@ func (a *Agent) runPoll(ctx context.Context, id string, offset int64) protocol.R
 	if err != nil {
 		return protocol.RunResponse{Error: err.Error()}
 	}
-	if st.State == protocol.RunRunning && time.Since(st.StartedAt) > runLost && !a.runActive(ctx, id) {
+	if st.State == protocol.RunRunning && time.Since(st.StartedAt) > runLost && !a.runLives(ctx, dir, id) {
 		// De unit is weg zonder eindstand, bijvoorbeeld na een herstart van
 		// de node.
 		if again, err := readRunStatus(dir); err == nil && again.State == protocol.RunRunning {
 			end := time.Now().UTC()
-			st.State, st.Error, st.EndedAt = protocol.RunFailed, "de run stopte onverwacht (herstart van de node?)", &end
+			st.State, st.Error, st.EndedAt = protocol.RunFailed, protocol.RunLostError, &end
 			_ = writeRunStatus(dir, st)
+			// Holds van een weggevallen apt-run niet laten staan: een
+			// hervatte run zou ze anders als "al vastgehouden" laten.
+			go a.releaseHolds(context.Background())
 		} else if err == nil {
 			st = again
 		}
@@ -178,17 +183,66 @@ func (a *Agent) runPoll(ctx context.Context, id string, offset int64) protocol.R
 	return res
 }
 
-// runActive is true als de unit van de run nog bestaat.
+// runActive is true als de unit van de run nog bestaat. Alleen een
+// duidelijk "inactive" of "failed" telt als weg: tijdens een upgrade van
+// systemd (daemon-reexec) antwoordt systemctl even met een fout, en dan is
+// de run nog niet dood.
 func (a *Agent) runActive(ctx context.Context, id string) bool {
 	if hostOS == "freebsd" {
 		return oneShotActive(ctx, a.exec, runUnit(id))
 	}
 	out, _ := a.exec(ctx, "systemctl", "is-active", runUnit(id))
-	switch strings.TrimSpace(string(out)) {
-	case "active", "activating", "deactivating", "reloading":
-		return true
+	first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	switch strings.TrimSpace(first) {
+	case "inactive", "failed":
+		return false
 	}
-	return false
+	return true
+}
+
+// runLives zegt of de run nog loopt. Op Linux is het proces van run-exec
+// de maat (systemctl kan tijdens een upgrade van systemd even niets
+// zeggen); zonder PID-bestand beslist de unit.
+func (a *Agent) runLives(ctx context.Context, dir, id string) bool {
+	if hostOS != "freebsd" {
+		if alive, known := a.runAlive(dir, id); known {
+			return alive
+		}
+	}
+	return a.runActive(ctx, id)
+}
+
+// runPIDFile is het bestand waarin run-exec zijn PID zet.
+const runPIDFile = "pid"
+
+// runAlive zegt of het run-exec-proces van de run nog leeft, los van wat
+// systemd zegt; known is false zonder (geldig) PID-bestand.
+func (a *Agent) runAlive(dir, id string) (alive, known bool) {
+	data, err := os.ReadFile(filepath.Join(dir, runPIDFile))
+	if err != nil {
+		return false, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return false, false
+	}
+	if _, err := os.Stat(a.procRoot()); err != nil {
+		return false, false
+	}
+	cmdline, err := os.ReadFile(filepath.Join(a.procRoot(), strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return false, true
+	}
+	args := strings.Split(string(cmdline), "\x00")
+	return slices.Contains(args, "run-exec") && slices.Contains(args, id), true
+}
+
+// procRoot is /proc onder de bestandssysteemwortel van de agent.
+func (a *Agent) procRoot() string {
+	if a.Root == "" {
+		return "/proc"
+	}
+	return filepath.Join(a.Root, "proc")
 }
 
 // runStop stopt de unit; run-exec krijgt SIGTERM en zet de stand op
