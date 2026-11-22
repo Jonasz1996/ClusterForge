@@ -19,6 +19,7 @@ export type PublishDefaults = {
   block_exploits: boolean;
   authentik: boolean;
   authentik_skip: string[];
+  authentik_auto_repair?: boolean;
   letsencrypt: boolean;
   letsencrypt_email?: string;
 };
@@ -205,7 +206,18 @@ export type PublishOverview = {
   protocol: number;
 };
 
-export type PublishActionKind = "publish" | "update" | "retarget" | "retarget_many" | "protect" | "unprotect" | "delete" | "restore" | "rename" | "theme_many";
+export type PublishActionKind =
+  | "publish"
+  | "update"
+  | "retarget"
+  | "retarget_many"
+  | "protect"
+  | "unprotect"
+  | "delete"
+  | "restore"
+  | "rename"
+  | "theme_many"
+  | "ak_repair";
 
 export type PublishAction = {
   action: PublishActionKind;
@@ -396,7 +408,17 @@ export type TrafficView = {
     connections_at?: string;
   };
   series: { t: string; requests: number; s4xx: number; s5xx: number }[];
-  hosts: { host_id: number; domain: string; requests: number; visitors: number; s4xx: number; s5xx: number; denied: number; bytes: number; last?: string }[];
+  hosts: {
+    host_id: number;
+    domain: string;
+    requests: number;
+    visitors: number;
+    s4xx: number;
+    s5xx: number;
+    denied: number;
+    bytes: number;
+    last?: string;
+  }[];
   ips: {
     ip: string;
     requests: number;
@@ -426,7 +448,17 @@ export type LoginsView = {
   users: { username: string; logins: number; failed: number; last?: string; last_ip?: string }[];
   failed_ips: { ip: string; failed: number; usernames: string[]; last: string; country?: string; ban?: PublishBan; requests: number }[];
   apps: { app: string; count: number; users: number }[];
-  recent: { created: string; action: string; username: string; ip: string; app?: string; country?: string; city?: string; reason?: string; banned: boolean }[];
+  recent: {
+    created: string;
+    action: string;
+    username: string;
+    ip: string;
+    app?: string;
+    country?: string;
+    city?: string;
+    reason?: string;
+    banned: boolean;
+  }[];
   feed?: PublishFeed;
 };
 
@@ -485,7 +517,9 @@ export function useSetHostCss() {
   const done = useInvalidate();
   return useMutation({
     mutationFn: async ({ hostId, css }: { hostId: number; css: string }) =>
-      unwrap(await api.PUT("/publish/theme/hosts/{hostId}", { params: { path: { hostId } }, body: { css } as unknown as Body })) as unknown as PublishTheme,
+      unwrap(
+        await api.PUT("/publish/theme/hosts/{hostId}", { params: { path: { hostId } }, body: { css } as unknown as Body }),
+      ) as unknown as PublishTheme,
     onSuccess: done,
   });
 }

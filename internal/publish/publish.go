@@ -72,7 +72,9 @@ type Service struct {
 
 	mu       sync.Mutex
 	npmToken npmToken
-	kick     chan struct{}
+	// akTried: wanneer het automatisch aanvullen een host laatst probeerde.
+	akTried map[int]time.Time
+	kick    chan struct{}
 	// Now is de klok; tests zetten hem vast.
 	Now func() time.Time
 	// SettleTime is hoe lang de taak na een wijziging wacht voor de
@@ -98,6 +100,9 @@ type Defaults struct {
 	BlockExploits bool `json:"block_exploits"`
 	// Authentik: nieuwe hosts standaard achter Authentik.
 	Authentik bool `json:"authentik"`
+	// AuthentikAutoRepair: hosts met forward auth in NPM maar zonder
+	// provider, applicatie of outpost vanzelf aanvullen (fase 42d).
+	AuthentikAutoRepair bool `json:"authentik_auto_repair"`
 	// AuthentikSkip zijn woorden in de naam, het image of de container van
 	// diensten met een eigen login, die standaard niet achter Authentik gaan.
 	AuthentikSkip []string `json:"authentik_skip"`
@@ -112,7 +117,7 @@ type Defaults struct {
 // websockets, exploits blokkeren, Authentik aan behalve voor apps met een
 // eigen login.
 func DefaultDefaults() Defaults {
-	return Defaults{SSLForced: true, HTTP2: true, Websockets: true, BlockExploits: true, Authentik: true, LetsEncrypt: true,
+	return Defaults{SSLForced: true, HTTP2: true, Websockets: true, BlockExploits: true, Authentik: true, AuthentikAutoRepair: true, LetsEncrypt: true,
 		AuthentikSkip: []string{"vaultwarden", "vaultx", "homeassistant", "home-assistant", "plex", "nextcloud", "authentik", "proxmox", "opnsense", "jellyfin"}}
 }
 
@@ -386,6 +391,7 @@ func (s *Service) Refresh(ctx context.Context) {
 		data, err := s.readAuthentik(ctx, st)
 		s.saveRead(ctx, "authentik", data, err)
 	}
+	s.autoRepairAK(ctx, st)
 }
 
 func (s *Service) saveRead(ctx context.Context, kind string, data any, rerr error) {
