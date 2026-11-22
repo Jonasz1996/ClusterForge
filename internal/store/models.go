@@ -2009,6 +2009,13 @@ type SecurityScope struct {
 	UpdatedBy   *uuid.UUID
 }
 
+type SecuritySetting struct {
+	ID             bool
+	ProdRequire2fa bool
+	UpdatedAt      *time.Time
+	UpdatedBy      *uuid.UUID
+}
+
 type SecurityTool struct {
 	NodeID    uuid.UUID
 	Tool      string
