@@ -89,7 +89,28 @@ export type PublishHost = {
   service_name?: string;
   cluster_name?: string;
   suggest_vip?: string;
+  suggest?: PublishSuggestion;
+  http2: boolean;
+  hsts: boolean;
+  block_exploits: boolean;
+  advanced?: string;
+  typo?: string;
+  typo_domains?: string[];
 };
+
+export type PublishSuggestion = {
+  forward_scheme: string;
+  forward_host: string;
+  forward_port: number;
+  service_key: string;
+  service_name: string;
+  cluster_name?: string;
+  vip: boolean;
+  why: string;
+  sure: boolean;
+};
+
+export type PublishCert = { id: number; name: string; domains: string[]; provider: string; expires?: string };
 
 export type PublishService = {
   key: string;
@@ -175,10 +196,11 @@ export type PublishOverview = {
     problems: number;
   };
   clusters: { id: string; name: string; template?: string; vips?: string[] }[];
+  certs?: PublishCert[];
   protocol: number;
 };
 
-export type PublishActionKind = "publish" | "update" | "retarget" | "protect" | "unprotect" | "delete" | "restore" | "rename";
+export type PublishActionKind = "publish" | "update" | "retarget" | "retarget_many" | "protect" | "unprotect" | "delete" | "restore" | "rename";
 
 export type PublishAction = {
   action: PublishActionKind;
@@ -200,6 +222,9 @@ export type PublishAction = {
   old_domain?: string;
   new_domain?: string;
   keep_old?: boolean;
+  advanced_config?: string;
+  ssl_forced?: boolean;
+  domains?: string[];
 };
 
 export type PublishPlan = {
