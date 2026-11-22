@@ -37,7 +37,7 @@ export default function PublishNPMPage() {
   }, [ov, filter, only]);
   const unmanaged = hosts.filter((h) => !h.managed).map((h) => h.id);
   // Samen toepassen: alleen zekere voorstellen en oude adressen in Advanced; een gok gaat per host.
-  const akHalf = (ov?.hosts ?? []).filter((h) => h.authentik === "half");
+  const akHalf = (ov?.hosts ?? []).filter((h) => h.authentik === "half" && !h.typo);
   const suggested = (ov?.hosts ?? []).filter((h) => h.suggest?.sure || (h.advanced_fix?.length ?? 0) > 0);
   const typos = (ov?.hosts ?? []).filter((h) => h.typo_domains);
 
@@ -62,33 +62,40 @@ export default function PublishNPMPage() {
         <>
           <StatusBar ov={ov} admin={admin} />
           {admin && ov.npm.linked && (
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setEdit("new")}>Proxy host toevoegen</Button>
-              <Button variant="secondary" onClick={() => setTheme(true)}>
-                Sjabloon (Advanced en css)
-              </Button>
-              {suggested.length > 0 && (
-                <Button
-                  variant="secondary"
-                  onClick={() => setOpen({ title: `Nieuw doel voor ${suggested.length} proxy hosts`, action: { action: "retarget_many" } })}
-                >
-                  Alle voorstellen toepassen ({suggested.length})
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => setEdit("new")}>Proxy host toevoegen</Button>
+                <Button variant="secondary" onClick={() => setTheme(true)}>
+                  Sjabloon (Advanced en css)
                 </Button>
-              )}
-              {akHalf.length > 0 && (
-                <Button
-                  variant="secondary"
-                  onClick={() => setOpen({ title: `Authentik aanvullen voor ${akHalf.length} proxy hosts`, action: { action: "ak_repair" } })}
-                >
-                  Authentik aanvullen ({akHalf.length})
-                </Button>
-              )}
-              {typos.length > 0 && (
-                <span className="text-sm text-amber-700 dark:text-amber-300">
-                  {typos.length} {typos.length === 1 ? "host" : "hosts"} met een tikfout in de naam: gebruik naam rechtzetten per host
-                </span>
-              )}
-            </div>
+                {suggested.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setOpen({ title: `Nieuw doel voor ${suggested.length} proxy hosts`, action: { action: "retarget_many" } })}
+                  >
+                    Alle voorstellen toepassen ({suggested.length})
+                  </Button>
+                )}
+                {akHalf.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setOpen({ title: `Authentik aanvullen voor ${akHalf.length} proxy hosts`, action: { action: "ak_repair" } })}
+                  >
+                    Authentik aanvullen ({akHalf.length})
+                  </Button>
+                )}
+                {typos.length > 0 && (
+                  <span className="text-sm text-amber-700 dark:text-amber-300">
+                    {typos.length} {typos.length === 1 ? "host" : "hosts"} met een tikfout in de naam: gebruik naam rechtzetten per host
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Volgorde als er veel tegelijk moet: 1. tikfouten in de naam rechtzetten{typos.length ? ` (${typos.length})` : ""}, 2. nieuwe doelen
+                {suggested.length ? ` (${suggested.length})` : ""}, 3. sjabloon, 4. Authentik aanvullen{akHalf.length ? ` (${akHalf.length})` : ""}.
+                Er loopt altijd maar één taak tegelijk op NPM; hosts met een tikfout slaat Authentik aanvullen over.
+              </p>
+            </>
           )}
           <Card title={`Proxy hosts · ${hosts.length}`}>
             <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">

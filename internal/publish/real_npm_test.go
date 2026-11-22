@@ -615,8 +615,13 @@ func TestRealNPM(t *testing.T) {
 	alive()
 	run(Action{Action: ActProtect, HostID: old[0]}, store.JobStatusSucceeded)
 	fake.mu.Lock()
-	fake.apps, fake.providers = nil, nil
+	// De applicatie blijft staan (met een provider die niet meer bestaat):
+	// die moet gekoppeld worden, niet dubbel gemaakt.
+	fake.providers = nil
 	fake.outpost["providers"] = []any{}
+	if len(fake.apps) != 1 {
+		t.Fatalf("verwacht 1 applicatie, %d", len(fake.apps))
+	}
 	fake.mu.Unlock()
 	alive()
 	s.Refresh(ctx)
@@ -630,6 +635,12 @@ func TestRealNPM(t *testing.T) {
 			t.Fatalf("niet aangevuld: %d apps, %d providers, %d in outpost", apps, provs, inOut)
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+	fake.mu.Lock()
+	linked := toInt(fake.apps[0]["provider"]) == toInt(fake.providers[0]["pk"])
+	fake.mu.Unlock()
+	if !linked {
+		t.Fatal("bestaande applicatie niet aan de nieuwe provider gekoppeld")
 	}
 	// Tweede lezing binnen akRetry start geen nieuwe taak.
 	s.Refresh(ctx)

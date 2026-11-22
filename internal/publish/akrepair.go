@@ -2,12 +2,15 @@ package publish
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/jackc/pgx/v5"
 )
 
 // Authentik aanvullen (fase 42d): een host met forward auth in NPM maar
@@ -35,9 +38,13 @@ func (s *Service) planAKRepair(ctx context.Context, st Settings, managed map[int
 		return err
 	}
 	p.Title = "Authentik aanvullen"
-	noSnippet := 0
+	noSnippet, typos := 0, 0
 	for _, v := range ov.Hosts {
 		if v.Authentik != AKHalf || len(v.Domains) == 0 || (len(a.Hosts) > 0 && !slices.Contains(a.Hosts, v.ID)) {
+			continue
+		}
+		if v.Typo != "" {
+			typos++
 			continue
 		}
 		h, ok := npmHostByID(ov, v.ID)
@@ -62,10 +69,16 @@ func (s *Service) planAKRepair(ctx context.Context, st Settings, managed map[int
 		}
 		p.Hosts = append(p.Hosts, ph)
 	}
+	if typos > 0 {
+		p.Lines = append(p.Lines, fmt.Sprintf("%d hosts met een tikfout in de naam overgeslagen: zet eerst de naam recht (Proxy hosts → Naam rechtzetten)", typos))
+	}
 	if noSnippet > 0 {
 		p.Lines = append(p.Lines, fmt.Sprintf("%d hosts hebben wel een provider maar geen forward auth in NPM; die zet je per host achter Authentik met de knop", noSnippet))
 	}
 	if len(p.Hosts) == 0 {
+		if typos > 0 {
+			return invalid("alle half ingestelde hosts hebben een tikfout in de naam: zet eerst de naam recht")
+		}
 		return invalid("geen half ingestelde host met forward auth om aan te vullen")
 	}
 	if len(p.Hosts) > 1 {
@@ -94,6 +107,10 @@ func (s *Service) autoRepairAK(ctx context.Context, st Settings) {
 	if err != nil {
 		return
 	}
+	// Nooit naast een andere taak op NPM; de volgende lezing probeert opnieuw.
+	if busy, _ := s.applyBusy(ctx); busy != nil {
+		return
+	}
 	now := s.Now()
 	var hosts []int
 	s.mu.Lock()
@@ -102,7 +119,7 @@ func (s *Service) autoRepairAK(ctx context.Context, st Settings) {
 	}
 	for _, v := range ov.Hosts {
 		adv, ok := npmHostByID(ov, v.ID)
-		if v.Authentik != AKHalf || !ok || !hasSnippet(adv) {
+		if v.Authentik != AKHalf || v.Typo != "" || !ok || !hasSnippet(adv) {
 			continue
 		}
 		if t, ok := s.akTried[v.ID]; ok && now.Sub(t) < akRetry {
@@ -119,4 +136,19 @@ func (s *Service) autoRepairAK(ctx context.Context, st Settings) {
 	if _, _, err := s.Start(ctx, actor, Action{Action: ActAKRepair, Hosts: hosts}); err != nil {
 		s.log.Info("publicatie: Authentik automatisch aanvullen", "err", err)
 	}
+}
+
+// applyBusy geeft de publicatietaak die nog wacht of loopt, of nil. Zo loopt
+// er nooit meer dan één taak tegelijk op NPM, ook zonder NPM-cluster.
+func (s *Service) applyBusy(ctx context.Context) (*jobs.BusyError, error) {
+	var b jobs.BusyError
+	err := s.pool.QueryRow(ctx, `SELECT id, title FROM jobs WHERE kind = $1 AND status IN ('queued', 'running') ORDER BY created_at LIMIT 1`, KindApply).Scan(&b.JobID, &b.Title)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	b.Cluster = "NPM"
+	return &b, nil
 }

@@ -106,6 +106,24 @@ func (f *fakeAuthentik) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		write(201, body)
+	case strings.HasPrefix(p, "/api/v3/core/applications/") && r.Method == http.MethodPatch:
+		slug := strings.Trim(strings.TrimPrefix(p, "/api/v3/core/applications/"), "/")
+		for _, a := range f.apps {
+			if a["slug"] == slug {
+				a["provider"] = body["provider"]
+				for _, pr := range f.providers {
+					if pr["assigned_application_slug"] == slug {
+						pr["assigned_application_slug"] = ""
+					}
+					if toInt(pr["pk"]) == toInt(body["provider"]) {
+						pr["assigned_application_slug"] = slug
+					}
+				}
+				write(200, a)
+				return
+			}
+		}
+		w.WriteHeader(404)
 	case strings.HasPrefix(p, "/api/v3/core/applications/") && r.Method == http.MethodDelete:
 		slug := strings.Trim(strings.TrimPrefix(p, "/api/v3/core/applications/"), "/")
 		for i, a := range f.apps {

@@ -194,7 +194,7 @@ func (s *Service) readAuthentik(ctx context.Context, st Settings) (*AKRead, erro
 		_ = json.Unmarshal(data, &v)
 		out.Version = v.Current
 	}
-	if out.Applications, err = akList[AKApplication](ctx, s, st, node, "/core/applications/"); err != nil {
+	if out.Applications, err = akList[AKApplication](ctx, s, st, node, "/core/applications/?superuser_full_list=true"); err != nil {
 		return nil, err
 	}
 	if out.Providers, err = akList[AKProxyProvider](ctx, s, st, node, "/providers/proxy/"); err != nil {
@@ -250,6 +250,10 @@ type akCreated struct {
 	OutpostPK       string `json:"outpost_pk,omitempty"`
 	// OutpostAdded: de provider kwam in de outpost door ClusterForge.
 	OutpostAdded bool `json:"outpost_added,omitempty"`
+	// AppRelinked: een bestaande applicatie met dezelfde slug kreeg deze
+	// provider; AppOldProvider is wat ze eerst had (0 = geen).
+	AppRelinked    string `json:"app_relinked,omitempty"`
+	AppOldProvider int    `json:"app_old_provider,omitempty"`
 }
 
 func (s *Service) akProtect(ctx context.Context, st Settings, node nodeRow, name, slug, domain, group string, log func(string, ...any)) (akCreated, error) {
@@ -293,7 +297,30 @@ func (s *Service) akProtect(ctx context.Context, st Settings, node nodeRow, name
 	} else {
 		log("Proxy provider %q bestaat al voor %s; hergebruikt", prov.Name, domain)
 	}
-	if prov.AssignedAppSlug == "" {
+	var sameSlug *AKApplication
+	for i, a := range r.Applications {
+		if a.Slug == slug {
+			sameSlug = &r.Applications[i]
+		}
+	}
+	if prov.AssignedAppSlug == "" && sameSlug != nil {
+		// De applicatie bestaat al (met een andere of geen provider): die
+		// krijgt deze provider, in plaats van een tweede aan te maken.
+		status, data, err := s.akCall(ctx, st, node, http.MethodPatch, "/core/applications/"+url.PathEscape(slug)+"/", map[string]any{"provider": prov.PK})
+		if err != nil {
+			return done, err
+		}
+		if status >= 300 {
+			return done, fmt.Errorf("bestaande applicatie %s koppelen: %s", slug, akMessage(status, data))
+		}
+		done.AppRelinked = slug
+		if sameSlug.Provider != nil {
+			done.AppOldProvider = *sameSlug.Provider
+			log("Bestaande applicatie %q (%s) gekoppeld aan deze provider (had provider %d)", sameSlug.Name, slug, *sameSlug.Provider)
+		} else {
+			log("Bestaande applicatie %q (%s) gekoppeld aan deze provider", sameSlug.Name, slug)
+		}
+	} else if prov.AssignedAppSlug == "" {
 		body := map[string]any{"name": name, "slug": slug, "provider": prov.PK, "meta_launch_url": external}
 		if group != "" {
 			body["group"] = group
@@ -370,6 +397,20 @@ func (s *Service) akUndo(ctx context.Context, st Settings, node nodeRow, c akCre
 					log("Provider uit de outpost gehaald")
 				}
 			}
+		}
+	}
+	if c.AppRelinked != "" {
+		var prov any
+		if c.AppOldProvider > 0 {
+			prov = c.AppOldProvider
+		}
+		status, data, err := s.akCall(ctx, st, node, http.MethodPatch, "/core/applications/"+url.PathEscape(c.AppRelinked)+"/", map[string]any{"provider": prov})
+		if err == nil && status >= 300 && status != http.StatusNotFound {
+			err = fmt.Errorf("applicatie terugzetten: %s", akMessage(status, data))
+		}
+		keep(err)
+		if err == nil {
+			log("Applicatie %s terug naar haar vorige provider", c.AppRelinked)
 		}
 	}
 	if c.AppSlug != "" {

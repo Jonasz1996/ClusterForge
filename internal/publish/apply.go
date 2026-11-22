@@ -907,6 +907,11 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, a Action) (stor
 	if err != nil {
 		return store.Job{}, Plan{}, err
 	}
+	if busy, err := s.applyBusy(ctx); err != nil {
+		return store.Job{}, p, err
+	} else if busy != nil {
+		return store.Job{}, p, *busy
+	}
 	spec := jobs.Spec{Kind: KindApply, Title: p.Title, Actor: actor, ClusterID: st.NPMClusterID, Params: applyParams{Action: a, Plan: p}}
 	var j store.Job
 	if st.NPMClusterID != nil {
