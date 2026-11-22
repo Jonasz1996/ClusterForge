@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,6 +59,27 @@ type HostView struct {
 	ClusterName string `json:"cluster_name,omitempty"`
 	// VIP is het VIP om naar te wijzen als de host nu naar één node wijst.
 	SuggestVIP string `json:"suggest_vip,omitempty"`
+	// Suggest: nieuw doel voor een host die naar een oud of onbekend adres
+	// wijst (fase 42).
+	Suggest *TargetSuggestion `json:"suggest,omitempty"`
+	// Voor het bewerken (fase 42).
+	HTTP2         bool   `json:"http2"`
+	HSTS          bool   `json:"hsts"`
+	BlockExploits bool   `json:"block_exploits"`
+	Advanced      string `json:"advanced,omitempty"`
+	// Typo: verbeterde naam bij een tikfout in het domein.
+	Typo string `json:"typo,omitempty"`
+	// TypoDomains: alle namen met de tikfout rechtgezet (voor één klik).
+	TypoDomains []string `json:"typo_domains,omitempty"`
+}
+
+// CertView is een certificaat in NPM, om te kiezen bij een host.
+type CertView struct {
+	ID       int        `json:"id"`
+	Name     string     `json:"name"`
+	Domains  []string   `json:"domains"`
+	Provider string     `json:"provider"`
+	Expires  *time.Time `json:"expires,omitempty"`
 }
 
 // AKAppView is een applicatie van Authentik met zijn provider en host.
@@ -87,6 +109,7 @@ type Overview struct {
 	Notices   []Notice     `json:"notices"`
 	Counts    Counts       `json:"counts"`
 	Clusters  []ClusterRef `json:"clusters"`
+	Certs     []CertView   `json:"certs"`
 	Protocol  int          `json:"protocol"`
 }
 
@@ -251,6 +274,14 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 	akRead := st.AuthentikLinked() && !akAt.IsZero()
 	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now())
 	ov.Apps = buildApps(npm, ak)
+	ov.Certs = make([]CertView, 0, len(npm.Certs))
+	for _, c := range npm.Certs {
+		cv := CertView{ID: c.ID, Name: certLabel(c), Domains: c.DomainNames, Provider: c.Provider}
+		if exp := c.Expires(); !exp.IsZero() {
+			cv.Expires = &exp
+		}
+		ov.Certs = append(ov.Certs, cv)
+	}
 	// Bij elke dienst: de hosts die er nu naartoe wijzen.
 	byKey := map[string]int{}
 	for i, r := range ov.Services {
@@ -351,6 +382,8 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 			ID: h.ID, Domains: h.DomainNames, ForwardScheme: h.ForwardScheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort,
 			Enabled: h.IsEnabled(), SSLForced: bool(h.SSLForced), Websockets: bool(h.AllowWebsocketUpgrade), CertID: h.CertID(),
 			HasAdvanced: strings.TrimSpace(h.AdvancedConfig) != "", AccessList: listByID[h.AccessListID], Problems: []Problem{},
+			HTTP2: bool(h.HTTP2Support), HSTS: bool(h.HSTSEnabled), BlockExploits: bool(h.BlockExploits),
+			Advanced: strings.TrimSpace(withoutSnippet(h.AdvancedConfig)),
 		}
 		add := func(code, level, format string, args ...any) {
 			v.Problems = append(v.Problems, Problem{Code: code, Level: level, Text: fmt.Sprintf(format, args...)})
@@ -390,16 +423,30 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 				inDom = true
 			}
 		}
-		if !inDom && len(h.DomainNames) > 0 {
-			if tail, fixed, ok := domainTypo(h.DomainNames[0], st.Domain); ok {
-				msg := fmt.Sprintf("%s staat onder %s, dat lijkt op %s: tikfout? Bedoeld is waarschijnlijk %s", h.DomainNames[0], tail, st.Domain, fixed)
+		var typoMsgs []string
+		fixedNames := make([]string, 0, len(h.DomainNames))
+		for _, d := range h.DomainNames {
+			d = strings.ToLower(d)
+			if tail, fixed, ok := domainTypo(d, st.Domain); ok {
+				msg := fmt.Sprintf("%s staat onder %s, dat lijkt op %s: tikfout? Bedoeld is waarschijnlijk %s", d, tail, st.Domain, fixed)
 				if _, ok := provByHost[fixed]; ok {
 					msg += " (in Authentik staat die naam al)"
 				}
-				add("domein_tikfout", "warn", "%s", msg)
-			} else {
-				add("buiten_domein", "info", "niet onder %s", st.Domain)
+				typoMsgs = append(typoMsgs, msg)
+				if v.Typo == "" {
+					v.Typo = fixed
+				}
+				d = fixed
 			}
+			if !slices.Contains(fixedNames, d) {
+				fixedNames = append(fixedNames, d)
+			}
+		}
+		if len(typoMsgs) > 0 {
+			v.TypoDomains = fixedNames
+			add("domein_tikfout", "warn", "%s", strings.Join(typoMsgs, "; "))
+		} else if !inDom && len(h.DomainNames) > 0 {
+			add("buiten_domein", "info", "niet onder %s", st.Domain)
 		}
 		fh := strings.ToLower(h.ForwardHost)
 		if i, ok := idx[fh+":"+strconv.Itoa(h.ForwardPort)]; ok {
@@ -409,8 +456,17 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 				v.SuggestVIP = r.Target
 				add("naar_node", "warn", "wijst naar één node (%s) terwijl %s op het VIP %s draait", h.ForwardHost, r.Name, r.Target)
 			}
-		} else if known[fh] && v.Enabled {
-			add("doel_weg", "crit", "op %s:%d draait niets dat ClusterForge kent (dienst gestopt of verhuisd?)", h.ForwardHost, h.ForwardPort)
+		} else {
+			if known[fh] && v.Enabled {
+				add("doel_weg", "crit", "op %s:%d draait niets dat ClusterForge kent (dienst gestopt of verhuisd?)", h.ForwardHost, h.ForwardPort)
+			}
+			if len(h.DomainNames) > 0 {
+				v.Suggest = suggestTarget(h.DomainNames[0], h.ForwardPort, services)
+			}
+			if v.Suggest != nil && !known[fh] {
+				add("oud_doel", "warn", "wijst naar %s:%d, een adres dat ClusterForge niet kent; voorstel: %s://%s:%d (%s)",
+					h.ForwardHost, h.ForwardPort, v.Suggest.Scheme, v.Suggest.Host, v.Suggest.Port, v.Suggest.ServiceName)
+			}
 		}
 		// Authentik.
 		if akRead && len(h.DomainNames) > 0 {
@@ -533,6 +589,7 @@ func notices(ov *Overview) []Notice {
 		{"cert_verlopen", "Certificaat verlopen", true},
 		{"cert_verloopt", "Certificaat verloopt binnenkort", false},
 		{"naar_node", "Proxy host wijst naar één node in plaats van het VIP", false},
+		{"oud_doel", "Proxy host wijst naar een oud adres (voorstel klaar)", false},
 		{"domein_tikfout", "Proxy host onder een domein dat op het hoofddomein lijkt (tikfout?)", false},
 		{"authentik_half", "Authentik half ingesteld", false},
 	} {

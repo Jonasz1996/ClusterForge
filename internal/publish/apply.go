@@ -43,6 +43,9 @@ const (
 	ActRestore = "restore"
 	// ActRename geeft beheerde hosts een naam onder een nieuw hoofddomein (M6).
 	ActRename = "rename"
+	// ActRetargetMany zet hosts op het voorgestelde nieuwe doel (fase 42);
+	// Hosts leeg is alle hosts met een voorstel.
+	ActRetargetMany = "retarget_many"
 )
 
 // Action is een vraag van de GUI.
@@ -77,6 +80,11 @@ type Action struct {
 	NewDomain string `json:"new_domain,omitempty"`
 	// KeepOld: de oude naam blijft als extra naam op de host.
 	KeepOld bool `json:"keep_old,omitempty"`
+	// Fase 42, bij ActUpdate: eigen Advanced (zonder het blok van
+	// ClusterForge, dat blijft staan), SSL afdwingen en de namen.
+	AdvancedConfig *string  `json:"advanced_config,omitempty"`
+	SSLForced      *bool    `json:"ssl_forced,omitempty"`
+	Domains        []string `json:"domains,omitempty"`
 }
 
 // Plan is wat een actie zou doen, voor het voorbeeldscherm en de taak.
@@ -313,6 +321,7 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 		return h, nil
 	}
 	akNeeded := false
+	wantCertNew, renamePK := false, 0
 	switch a.Action {
 	case ActPublish:
 		ph, lines, warns, err := s.planPublish(ctx, st, npm, taken, a)
@@ -375,9 +384,65 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			if a.HSTS != nil {
 				want["hsts_enabled"] = *a.HSTS
 			}
+			if a.SSLForced != nil {
+				want["ssl_forced"] = *a.SSLForced
+			}
+			if a.AdvancedConfig != nil {
+				adv, err := keepSnippet(h.AdvancedConfig, *a.AdvancedConfig)
+				if err != nil {
+					return Plan{}, err
+				}
+				want["advanced_config"] = adv
+			}
+			if len(a.Domains) > 0 {
+				names, err := s.planDomains(ctx, st, h, a.Domains, taken, &p, &renamePK)
+				if err != nil {
+					return Plan{}, err
+				}
+				want["domain_names"] = names
+				// Dekt het certificaat de nieuwe naam niet, kies er dan een.
+				if a.SSL == "" && h.CertID() > 0 {
+					covered := false
+					for _, c := range npm.Certs {
+						if c.ID == h.CertID() && c.Covers(names[0]) {
+							covered = true
+						}
+					}
+					if !covered {
+						a.SSL = "auto"
+					}
+				}
+			}
+			if a.SSL != "" {
+				first := strings.ToLower(h.DomainNames[0])
+				if names, ok := want["domain_names"].([]string); ok {
+					first = names[0]
+				}
+				certID, certNew, line, warn, err := s.chooseCert(st, npm, first, a.SSL)
+				if err != nil {
+					return Plan{}, err
+				}
+				if line != "" {
+					p.Lines = append(p.Lines, line)
+				}
+				if warn != "" {
+					p.Warnings = append(p.Warnings, warn)
+				}
+				if certNew {
+					wantCertNew = true
+				} else {
+					want["certificate_id"] = certID
+				}
+				if certID == 0 && !certNew {
+					want["ssl_forced"], want["http2_support"], want["hsts_enabled"] = false, false, false
+				}
+			}
 			p.Title = "Wijzigen: " + h.DomainNames[0]
 		}
 		body := diffFields(have, want)
+		if wantCertNew {
+			body["certificate_id"] = 0
+		}
 		if len(body) == 0 {
 			return Plan{}, invalid("er verandert niets")
 		}
@@ -386,7 +451,17 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			old[k] = have[k]
 			p.Lines = append(p.Lines, fmt.Sprintf("%s: %s → %s", k, jsonText(have[k]), jsonText(body[k])))
 		}
-		ph := PlannedHost{HostID: h.ID, Domain: strings.ToLower(h.DomainNames[0]), Body: body, Old: old, Scheme: schemeOf(h)}
+		ph := PlannedHost{HostID: h.ID, Domain: strings.ToLower(h.DomainNames[0]), Body: body, Old: old, Scheme: schemeOf(h),
+			CertNew: wantCertNew, ProviderPK: renamePK}
+		if names, ok := body["domain_names"].([]string); ok {
+			ph.Domain = names[0]
+		}
+		if id, ok := body["certificate_id"].(int); ok {
+			ph.Scheme = "http"
+			if id > 0 || wantCertNew {
+				ph.Scheme = "https"
+			}
+		}
 		if isManaged {
 			ph.ClusterID, ph.NodeID = m.ClusterID, m.NodeID
 			if m.ServicePort != nil {
@@ -474,6 +549,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			p.Lines = append(p.Lines, "Authentik: applicatie en provider van ClusterForge weg")
 		}
 		p.Hosts = append(p.Hosts, ph)
+	case ActRetargetMany:
+		if err := s.planRetargetMany(ctx, npm, managed, a, &p); err != nil {
+			return Plan{}, err
+		}
 	case ActRename:
 		if err := s.planRename(ctx, st, npm, managed, taken, a, &p); err != nil {
 			return Plan{}, err
@@ -812,12 +891,50 @@ func (s *Service) runApply(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
+	if p.Action.Action == ActRetargetMany && len(p.Plan.Hosts) > 1 {
+		return s.runMany(ctx, j, st, node, snapshot, p)
+	}
 	for i := range p.Plan.Hosts {
 		if err := s.applyHost(ctx, j, st, node, snapshot, p.Action, &p.Plan.Hosts[i]); err != nil {
 			return err
 		}
 	}
 	return s.syncNow(ctx, j, st)
+}
+
+// runMany doet veel hosts na elkaar, elk met een eigen kopie: mislukt er
+// een, dan gaat alleen die terug en gaan de andere door.
+func (s *Service) runMany(ctx context.Context, j *jobs.Job, st Settings, node nodeRow, snapshot string, p applyParams) error {
+	var failed []string
+	for i := range p.Plan.Hosts {
+		ph := &p.Plan.Hosts[i]
+		snap := snapshot
+		if i > 0 {
+			if err := j.Step(ctx, "Kopie van NPM: "+ph.Domain, func(ctx context.Context, step *jobs.Step) error {
+				res, err := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpNPMSnapshot})
+				if err != nil {
+					return err
+				}
+				snap = res.NPM.Snapshot
+				step.Logf("Kopie %s", snap)
+				return nil
+			}); err != nil {
+				failed = append(failed, ph.Domain+": geen kopie, overgeslagen")
+				continue
+			}
+		}
+		if err := s.applyHost(ctx, j, st, node, snap, p.Action, ph); err != nil {
+			failed = append(failed, err.Error())
+		}
+	}
+	if err := s.syncNow(ctx, j, st); err != nil {
+		return err
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d van %d mislukt (die staan terug zoals ze waren, de andere zijn aangepast): %s",
+			len(failed), len(p.Plan.Hosts), strings.Join(failed, "; "))
+	}
+	return nil
 }
 
 func (s *Service) web(ctx context.Context, node nodeRow, req protocol.WebRequest) (protocol.WebResponse, error) {
@@ -979,6 +1096,13 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 		have := h.fields()
 		for k, v := range ph.Body {
 			if !slices.Contains(npmHostFields, k) {
+				continue
+			}
+			if k == "domain_names" {
+				// NPM zet de namen op alfabet.
+				if !sameValue(sortedNames(have[k]), sortedNames(v)) {
+					diff = append(diff, k)
+				}
 				continue
 			}
 			if !sameValue(have[k], v) {
@@ -1312,4 +1436,23 @@ func (s *Service) Test(ctx context.Context, what string) (map[string]any, error)
 		return out, nil
 	}
 	return nil, invalid("test npm of authentik")
+}
+
+func sortedNames(v any) []string {
+	var out []string
+	switch x := v.(type) {
+	case []string:
+		out = slices.Clone(x)
+	case []any:
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	for i := range out {
+		out[i] = strings.ToLower(out[i])
+	}
+	slices.Sort(out)
+	return out
 }

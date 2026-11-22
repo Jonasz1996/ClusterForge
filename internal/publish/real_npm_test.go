@@ -483,6 +483,86 @@ func TestRealNPM(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("publish_hosts: %d", n)
 	}
+
+	// 9. Fase 42: twee oude hosts naar een adres dat niet meer bestaat; de
+	// dienst draait nu op een andere node. Voorstel op naam, en alles in één
+	// keer toepassen, host voor host.
+	alive := func() {
+		if _, err := pool.Exec(ctx, `UPDATE node_status SET heartbeat_at = now()`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alive()
+	tok = loginNPM(t, p81, identity, secret)
+	var old []int
+	for _, name := range []string{"webapp.example.test", "webapp2.example.test"} {
+		st, b := npmAPI(t, p81, "POST", "/nginx/proxy-hosts", tok, map[string]any{"domain_names": []string{name}, "forward_scheme": "http",
+			"forward_host": "10.255.255.1", "forward_port": 8080, "certificate_id": 0, "meta": map[string]any{}, "advanced_config": "", "locations": []any{}})
+		var h struct {
+			ID int `json:"id"`
+		}
+		if st >= 300 || json.Unmarshal(b, &h) != nil {
+			t.Fatalf("oude host maken: %d %s", st, b)
+		}
+		old = append(old, h.ID)
+	}
+	s.Refresh(ctx)
+	svcNode := seedNode(t, pool, "svc1", gateway)
+	svcs, _ := json.Marshal([]protocol.WebService{{Proto: "tcp", Addr: "0.0.0.0", Port: backend, Container: "webapp", Image: "example/webapp:1", Kind: "http", Status: 200}})
+	if _, err := pool.Exec(ctx, `INSERT INTO publish_services (node_id, services) VALUES ($1, $2)`, svcNode, svcs); err != nil {
+		t.Fatal(err)
+	}
+	alive()
+	ov, _ = s.Overview(ctx)
+	sugg := 0
+	for _, h := range ov.Hosts {
+		if slices.Contains(old, h.ID) {
+			if h.Suggest == nil || h.Suggest.Host != gateway || h.Suggest.Port != backend {
+				t.Fatalf("voorstel voor %v: %+v", h.Domains, h.Suggest)
+			}
+			sugg++
+		}
+	}
+	if sugg != 2 {
+		for _, h := range ov.Hosts {
+			t.Logf("host %d %v → %s:%d %+v", h.ID, h.Domains, h.ForwardHost, h.ForwardPort, h.Suggest)
+		}
+		for _, r := range ov.Services {
+			t.Logf("dienst %s %s %s:%d web=%v", r.Key, r.Name, r.Target, r.Port, r.Web)
+		}
+		t.Fatalf("%d voorstellen (oud %v)", sugg, old)
+	}
+	plan, err := s.Plan(ctx, Action{Action: ActRetargetMany})
+	if err != nil || len(plan.Hosts) != 2 {
+		t.Fatalf("plan: %v %+v", err, plan)
+	}
+	run(Action{Action: ActRetargetMany}, store.JobStatusSucceeded)
+	for _, hid := range old {
+		if c := conf(hid); !strings.Contains(c, gateway) || !strings.Contains(c, fmt.Sprint(backend)) {
+			t.Fatalf("host %d niet omgezet:\n%s", hid, c)
+		}
+	}
+
+	// 10. Bewerken: eigen Advanced, een extra naam en de tikfout rechtzetten.
+	alive()
+	s.Refresh(ctx)
+	adv := "add_header X-CF-Test fase42;"
+	run(Action{Action: ActUpdate, HostID: old[0], AdvancedConfig: &adv, Domains: []string{"webapp.exampel.test", "extra.example.test"}}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "X-CF-Test fase42") || !strings.Contains(c, "extra.example.test") {
+		t.Fatalf("bewerken:\n%s", c)
+	}
+	s.Refresh(ctx)
+	ov, _ = s.Overview(ctx)
+	for _, h := range ov.Hosts {
+		if h.ID == old[0] && (h.Typo != "webapp.example.test" || h.Advanced != adv || len(h.TypoDomains) != 2) {
+			t.Fatalf("tikfout of advanced: %+v", h)
+		}
+	}
+	alive()
+	run(Action{Action: ActUpdate, HostID: old[0], Domains: []string{"webapp.example.test", "extra.example.test"}}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "webapp.example.test") || strings.Contains(c, "exampel") {
+		t.Fatalf("tikfout niet rechtgezet:\n%s", c)
+	}
 }
 
 func loginNPM(t *testing.T, port, identity, secret string) string {

@@ -1,6 +1,9 @@
 package publish
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestInternalReason(t *testing.T) {
 	cases := []struct {
@@ -48,5 +51,37 @@ func TestDomainTypo(t *testing.T) {
 		if ok != c.ok || fixed != c.fixed {
 			t.Errorf("%s: %q %v, verwacht %q %v", c.name, fixed, ok, c.fixed, c.ok)
 		}
+	}
+}
+
+func TestSuggestTarget(t *testing.T) {
+	svcs := []ServiceRow{
+		{Key: "a", Proto: "tcp", Web: true, Kind: "http", Port: 5100, Container: "changedetection", Image: "dgtlmoon/changedetection.io", Target: "192.168.106.166", TargetVIP: true, Label: "changedetection"},
+		{Key: "b", Proto: "tcp", Web: true, Kind: "http", Port: 15100, Unit: "haproxy", Target: "192.168.106.166", TargetVIP: true, Internal: true, Label: "haproxy"},
+		{Key: "c", Proto: "tcp", Web: true, Kind: "https", Port: 5651, Container: "ferdium", Image: "lscr.io/linuxserver/ferdium:latest", Target: "192.168.106.166", TargetVIP: true, Label: "ferdium"},
+		{Key: "d", Proto: "tcp", Web: true, Kind: "http", Port: 5650, Container: "ferdium", Image: "lscr.io/linuxserver/ferdium:latest", Target: "192.168.106.166", TargetVIP: true, Label: "ferdium"},
+	}
+	if s := suggestTarget("changedetection.jbogaert.be", 15100, svcs); s == nil || s.ServiceKey != "a" || !s.Sure {
+		t.Errorf("changedetection: %+v", s)
+	}
+	if s := suggestTarget("ferdium.bogaert.be", 5651, svcs); s == nil || s.ServiceKey != "c" || s.Scheme != "https" {
+		t.Errorf("ferdium: %+v", s)
+	}
+	if s := suggestTarget("iets.jbogaert.be", 15100, svcs); s != nil {
+		t.Errorf("haproxy-poort mag geen voorstel geven: %+v", s)
+	}
+}
+
+func TestKeepSnippet(t *testing.T) {
+	cur := "client_max_body_size 0;\n\n" + AuthentikSnippet("http://ak:9000")
+	got, err := keepSnippet(cur, "add_header X 1;")
+	if err != nil || !strings.HasPrefix(got, "add_header X 1;\n\n"+snippetBegin) || !strings.HasSuffix(got, snippetEnd) {
+		t.Fatalf("%v %q", err, got)
+	}
+	if _, err := keepSnippet(cur, "location / { }"); err == nil {
+		t.Fatal("location / naast forward auth")
+	}
+	if got, _ := keepSnippet("oud", ""); got != "" {
+		t.Fatalf("leeg: %q", got)
 	}
 }
