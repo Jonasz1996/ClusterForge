@@ -1,0 +1,402 @@
+package httpapi
+
+import (
+	"errors"
+	"maps"
+	"net/http"
+	"slices"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Jonasz1996/clusterforge/internal/components"
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/store"
+)
+
+// ListComponentTemplates geeft de databases die een cluster erbij kan
+// krijgen, met hun instellingen.
+func (s *Server) ListComponentTemplates(w http.ResponseWriter, r *http.Request) {
+	items := []gen.ComponentTemplate{}
+	for _, engine := range slices.Sorted(maps.Keys(components.Templates)) {
+		t, ok := components.Registry().Latest(components.Templates[engine])
+		if !ok {
+			continue
+		}
+		out := gen.ComponentTemplate{
+			Engine: gen.ComponentTemplateEngine(engine), Name: t.Name, Version: t.Version, Title: t.Title,
+			Description: strings.TrimSpace(t.Description), Params: []gen.TemplateParam{},
+		}
+		for _, p := range t.Params {
+			// Het eigen VIP kies je apart (vip_address), niet als instelling.
+			if p.Name == "vip" || components.Managed(p.Name) {
+				continue
+			}
+			out.Params = append(out.Params, toAPIParam(p))
+		}
+		items = append(items, out)
+	}
+	writeJSON(w, http.StatusOK, list[gen.ComponentTemplate]{items})
+}
+
+// ListClusterComponents geeft de onderdelen van een cluster, zoals zijn
+// database. Ook voor viewers.
+func (s *Server) ListClusterComponents(w http.ResponseWriter, r *http.Request, clusterID uuid.UUID) {
+	ctx := r.Context()
+	if _, err := s.q.GetCluster(ctx, clusterID); err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	list, err := s.components.List(ctx, clusterID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	items := make([]gen.ClusterComponent, 0, len(list))
+	for _, c := range list {
+		items = append(items, toAPIComponent(c))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// PlanClusterComponent toont wat een database toevoegen zou doen.
+func (s *Server) PlanClusterComponent(w http.ResponseWriter, r *http.Request, clusterID uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	var in gen.ComponentInput
+	if !decode(w, r, &in) {
+		return
+	}
+	p, err := s.components.Plan(r.Context(), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.VipAddress, in.Settings))
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIComponentPlan(p))
+}
+
+// AddClusterComponent rolt de database uit volgens het plan met deze hash.
+func (s *Server) AddClusterComponent(w http.ResponseWriter, r *http.Request, clusterID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentApplyInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database toevoegen") {
+		return
+	}
+	j, err := s.components.Add(ctx, events.User(p.User.ID), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.VipAddress, in.Settings), in.Hash)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// ReapplyClusterComponent past de database opnieuw toe.
+func (s *Server) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentReapplyInput
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw toepassen") {
+		return
+	}
+	j, err := s.components.Reapply(ctx, events.User(p.User.ID), clusterID, componentID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// UpdateClusterComponent zet vanzelf opnieuw starten aan of uit.
+func (s *Server) UpdateClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentUpdateInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	if err := s.components.SetAutoRecover(ctx, events.User(p.User.ID), clusterID, componentID, in.AutoRecover); err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	list, err := s.components.List(ctx, clusterID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	for _, c := range list {
+		if c.ID == componentID {
+			writeJSON(w, http.StatusOK, toAPIComponent(c))
+			return
+		}
+	}
+	s.componentError(w, r, components.ErrNotFound)
+}
+
+// PlanRecoverClusterComponent toont wat opnieuw starten zou doen.
+func (s *Server) PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	p, err := s.components.RecoverPlan(r.Context(), clusterID, componentID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIRecoverPlan(p))
+}
+
+// RecoverClusterComponent start de database opnieuw volgens het plan met
+// deze hash.
+func (s *Server) RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentRecoverInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw starten") {
+		return
+	}
+	j, err := s.components.Recover(ctx, events.User(p.User.ID), clusterID, componentID, in.Hash)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// GetClusterComponentManage toont Beheer van een database per node.
+func (s *Server) GetClusterComponentManage(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	v, err := s.components.Manage(r.Context(), clusterID, componentID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIManage(v))
+}
+
+// ManageClusterComponent voert een actie uit Beheer uit, als het overzicht
+// nog is wat de gebruiker zag.
+func (s *Server) ManageClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentManageInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database beheren") {
+		return
+	}
+	j, err := s.components.ManageAct(ctx, events.User(p.User.ID), clusterID, componentID, components.ManageInput{
+		Action: string(in.Action), NodeID: in.NodeId, Hash: in.Hash,
+	})
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func toAPIManage(v components.ManageView) gen.ComponentManage {
+	out := gen.ComponentManage{
+		ClusterId: v.ClusterID, ClusterName: v.ClusterName, Slug: v.Slug, Prod: v.Prod, Engine: gen.ComponentManageEngine(v.Engine), Title: v.Title,
+		Vip: v.VIP, Hash: v.Hash, Nodes: make([]gen.ComponentManageNode, 0, len(v.Nodes)),
+	}
+	for _, n := range v.Nodes {
+		node := gen.ComponentManageNode{
+			NodeId: n.NodeID, Hostname: n.Hostname, Index: n.Index, Answered: n.Answered, State: n.State, Healthy: n.Healthy, Role: n.Role,
+			Sync: n.Sync, LagBytes: nullableOf(n.LagBytes), PendingRestart: n.PendingRestart, Vip: n.VIP, Actions: make([]gen.ComponentManageAction, 0, len(n.Actions)),
+		}
+		for _, a := range n.Actions {
+			node.Actions = append(node.Actions, gen.ComponentManageAction{
+				Action: gen.ComponentManageActionAction(a.Action), Title: a.Title, Allowed: a.Allowed, Reason: a.Reason, Effects: nonNil(a.Effects),
+			})
+		}
+		out.Nodes = append(out.Nodes, node)
+	}
+	return out
+}
+
+// RemoveClusterComponent haalt een database die nooit gelukt is uit
+// ClusterForge.
+func (s *Server) RemoveClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if err := s.components.Remove(r.Context(), events.User(p.User.ID), clusterID, componentID); err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func componentRequest(engine string, nodes []uuid.UUID, arbiter, vip func() (uuid.UUID, error), vipAddress *string, settings *map[string]any) components.Request {
+	req := components.Request{Engine: engine, Nodes: nodes, Settings: map[string]any{}}
+	if vipAddress != nil {
+		req.VIPAddress = strings.TrimSpace(*vipAddress)
+	}
+	if a, err := arbiter(); err == nil {
+		req.Arbiter = &a
+	}
+	if v, err := vip(); err == nil {
+		req.VIP = &v
+	}
+	if settings != nil {
+		req.Settings = *settings
+	}
+	return req
+}
+
+func (s *Server) componentError(w http.ResponseWriter, r *http.Request, err error) {
+	var ie *components.InvalidError
+	var ce *components.ConflictError
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		writeError(w, http.StatusNotFound, "not_found", "cluster niet gevonden")
+	case errors.Is(err, components.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, components.ErrStale):
+		writeError(w, http.StatusConflict, "plan_stale", err.Error())
+	case errors.As(err, &ie):
+		writeError(w, http.StatusBadRequest, "validation", ie.Msg)
+	case errors.As(err, &ce):
+		writeError(w, http.StatusConflict, "conflict", ce.Msg)
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
+func toAPIComponent(c components.Component) gen.ClusterComponent {
+	out := gen.ClusterComponent{
+		Id: c.ID, ClusterId: c.ClusterID, Engine: c.Engine, Template: c.Template, Version: c.Version, Title: c.Title,
+		Revision: c.Revision, AppliedRevision: nullableOf(c.AppliedRevision), Params: c.Params, Nodes: make([]gen.ComponentNode, 0, len(c.Nodes)),
+		State: c.State, JobId: nullableOf(c.JobID), JobError: c.JobError, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+	}
+	for _, n := range c.Nodes {
+		out.Nodes = append(out.Nodes, gen.ComponentNode{NodeId: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index})
+	}
+	var vip *gen.ComponentVIP
+	if v := c.VIP; v != nil {
+		vip = &gen.ComponentVIP{Id: v.ID, Address: v.Address, Nodes: nonNil(v.Nodes), Owner: v.Owner, Own: v.Own, Vrid: v.VRID}
+	}
+	out.Vip = nullableOf(vip)
+	out.AutoRecover, out.DownSince, out.DownReason = c.AutoRecover, nullableOf(c.DownSince), c.DownReason
+	out.NodesOut = make([]gen.ComponentNodeOut, 0, len(c.NodesOut))
+	for _, n := range c.NodesOut {
+		out.NodesOut = append(out.NodesOut, gen.ComponentNodeOut{Hostname: n.Hostname, Since: n.Since, Reason: n.Reason})
+	}
+	var rec *gen.ComponentRecovery
+	if v := c.Recovery; v != nil {
+		rec = &gen.ComponentRecovery{JobId: v.JobID, Status: v.Status, Error: v.Error}
+	}
+	out.Recovery = nullableOf(rec)
+	out.Health, out.HealthReason, out.HealthAt = gen.ClusterComponentHealth(c.Health), c.HealthReason, nullableOf(c.HealthAt)
+	return out
+}
+
+func toAPIRecoverPlan(p components.RecoverPlan) gen.ComponentRecoverPlan {
+	out := gen.ComponentRecoverPlan{
+		ClusterId: p.ClusterID, ClusterName: p.ClusterName, Slug: p.Slug, Prod: p.Prod, Title: p.Title, Primary: p.Primary, Begin: p.Begin,
+		Blocked: p.Blocked, Hash: p.Hash, Nodes: make([]gen.ComponentRecoverNode, 0, len(p.Nodes)), Findings: make([]gen.ComponentFinding, 0, len(p.Findings)),
+	}
+	for _, n := range p.Nodes {
+		out.Nodes = append(out.Nodes, gen.ComponentRecoverNode{
+			NodeId: n.NodeID, Hostname: n.Hostname, Index: n.Index, Answered: n.Answered, State: n.State, Active: n.Active, Running: n.Running,
+			Uuid: n.UUID, Seqno: n.Seqno, SafeToBootstrap: n.SafeToBootstrap, From: n.From, Action: n.Action,
+		})
+	}
+	for _, f := range p.Findings {
+		out.Findings = append(out.Findings, gen.ComponentFinding{
+			Level: f.Level, Code: f.Code, NodeId: nullableOf(f.NodeID), Hostname: f.Hostname, Message: f.Message, Command: f.Command,
+		})
+	}
+	return out
+}
+
+func toAPIComponentPlan(p components.Plan) gen.ComponentPlan {
+	out := gen.ComponentPlan{
+		ClusterId: p.ClusterID, ClusterName: p.ClusterName, Slug: p.Slug, Prod: p.Prod, Engine: p.Engine, Template: p.Template,
+		Version: p.Version, Title: p.Title, Params: p.Params, Blocked: p.Blocked, Hash: p.Hash,
+		Nodes: make([]gen.ComponentPlanNode, 0, len(p.Nodes)), Findings: make([]gen.ComponentFinding, 0, len(p.Findings)),
+	}
+	for _, n := range p.Nodes {
+		out.Nodes = append(out.Nodes, toAPIPlanNode(n))
+	}
+	var vip *gen.ComponentPlanVIP
+	if v := p.VIP; v != nil {
+		vip = &gen.ComponentPlanVIP{Id: v.ID, Address: v.Address, Owner: v.Owner, Own: v.Own, Vrid: v.VRID}
+	}
+	out.Vip = nullableOf(vip)
+	for _, f := range p.Findings {
+		out.Findings = append(out.Findings, gen.ComponentFinding{
+			Level: f.Level, Code: f.Code, NodeId: nullableOf(f.NodeID), Hostname: f.Hostname, Message: f.Message, Command: f.Command,
+		})
+	}
+	return out
+}
+
+func toAPIPlanNode(n components.PlanNode) gen.ComponentPlanNode {
+	return gen.ComponentPlanNode{
+		NodeId: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Os: n.OS, PveType: n.PveType,
+		PveNode: n.PveNode, Vmid: n.VMID, MemoryBytes: n.MemoryBytes, MemoryUsedPct: nullableOf(float32Of(n.MemoryUsedPct)),
+		NeedBytes: n.NeedBytes, FreeAfterPct: nullableOf(float32Of(n.FreeAfterPct)), DiskFreeBytes: nullableOf(n.DiskFreeBytes),
+		DiskMount: n.DiskMount, Existing: n.Existing, Steps: nonNil(n.Steps), VipInstance: n.VIPInstance, VipDiff: n.VIPDiff,
+	}
+}
+
+func float32Of(p *float64) *float32 {
+	if p == nil {
+		return nil
+	}
+	v := float32(*p)
+	return &v
+}

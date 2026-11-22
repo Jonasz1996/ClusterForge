@@ -1,0 +1,87 @@
+name: cron
+version: 1.0.0
+title: Cron-cluster
+description: >-
+  Twee of meer servers die samen je geplande taken draaien, elke taak op één
+  node tegelijk. Keepalived geeft het VIP aan de node met de hoogste
+  prioriteit waarop cron draait, en cf-leader voert een taak alleen uit op de
+  node die het VIP heeft. Valt die node of cron erop uit, dan neemt de
+  volgende het binnen enkele seconden over.
+cluster_type: cron
+# Keepalived met preempt: het VIP keert terug naar de eerste node zodra die
+# weer gezond is.
+failback: true
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Wie het VIP heeft, draait de taken. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+  - name: node_count
+    type: int
+    label: Aantal nodes
+    default: 2
+    min: 2
+    max: 5
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 1
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 1G
+    min: 512M
+    max: 64G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 10G
+    min: 8G
+    max: 1T
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+
+roles:
+  - name: cron
+    count: "{{ .params.node_count }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      - package: { names: [cron, keepalived] }
+      - file:
+          path: /usr/local/bin/cf-leader
+          template: cf-leader.tmpl
+          mode: "0755"
+      - service: { name: cron, enabled: true, state: started }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 60s }
+
+# Zonder cron geeft keepalived het VIP af (chk_cron). Zonder keepalived heeft
+# geen node het VIP, en draait cf-leader nergens een taak.
+services:
+  - { name: cron, kind: cron, unit: cron, depends_on: [keepalived], strength: hard }
+  - { name: keepalived, kind: vip, unit: keepalived }

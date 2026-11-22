@@ -1,0 +1,30 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Het pakket herstart na een update alleen zijn eigen dienst, en die staat
+# uit. Draait cf-zabbix-server of cf-zabbix-proxy nog het vervangen
+# programma, dan herstart dit script hem; de Zabbix server zet bij het
+# starten zelf de database om naar de nieuwe versie.
+#
+#   zabbix-restart.sh            herstart wie het oude programma draait
+#   zabbix-restart.sh --check    geeft 1 als een herstart nodig is
+#   zabbix-restart.sh --no-block zoals zonder optie, zonder te wachten (apt)
+mode=${1:-}
+need=0
+for u in cf-zabbix-server cf-zabbix-proxy; do
+	pid=$(systemctl show -p MainPID --value "$u" 2>/dev/null)
+	[ -n "$pid" ] && [ "$pid" != 0 ] || continue
+	case "$(readlink "/proc/$pid/exe" 2>/dev/null)" in
+	*" (deleted)")
+		need=1
+		case "$mode" in
+		--check) ;;
+		--no-block) systemctl try-restart --no-block "$u" ;;
+		*) echo "$u draait een vervangen programma: herstarten"; systemctl try-restart "$u" ;;
+		esac
+		;;
+	esac
+done
+[ "$mode" = --check ] && exit "$need"
+exit 0

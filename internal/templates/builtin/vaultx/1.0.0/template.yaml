@@ -1,0 +1,239 @@
+name: vaultx
+version: 1.0.0
+title: VaultX (HA)
+description: >-
+  VaultX, de eigen wachtwoordkluis, op drie of vijf nodes met één gedeelde
+  PostgreSQL (Patroni, met een eigen VIP op de primary) en een VIP van
+  keepalived. VaultX draait op elke node tegelijk tegen dezelfde database;
+  valt een node weg, dan neemt een andere het VIP over zonder dat er iets
+  gekopieerd moet worden. Een bestaande VaultX neem je over met
+  vaultx-ctl.sh overnemen, met een gecontroleerde back-up vooraf, een
+  telling en controlesom per tabel en terugdraaien bij een fout. De
+  bestaande node mag zelf een van de nodes zijn (zijn PostgreSQL blijft
+  ernaast staan als terugweg), of erbuiten blijven.
+cluster_type: generic
+
+# VaultX draait op elke node; het VIP hoort bij de gezondste node met de
+# hoogste prioriteit en mag dus terugspringen.
+failback: true
+
+# PostgreSQL (Patroni) op alle nodes, met een eigen VIP op de primary.
+# ClusterForge maakt daarna de gebruiker en de database vaultx (eigenaar).
+database:
+  engine: postgresql
+  role: node
+  vip: "{{ .params.db_vip }}"
+  host: "{{ .params.db_vip }}"
+  settings:
+    shared_buffers: 256M
+    max_connections: 200
+  steps:
+    - { kind: db_user, user: vaultx, password: "{{ .params.db_password }}", grant_on: vaultx }
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van VaultX (http://VIP en https://VIP). Zet daarna de proxy host in Nginx Proxy Manager naar dit adres, poort 80. Niet .1 tot .3 van het VLAN (gateways).
+  - name: db_vip
+    type: ipv4
+    label: VIP van de database
+    immutable: true
+    help: Een tweede vrij adres; het staat altijd op de primary van PostgreSQL.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: Patroni wil een meerderheid; met drie mag er één uitvallen.
+    default: 3
+    choices: [3, 5]
+  - name: version
+    type: string
+    label: Versie van VaultX
+    help: Een commit, tag of branch van github.com/Jonasz1996/vaultx. Neem je een bestaande VaultX over, geef dan zijn commit (git -C /opt/vaultx rev-parse HEAD op de oude node; vaultx-ctl.sh bron-info toont hem). Een andere waarde bouwt VaultX op elke node opnieuw en herstart het.
+    default: main
+    pattern: '[A-Za-z0-9][A-Za-z0-9._/-]{0,99}'
+  - name: nieuw
+    type: bool
+    label: Nieuw cluster met een lege kluis
+    immutable: true
+    help: Uit (standaard) wacht VaultX op de overname van een bestaande kluis en start geen enkele node met een lege database. Alleen aanzetten voor een kluis die nog niet bestaat.
+    default: false
+  - name: public_url
+    type: string
+    label: Publieke URL (nieuw cluster)
+    help: Zoals gebruikers VaultX openen, zonder slash, zoals https://vaultx.jouwdomein.be. Bij een overname komt de URL van de oude node en geldt deze niet.
+    optional: true
+    pattern: 'https?://[A-Za-z0-9.:-]+'
+  - name: oidc_issuer
+    type: string
+    label: OIDC-issuer (nieuw cluster)
+    help: De issuer van de Authentik-provider, met slash. Bij een overname komen de OIDC-instellingen van de oude node.
+    optional: true
+    pattern: 'https?://[^\s''"]+'
+  - name: oidc_client_id
+    type: string
+    label: OIDC client ID (nieuw cluster)
+    optional: true
+    pattern: '[A-Za-z0-9._-]{1,128}'
+  - name: oidc_client_secret
+    type: secret
+    label: OIDC client secret (nieuw cluster)
+    help: Alleen voor een nieuw cluster; bij een overname geldt dat van de oude node.
+    length: 64
+  - name: secret_key
+    type: secret
+    label: Geheime sleutel (nieuw cluster)
+    immutable: true
+    help: VAULTX_SECRET_KEY voor een nieuw cluster. Leeg laten maakt er een. Bij een overname neemt het cluster de sleutel van de oude node over en geldt deze niet.
+    length: 64
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker vaultx
+    help: Leeg laten maakt er een; je ziet het bij Verbinding.
+    length: 32
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    help: Voor VaultX, PostgreSQL en het bouwen van de frontend (Node).
+    default: 3G
+    min: 2G
+    max: 64G
+  - name: disk
+    type: size
+    label: Schijf per node
+    help: Bijlagen staan in de database; reken op de database, plus de nachtelijke back-ups.
+    default: 24G
+    min: 12G
+    max: 1T
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # Wat VaultX nodig heeft (docs/debian-ct.md van VaultX), plus psql en
+      # pg_restore voor de overname, rsync en sshd voor de sync.
+      - package: { names: [keepalived, nginx, git, curl, ca-certificates, openssl, python3, python3-venv, postgresql-client, rsync, openssh-server, openssh-client, gzip] }
+      # De frontend vraagt Node 22.12 of nieuwer; Debian 13 levert 20.
+      - command:
+          title: Node.js 22
+          run: curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+          unless: "node -e 'process.exit(+process.versions.node.split(\".\")[0] >= 22 ? 0 : 1)'"
+      - command:
+          title: gebruiker vaultx
+          run: useradd --system --home /opt/vaultx --shell /usr/sbin/nologin vaultx
+          unless: id vaultx
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      # files: wat de sync naar de andere nodes brengt (na een overname de
+      # instellingen van de oude node in .cf, 0600).
+      - directory: { path: /opt/cf-vaultx, mode: "0755" }
+      - directory: { path: /opt/cf-vaultx/files, mode: "0755" }
+      - directory: { path: /var/lib/cf-vaultx, mode: "0700" }
+      - directory: { path: /etc/cf-vaultx, mode: "0700" }
+      - directory: { path: /etc/vaultx, mode: "0755" }
+      - file:
+          path: /etc/cf-vaultx/base.env
+          template: base.env.tmpl
+          mode: "0600"
+      - file:
+          path: /usr/local/lib/clusterforge/vaultx-ctl.sh
+          template: vaultx-ctl.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /usr/local/lib/clusterforge/vaultx-bron.sh
+          template: vaultx-bron.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /usr/local/lib/clusterforge/vaultx-migreer.py
+          template: vaultx-migreer.py.tmpl
+          mode: "0755"
+      - command:
+          title: ufw-regels voor het cluster
+          run: /usr/local/lib/clusterforge/vaultx-ctl.sh firewall
+          unless: /usr/local/lib/clusterforge/vaultx-ctl.sh firewall-ok
+      # Een oude VaultX op deze node (de bestaande node die mee in het
+      # cluster gaat): zijn PostgreSQL verhuist van cluster main op 5432 naar
+      # vaultxoud op 5433, met een back-up vooraf, zodat Patroni 5432 krijgt.
+      # VaultX blijft draaien en bedient het VIP tot de overname.
+      - command:
+          title: oude VaultX klaarzetten
+          run: /usr/local/lib/clusterforge/vaultx-ctl.sh voorbereiden
+          unless: /usr/local/lib/clusterforge/vaultx-ctl.sh voorbereid
+      # Code ophalen en bouwen; een andere versie bouwt opnieuw. De vorige
+      # build blijft staan tot de nieuwe lukt.
+      - command:
+          title: VaultX ophalen en bouwen (enkele minuten)
+          run: /usr/local/lib/clusterforge/vaultx-ctl.sh bouwen
+          unless: /usr/local/lib/clusterforge/vaultx-ctl.sh gebouwd
+      - command:
+          title: nginx voor VaultX
+          run: /usr/local/lib/clusterforge/vaultx-ctl.sh nginx
+          unless: /usr/local/lib/clusterforge/vaultx-ctl.sh nginx-ok
+      # Enabled op elke node. Zolang de database er niet is of de kluis nog
+      # niet is overgenomen, wacht cf-vaultx en probeert het opnieuw.
+      - file:
+          path: /etc/systemd/system/cf-vaultx.service
+          template: cf-vaultx.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-vaultx-backup.service
+          template: cf-vaultx-backup.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-vaultx-backup.timer
+          template: cf-vaultx-backup.timer.tmpl
+      - command:
+          title: cf-vaultx inschakelen
+          run: systemctl daemon-reload && systemctl enable cf-vaultx cf-vaultx-backup.timer && systemctl start --no-block cf-vaultx cf-vaultx-backup.timer
+          unless: systemctl is-enabled --quiet cf-vaultx && systemctl is-enabled --quiet cf-vaultx-backup.timer
+      - command:
+          title: VaultX herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/vaultx-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/vaultx-ctl.sh unchanged
+      - directory: { path: /etc/keepalived/conf.d, mode: "0755" }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# De overgenomen instellingen van de VIP-node naar de andere nodes. Zonder
+# --delete.
+syncs:
+  - name: VaultX-instellingen
+    schedule: "* * * * *"
+    source: /opt/cf-vaultx/files/
+    target: /opt/cf-vaultx/files/
+    delete: false
+    alert: true
+    timeout_seconds: 300
+
+# VaultX start pas na de overname; daarom controleert de uitrol alleen het VIP.
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+
+services:
+  - { name: vaultx, kind: app, unit: cf-vaultx, port: 80 }
+  - { name: keepalived, kind: vip, unit: keepalived }

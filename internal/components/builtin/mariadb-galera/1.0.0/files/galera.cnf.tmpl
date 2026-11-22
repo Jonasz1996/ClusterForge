@@ -1,0 +1,28 @@
+# Beheerd door ClusterForge: de database van cluster {{ .cluster.slug }}.
+# Een wijziging hier ziet de driftcontrole; pas de instellingen aan in
+# ClusterForge. Dit bestand komt na 50-server.cnf en 60-galera.cnf van
+# Debian, dus wat hier staat, wint.
+
+[mysqld]
+# Galera vraagt rijen in de binlog en InnoDB zonder tabelsloten.
+binlog_format = ROW
+default_storage_engine = InnoDB
+innodb_autoinc_lock_mode = 2
+
+innodb_buffer_pool_size = {{ .params.buffer_pool }}
+max_connections = {{ .params.max_connections }}
+
+# De apps op de andere nodes verbinden via het netwerk.
+bind-address = 0.0.0.0
+
+[galera]
+wsrep_on = ON
+wsrep_provider = /usr/lib/galera/libgalera_smm.so
+wsrep_cluster_name = {{ .cluster.slug }}
+wsrep_cluster_address = gcomm://{{ $first := true }}{{ range .nodes }}{{ if eq .role "data" }}{{ if not $first }},{{ end }}{{ .address }}{{ $first = false }}{{ end }}{{ end }}
+wsrep_node_address = {{ .node.address }}
+wsrep_node_name = {{ .node.hostname }}
+# SST kopieert alle data naar een nieuwe node met mariabackup, als de
+# gebruiker mysql via de socket: er staat geen wachtwoord op de node.
+wsrep_sst_method = mariabackup
+wsrep_sst_auth = mysql:

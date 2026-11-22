@@ -1,0 +1,24 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# cf-leader voert een commando alleen uit op de node die nu het VIP
+# {{ .params.vip }} heeft; op de andere nodes doet het niets en eindigt het
+# met 0. Zet het voor elke taak, op elke node dezelfde regel, bijvoorbeeld
+# in /etc/cron.d/taken:
+#
+#   */5 * * * * root /usr/local/bin/cf-leader /usr/local/bin/opruimen.sh
+#
+# De taak draait zo op precies één node, en na een failover op de nieuwe
+# eigenaar van het VIP.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ "$#" -eq 0 ]; then
+    echo "gebruik: cf-leader commando [argumenten]" >&2
+    exit 2
+fi
+if ip -4 -o addr show | grep -qF " inet {{ .params.vip }}/"; then
+    exec "$@"
+fi
+exit 0

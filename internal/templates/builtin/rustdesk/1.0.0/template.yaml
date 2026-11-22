@@ -1,0 +1,228 @@
+name: rustdesk
+version: 1.0.0
+title: RustDesk-server (HA)
+description: >-
+  De open-source RustDesk-server (hbbs voor ID en hole punching, hbbr als
+  relay) op twee of meer nodes met een VIP van keepalived, met de
+  open-source API-server lejianwen/rustdesk-api ernaast (accounts, adresboek,
+  OIDC-login, webbeheer, verbindings- en bestandslogs, webclient). Alles draait
+  alleen op de node met het VIP; de andere nodes staan klaar. De VIP-node maakt
+  elke paar minuten een consistente kopie van de sleutels en beide databases
+  (sqlite3 .backup) en ClusterForge zet die met een sync op de andere nodes, dus
+  na een failover is de sleutel dezelfde en hoeven de clients niets te
+  veranderen. Draaien er al hbbs/hbbr-containers op de nodes, dan neemt de
+  eerste node hun sleutel en database vanzelf over.
+cluster_type: generic
+
+# Terugspringen zou alle sessies zonder reden verbreken.
+failback: false
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: >-
+      Het interne adres van RustDesk. Zet de NAT van je router naar dit adres
+      (TCP 21115-21117 en UDP 21116). Neem je een bestaand keepalived-cluster
+      over, geef dan het VIP dat het nu heeft.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: RustDesk draait op één node tegelijk; de andere staan klaar met een kopie.
+    default: 2
+    min: 2
+    max: 5
+  - name: public_host
+    type: string
+    label: Publiek adres
+    help: >-
+      De hostnaam of het publieke IP waarmee clients van buiten RustDesk
+      bereiken (zoals rustdesk.jouwdomein.be), zonder poort. hbbs geeft dit
+      adres door als relay.
+    pattern: '[A-Za-z0-9][A-Za-z0-9.-]{0,252}'
+  - name: api_url
+    type: string
+    label: Publiek adres van de API
+    help: >-
+      Zoals https://rustdesk-api.jouwdomein.be, de proxy host in NPM naar
+      http://VIP:21114. Leeg laten gebruikt http://VIP:21114 (alleen in je LAN).
+      Dit adres zet je in de client bij API-server.
+    optional: true
+    pattern: 'https?://[A-Za-z0-9.:-]+'
+  - name: trusted_proxies
+    type: string
+    label: IP's van Nginx Proxy Manager
+    help: Komma-gescheiden. Dan ziet de API het echte adres van de bezoeker (logs, blokkeren na foute logins).
+    optional: true
+    pattern: '[0-9./]+(,[0-9./]+)*'
+  - name: admin_password
+    type: secret
+    label: Wachtwoord van admin (API)
+    help: >-
+      Voor de gebruiker admin van de API-server (webbeheer op /_admin/).
+      Leeg laten maakt er een; je ziet het bij de parameters van het cluster.
+      Een ander wachtwoord hier zet het opnieuw.
+    length: 20
+  - name: jwt_key
+    type: secret
+    label: JWT-sleutel (API)
+    immutable: true
+    help: Leeg laten maakt er een. Op elke node dezelfde, anders moeten clients na een failover opnieuw inloggen.
+    length: 64
+  - name: always_relay
+    type: bool
+    label: Altijd via de relay
+    help: Uit is sneller (rechtstreeks waar het kan). Aan als rechtstreekse verbindingen vaak mislukken.
+    default: false
+  - name: server_image
+    type: string
+    label: Image van de RustDesk-server
+    help: Met een dubbele punt voor de versie, zoals rustdesk/rustdesk-server:1.1.14. Een andere waarde start RustDesk opnieuw op de VIP-node.
+    default: rustdesk/rustdesk-server:latest
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
+  - name: api_image
+    type: string
+    label: Image van de API-server
+    default: lejianwen/rustdesk-api:latest
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
+  - name: sync_minutes
+    type: int
+    label: Sync elke zoveel minuten
+    help: Zo oud is een kopie hoogstens als de VIP-node wegvalt. Clients melden zich na een failover vanzelf opnieuw aan; wat je in de API aanpaste, kan zo lang missen.
+    default: 1
+    choices: [1, 2, 5, 10, 15, 30, 60]
+  - name: timezone
+    type: string
+    label: Tijdzone
+    default: Europe/Brussels
+    pattern: '[A-Za-z]+(/[A-Za-z0-9_+-]+)*'
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 1
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 1G
+    min: 512M
+    max: 32G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 8G
+    min: 4G
+    max: 500G
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # sqlite3 voor de kopie, rsync en sshd voor de sync van ClusterForge.
+      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl, iputils-arping, iputils-ping, iproute2] }
+      # Docker alleen op een node zonder Docker. Een bestaande Docker CE of
+      # docker.io blijft zoals hij is (docker.io zou Docker CE verdringen).
+      - command:
+          title: Docker
+          run: |-
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ce() { dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'ok installed'; }
+            if command -v dockerd >/dev/null 2>&1 || ce; then
+              if ! docker compose version >/dev/null 2>&1; then
+                if ce; then apt-get install -y docker-compose-plugin; else apt-get install -y docker-compose; fi
+              fi
+              systemctl is-active --quiet docker || systemctl start docker
+            else
+              apt-get install -y docker.io docker-compose
+              systemctl enable --now docker
+            fi
+          unless: command -v dockerd >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && systemctl is-active --quiet docker
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /etc/cf-rustdesk, mode: "0700" }
+      - directory: { path: /opt/cf-rustdesk, mode: "0755" }
+      - directory: { path: /opt/cf-rustdesk/data, mode: "0700" }
+      - directory: { path: /opt/cf-rustdesk/api, mode: "0700" }
+      # outgoing: de kopie van de VIP-node; incoming: wat de sync brengt.
+      - directory: { path: /var/lib/cf-rustdesk, mode: "0700" }
+      - directory: { path: /var/lib/cf-rustdesk/incoming, mode: "0700" }
+      - file:
+          path: /etc/cf-rustdesk/api.env
+          content: "RUSTDESK_API_JWT_KEY={{ .params.jwt_key }}\n"
+          mode: "0600"
+      - file:
+          path: /etc/cf-rustdesk/admin.pw
+          content: "{{ .params.admin_password }}\n"
+          mode: "0600"
+      - file:
+          path: /opt/cf-rustdesk/compose.yaml
+          template: compose.yaml.tmpl
+      - file:
+          path: /usr/local/lib/clusterforge/rustdesk-ctl.sh
+          template: rustdesk-ctl.sh.tmpl
+          mode: "0755"
+      - command:
+          title: images van RustDesk
+          run: /usr/local/lib/clusterforge/rustdesk-ctl.sh pull
+          unless: /usr/local/lib/clusterforge/rustdesk-ctl.sh pulled
+      # Oude hbbs/hbbr-containers (van vóór ClusterForge) houden de poorten
+      # vast: niet meer vanzelf laten starten en stoppen. Hun mappen blijven
+      # staan; node 1 neemt sleutel en database eruit over bij de eerste start.
+      - command:
+          title: oude RustDesk-containers stoppen
+          run: /usr/local/lib/clusterforge/rustdesk-ctl.sh oude-stoppen
+          unless: /usr/local/lib/clusterforge/rustdesk-ctl.sh geen-oude
+      # cf-rustdesk is niet enabled: keepalived start het op de node met het VIP.
+      - file:
+          path: /etc/systemd/system/cf-rustdesk.service
+          template: cf-rustdesk.service.tmpl
+      - command:
+          title: RustDesk herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/rustdesk-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/rustdesk-ctl.sh unchanged
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# De kopie gaat van de VIP-node naar de andere nodes. ClusterForge zet deze
+# sync na de uitrol zelf bij Cronjobs.
+syncs:
+  - name: RustDesk-sleutels en data
+    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else if eq .params.sync_minutes 1 }}* * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
+    before: /usr/local/lib/clusterforge/rustdesk-ctl.sh snapshot
+    source: /var/lib/cf-rustdesk/outgoing/
+    target: /var/lib/cf-rustdesk/incoming/
+    delete: true
+    alert: true
+    timeout_seconds: 600
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+  - http: { url: "http://{{ .params.vip }}:21114/_admin/", expect: 200, within: 300s }
+
+services:
+  - { name: rustdesk, kind: app, unit: cf-rustdesk, port: 21116, depends_on: [keepalived], strength: hard }
+  - { name: rustdesk-api, kind: web, unit: cf-rustdesk, port: 21114, depends_on: [keepalived], strength: hard }
+  - { name: keepalived, kind: vip, unit: keepalived }

@@ -1,0 +1,357 @@
+// Package agents regelt enrollmenttokens, het aanmelden van agents en het
+// intrekken ervan.
+package agents
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base32"
+	"errors"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nkeys"
+
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
+)
+
+var (
+	ErrInvalidToken = errors.New("ongeldig, verlopen of opgebruikt enrollmenttoken")
+	ErrNotFound     = errors.New("niet gevonden")
+	// ErrNoClaim: geen uitrol wacht op een agent met deze hostname vanaf dit
+	// adres.
+	ErrNoClaim = errors.New("geen uitrol wacht op deze node")
+)
+
+// ClaimError zegt waarom een aanmelding zonder token niet lukt: no_node,
+// no_token of wrong_ip. Voor de agent is het gewoon ErrNoClaim.
+type ClaimError struct{ Reason string }
+
+func (e ClaimError) Error() string        { return ErrNoClaim.Error() }
+func (e ClaimError) Is(target error) bool { return target == ErrNoClaim }
+
+// TokenError zegt waarom een enrollmenttoken niet geldt: unknown, expired of
+// used_up. Voor de agent is het gewoon ErrInvalidToken.
+type TokenError struct{ Reason string }
+
+func (e TokenError) Error() string        { return ErrInvalidToken.Error() }
+func (e TokenError) Is(target error) bool { return target == ErrInvalidToken }
+
+type ValidationError struct{ Msg string }
+
+func (e ValidationError) Error() string { return e.Msg }
+
+type ConflictError struct{ Msg string }
+
+func (e ConflictError) Error() string { return e.Msg }
+
+// Disconnecter verbreekt open NATS-verbindingen van een agent.
+type Disconnecter interface {
+	Disconnect(nkeyPublic string)
+}
+
+type Service struct {
+	pool *pgxpool.Pool
+	ev   *events.Writer
+	bus  Disconnecter
+}
+
+func NewService(pool *pgxpool.Pool, ev *events.Writer, bus Disconnecter) *Service {
+	return &Service{pool: pool, ev: ev, bus: bus}
+}
+
+const tokenPrefix = "cfe_"
+
+var (
+	hostnameRe  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
+	machineIDRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
+)
+
+func hashToken(token string) []byte {
+	sum := sha256.Sum256([]byte(token))
+	return sum[:]
+}
+
+func newToken() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return tokenPrefix + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)), nil
+}
+
+type TokenInput struct {
+	Description string
+	NodeID      *uuid.UUID
+	ClusterID   *uuid.UUID
+	MaxUses     int
+	TTL         time.Duration
+	// ClaimIP: de agent van NodeID mag zich met dit token ook zonder het
+	// token aanmelden (Claim), vanaf dit adres. Voor CT's uit een
+	// CT-template, waar ClusterForge geen aanmeldbestand in kan zetten.
+	ClaimIP string
+}
+
+// CreateToken maakt een enrollmenttoken. Het token zelf wordt alleen hier
+// teruggegeven; de database bewaart de hash.
+func (s *Service) CreateToken(ctx context.Context, by uuid.UUID, in TokenInput) (string, store.EnrollmentToken, error) {
+	in.Description = strings.TrimSpace(in.Description)
+	if in.MaxUses == 0 {
+		in.MaxUses = 1
+	}
+	if in.TTL == 0 {
+		in.TTL = 24 * time.Hour
+	}
+	switch {
+	case len(in.Description) > 200:
+		return "", store.EnrollmentToken{}, ValidationError{"beschrijving is hoogstens 200 tekens"}
+	case in.MaxUses < 1 || in.MaxUses > 100:
+		return "", store.EnrollmentToken{}, ValidationError{"aantal keer bruikbaar moet tussen 1 en 100 liggen"}
+	case in.TTL < time.Hour || in.TTL > 30*24*time.Hour:
+		return "", store.EnrollmentToken{}, ValidationError{"geldigheid moet tussen 1 uur en 30 dagen liggen"}
+	case in.NodeID != nil && in.MaxUses != 1:
+		return "", store.EnrollmentToken{}, ValidationError{"een token voor één node is maar één keer bruikbaar"}
+	case in.ClaimIP != "" && in.NodeID == nil:
+		return "", store.EnrollmentToken{}, ValidationError{"aanmelden zonder token kan alleen voor één node"}
+	}
+	var claimIP *string
+	if in.ClaimIP != "" {
+		claimIP = &in.ClaimIP
+	}
+	token, err := newToken()
+	if err != nil {
+		return "", store.EnrollmentToken{}, err
+	}
+	var t store.EnrollmentToken
+	err = s.tx(ctx, func(q *store.Queries) error {
+		t, err = q.CreateEnrollmentToken(ctx, store.CreateEnrollmentTokenParams{
+			TokenHash: hashToken(token), Description: in.Description, NodeID: in.NodeID, ClusterID: in.ClusterID,
+			MaxUses: int32(in.MaxUses), ExpiresAt: time.Now().Add(in.TTL), CreatedBy: &by, ClaimIp: claimIP,
+		})
+		if err != nil {
+			return err
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: events.User(by), SubjectType: "enrollment_token", SubjectID: t.ID.String(), ClusterID: in.ClusterID,
+			Action: "enrollment_token.created",
+			Payload: map[string]any{
+				"description": t.Description, "node_id": t.NodeID, "max_uses": t.MaxUses, "expires_at": t.ExpiresAt,
+			},
+		})
+	})
+	return token, t, err
+}
+
+func (s *Service) DeleteToken(ctx context.Context, by uuid.UUID, id uuid.UUID) error {
+	return s.tx(ctx, func(q *store.Queries) error {
+		n, err := q.DeleteEnrollmentToken(ctx, id)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: events.User(by), SubjectType: "enrollment_token", SubjectID: id.String(),
+			Action: "enrollment_token.deleted",
+		})
+	})
+}
+
+// Enroll meldt een agent aan. De node is de node van het token, anders een
+// bestaande node met dezelfde hostname, anders een nieuwe. Een eerdere agent
+// van die node wordt ingetrokken.
+func (s *Service) Enroll(ctx context.Context, req protocol.EnrollRequest) (store.Agent, error) {
+	if !strings.HasPrefix(req.Token, tokenPrefix) {
+		return store.Agent{}, TokenError{"unknown"}
+	}
+	return s.enroll(ctx, &req, func(q *store.Queries) (store.EnrollmentToken, error) {
+		tok, err := q.LockEnrollmentTokenByHash(ctx, hashToken(req.Token))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tok, TokenError{"unknown"}
+		}
+		return tok, err
+	})
+}
+
+// Claim meldt een agent aan zonder token: een CT uit een CT-template, waar
+// ClusterForge geen aanmeldbestand in kan zetten. Dat lukt alleen als een
+// uitrol voor de node met deze hostname een token met dit adres klaarzette
+// (TokenInput.ClaimIP), en ip het adres is waarvan de aanvraag komt.
+func (s *Service) Claim(ctx context.Context, req protocol.EnrollRequest, ip string) (store.Agent, error) {
+	req.Token = ""
+	return s.enroll(ctx, &req, func(q *store.Queries) (store.EnrollmentToken, error) {
+		node, err := q.FindNodeByHostname(ctx, req.Hostname)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.EnrollmentToken{}, ClaimError{"no_node"}
+		}
+		if err != nil {
+			return store.EnrollmentToken{}, err
+		}
+		tok, err := q.LockClaimToken(ctx, &node.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tok, ClaimError{"no_token"}
+		}
+		if err != nil {
+			return tok, err
+		}
+		if tok.ClaimIp == nil || *tok.ClaimIp != ip {
+			return tok, ClaimError{"wrong_ip"}
+		}
+		return tok, nil
+	})
+}
+
+// enroll meldt een agent aan met het token dat lock in de transactie
+// vastzet.
+func (s *Service) enroll(ctx context.Context, reqp *protocol.EnrollRequest, lock func(*store.Queries) (store.EnrollmentToken, error)) (store.Agent, error) {
+	req := *reqp
+	req.Hostname = strings.TrimSpace(req.Hostname)
+	req.MachineID = strings.ToLower(strings.TrimSpace(req.MachineID))
+	switch {
+	case !nkeys.IsValidPublicUserKey(req.NkeyPublic):
+		return store.Agent{}, ValidationError{"ongeldige publieke sleutel"}
+	case !hostnameRe.MatchString(req.Hostname):
+		return store.Agent{}, ValidationError{"ongeldige hostname"}
+	case req.MachineID != "" && !machineIDRe.MatchString(req.MachineID):
+		return store.Agent{}, ValidationError{"ongeldige machine-id"}
+	case len(req.AgentVersion) > 64:
+		return store.Agent{}, ValidationError{"agentversie te lang"}
+	}
+	agentID := uuid.New()
+	actor := events.Actor{Type: store.ActorTypeAgent, ID: agentID.String()}
+	var agent store.Agent
+	var revoked []store.Agent
+	err := s.tx(ctx, func(q *store.Queries) error {
+		tok, err := lock(q)
+		if err != nil {
+			return err
+		}
+		switch {
+		case time.Now().After(tok.ExpiresAt):
+			return TokenError{"expired"}
+		case tok.Uses >= tok.MaxUses:
+			return TokenError{"used_up"}
+		}
+
+		var node store.Node
+		created := false
+		if tok.NodeID != nil {
+			node, err = q.LockNode(ctx, *tok.NodeID)
+		} else {
+			node, err = q.FindNodeByHostname(ctx, req.Hostname)
+			if errors.Is(err, pgx.ErrNoRows) {
+				node, err = q.CreateNode(ctx, store.CreateNodeParams{
+					ClusterID: tok.ClusterID, Hostname: req.Hostname, Lifecycle: store.NodeLifecycleActive, Tags: []string{},
+				})
+				created = true
+			}
+		}
+		if err != nil {
+			return err
+		}
+
+		// Een token zonder vaste node mag geen node van een ander cluster
+		// nemen, en een node met een actieve agent alleen terugnemen vanaf
+		// dezelfde machine. Wie alleen de hostname kent, krijgt anders de
+		// commando's en databasewachtwoorden van die node.
+		if tok.NodeID == nil && !created && tok.ClusterID != nil && node.ClusterID != nil && *node.ClusterID != *tok.ClusterID {
+			return ConflictError{"de node " + node.Hostname + " hoort bij een ander cluster dan dit token"}
+		}
+		if cur, err := q.GetActiveAgentByNode(ctx, node.ID); err == nil {
+			if tok.NodeID == nil && (cur.MachineID == "" || req.MachineID != cur.MachineID) {
+				return ConflictError{"de node " + node.Hostname + " heeft al een agent op een andere machine; maak een token voor die node als je hem wilt vervangen"}
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if revoked, err = q.RevokeAgentsOfNode(ctx, node.ID); err != nil {
+			return err
+		}
+		agent, err = q.CreateAgent(ctx, store.CreateAgentParams{
+			ID: agentID, NodeID: node.ID, NkeyPublic: req.NkeyPublic, MachineID: req.MachineID,
+			Version: req.AgentVersion, ProtocolVersion: int32(req.ProtocolVersion),
+		})
+		if err != nil {
+			return err
+		}
+		if err := q.UseEnrollmentToken(ctx, tok.ID); err != nil {
+			return err
+		}
+		if created {
+			err := s.ev.Write(ctx, q, events.Event{
+				Actor: actor, SubjectType: "node", SubjectID: node.ID.String(), ClusterID: node.ClusterID,
+				Action: "node.created", Payload: map[string]any{"hostname": node.Hostname, "via": "enrollment"},
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: actor, SubjectType: "agent", SubjectID: agentID.String(), ClusterID: node.ClusterID,
+			Action: "agent.enrolled",
+			Payload: map[string]any{
+				"hostname": node.Hostname, "node_id": node.ID, "version": req.AgentVersion,
+				"token_id": tok.ID, "replaced": len(revoked),
+			},
+		})
+	})
+	if err != nil {
+		return store.Agent{}, err
+	}
+	for _, a := range revoked {
+		s.bus.Disconnect(a.NkeyPublic)
+	}
+	return agent, nil
+}
+
+// Revoke trekt een agent in en verbreekt zijn verbinding.
+func (s *Service) Revoke(ctx context.Context, by uuid.UUID, id uuid.UUID) error {
+	var a store.Agent
+	err := s.tx(ctx, func(q *store.Queries) error {
+		var err error
+		a, err = q.RevokeAgent(ctx, id)
+		if err != nil {
+			return err
+		}
+		node, err := q.GetNode(ctx, a.NodeID)
+		if err != nil {
+			return err
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: events.User(by), SubjectType: "agent", SubjectID: id.String(), ClusterID: node.Node.ClusterID,
+			Action: "agent.revoked", Payload: map[string]any{"hostname": node.Node.Hostname, "node_id": a.NodeID},
+		})
+	})
+	if err != nil {
+		return err
+	}
+	s.bus.Disconnect(a.NkeyPublic)
+	return nil
+}
+
+func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "agents_nkey_public_key" {
+		return ConflictError{"deze sleutel is al aangemeld"}
+	}
+	if errors.As(err, &pe) && pe.Code == "23503" && pe.ConstraintName == "enrollment_tokens_node_id_fkey" {
+		return ValidationError{"node bestaat niet"}
+	}
+	if errors.As(err, &pe) && pe.Code == "23503" && pe.ConstraintName == "enrollment_tokens_cluster_id_fkey" {
+		return ValidationError{"cluster bestaat niet"}
+	}
+	return err
+}

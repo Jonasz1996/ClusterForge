@@ -1,0 +1,65 @@
+import createClient, { type Middleware } from "openapi-fetch";
+import type { components, paths } from "./schema";
+
+export type Me = components["schemas"]["Me"];
+export type User = components["schemas"]["User"];
+export type ApiEvent = components["schemas"]["Event"];
+export type ApiErrorBody = components["schemas"]["Error"];
+
+// De CSRF-token komt uit de login-respons of /auth/me en gaat mee op elke
+// request die iets wijzigt.
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null) {
+  csrfToken = token;
+}
+
+// getCsrfToken is voor een request buiten de client om, zoals de stroom van
+// de assistent.
+export function getCsrfToken() {
+  return csrfToken;
+}
+
+const csrfMiddleware: Middleware = {
+  onRequest({ request }) {
+    if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      request.headers.set("X-CSRF-Token", csrfToken);
+    }
+    return request;
+  },
+};
+
+export const api = createClient<paths>({ baseUrl: "/api/v1", credentials: "same-origin" });
+api.use(csrfMiddleware);
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+    // field is het veld met de fout, zoals params.vip, als de server het noemt.
+    public field?: string,
+    // checks zijn de controles bij precheck_failed.
+    public checks?: components["schemas"]["TestRunCheck"][],
+    // diff is bij git_mismatch het verschil tussen Git en de export.
+    public diff?: string,
+  ) {
+    super(message);
+  }
+}
+
+// unwrap geeft de data terug of gooit een ApiError met de foutcode van de server.
+export function unwrap<T>(res: { data?: T; error?: unknown; response: Response }): T {
+  if (res.error !== undefined || !res.response.ok) {
+    const body = res.error as Partial<ApiErrorBody> | undefined;
+    throw new ApiError(
+      res.response.status,
+      body?.code ?? "unknown",
+      body?.message ?? `Onverwachte fout (${res.response.status})`,
+      body?.field,
+      body?.checks,
+      body?.diff,
+    );
+  }
+  return res.data as T;
+}

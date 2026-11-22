@@ -1,0 +1,205 @@
+name: authentik
+version: 1.0.0
+title: Authentik (HA)
+description: >-
+  Authentik (Docker) op drie of vijf nodes met één gedeelde PostgreSQL
+  (Patroni, met een eigen VIP op de primary) en een VIP van keepalived.
+  Authentik draait op elke node tegelijk tegen dezelfde database: een
+  applicatie, provider of outpost die je toevoegt, staat meteen overal, en
+  valt een node weg, dan neemt een andere het VIP over zonder dat er iets
+  gekopieerd moet worden. Media, sjablonen en certificaten gaan elke minuut
+  van de VIP-node naar de andere nodes. Een bestaande Authentik (Docker
+  Compose met eigen PostgreSQL) neem je over met authentik-ctl.sh overnemen:
+  database, media en geheime sleutel, met een telling vooraf en achteraf.
+cluster_type: generic
+
+# Authentik draait op elke node; het VIP hoort bij de gezondste node met de
+# hoogste prioriteit en mag dus terugspringen.
+failback: true
+
+# PostgreSQL (Patroni) op alle nodes, na de uitrol, met een eigen VIP op de
+# primary. Daarna maakt ClusterForge de gebruiker en de database authentik.
+database:
+  engine: postgresql
+  role: node
+  vip: "{{ .params.db_vip }}"
+  host: "{{ .params.db_vip }}"
+  settings:
+    shared_buffers: 256M
+    # Server en worker op elke node houden verbindingen open.
+    max_connections: 300
+    # Authentik draait in Docker; op de node met het VIP van de database
+    # verbindt het vanaf zijn container.
+    client_networks: 172.16.0.0/12
+  steps:
+    - { kind: db_user, user: authentik, password: "{{ .params.db_password }}", grant_on: authentik }
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van Authentik (http://VIP:9000, https://VIP:9443). Neem je een bestaande Authentik over, geef dan hetzelfde VIP, dan hoeft je proxy niets te veranderen. Niet .1 tot .3 van het VLAN (gateways).
+  - name: db_vip
+    type: ipv4
+    label: VIP van de database
+    immutable: true
+    help: Een tweede vrij adres; het staat altijd op de primary van PostgreSQL.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: Patroni wil een meerderheid; met drie mag er één uitvallen.
+    default: 3
+    choices: [3, 5]
+  - name: version
+    type: string
+    label: Versie van Authentik
+    help: De tag van ghcr.io/goauthentik/server, zoals 2026.8.5. Neem je een bestaande Authentik over, geef dan dezelfde jaar.maand als die. Een andere waarde start Authentik op elke node opnieuw.
+    default: 2026.8.5
+    pattern: '20[0-9]{2}\.[0-9]{1,2}\.[0-9]+(-rc[0-9]+)?'
+  - name: sync_minutes
+    type: int
+    label: Media-sync elke zoveel minuten
+    help: Media (iconen, achtergronden), sjablonen en certificaten gaan van de VIP-node naar de andere nodes. De configuratie zelf zit in de database en is altijd overal actueel.
+    default: 1
+    choices: [1, 2, 5, 10, 15, 30, 60]
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Neem je een bestaande Authentik met keepalived over, geef dan zijn virtual_router_id. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Bij overnemen het auth_pass van de huidige keepalived. Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: secret_key
+    type: secret
+    label: Geheime sleutel (nieuw cluster)
+    immutable: true
+    help: AUTHENTIK_SECRET_KEY voor een nieuw cluster. Leeg laten maakt er een. Neem je een bestaande Authentik over, dan neemt overnemen zijn sleutel mee en geldt deze niet.
+    length: 64
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker authentik
+    help: Leeg laten maakt er een; je ziet het bij Verbinding.
+    length: 32
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    help: Voor Authentik (server en worker) en PostgreSQL samen.
+    default: 4G
+    min: 2G
+    max: 64G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 24G
+    min: 12G
+    max: 1T
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # psql voor de controles en de overname, rsync en sshd voor de sync.
+      - package: { names: [keepalived, postgresql-client, rsync, openssh-server, curl, gzip] }
+      - command:
+          title: Docker
+          run: DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose && systemctl enable --now docker
+          unless: command -v docker && docker compose version && systemctl is-active --quiet docker
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /opt/cf-authentik, mode: "0755" }
+      # files: wat de sync naar de andere nodes brengt (media, data, sjablonen,
+      # certificaten en, na een overname, de geheime sleutel in .cf).
+      - directory: { path: /opt/cf-authentik/files, mode: "0755" }
+      - directory: { path: /opt/cf-authentik/files/data, mode: "0755" }
+      - directory: { path: /opt/cf-authentik/files/media, mode: "0755" }
+      - directory: { path: /opt/cf-authentik/files/templates, mode: "0755" }
+      - directory: { path: /opt/cf-authentik/files/certs, mode: "0755" }
+      - directory: { path: /var/lib/cf-authentik, mode: "0700" }
+      - directory: { path: /etc/cf-authentik, mode: "0700" }
+      - file:
+          path: /etc/cf-authentik/authentik.env
+          template: authentik.env.tmpl
+          mode: "0600"
+      - file:
+          path: /opt/cf-authentik/compose.yaml
+          template: compose.yaml.tmpl
+      - file:
+          path: /usr/local/lib/clusterforge/authentik-ctl.sh
+          template: authentik-ctl.sh.tmpl
+          mode: "0755"
+      # Met een actieve ufw: etcd, Patroni, PostgreSQL en VRRP tussen de nodes
+      # toelaten (anders vormt etcd nooit een cluster).
+      - command:
+          title: ufw-regels voor het cluster
+          run: /usr/local/lib/clusterforge/authentik-ctl.sh firewall
+          unless: /usr/local/lib/clusterforge/authentik-ctl.sh firewall-ok
+      # Een oude Authentik op deze node: op node 1 verhuist zijn PostgreSQL
+      # (network_mode: host) van poort 5432 naar 5433 voor Patroni, op de
+      # andere nodes stopt hij (de kloon wordt niet overgenomen).
+      - command:
+          title: oude Authentik klaarzetten
+          run: /usr/local/lib/clusterforge/authentik-ctl.sh voorbereiden
+          unless: /usr/local/lib/clusterforge/authentik-ctl.sh voorbereid
+      - command:
+          title: images van Authentik
+          run: /usr/local/lib/clusterforge/authentik-ctl.sh pull
+          unless: /usr/local/lib/clusterforge/authentik-ctl.sh pulled
+      # Enabled op elke node. Zolang de database er niet is (of een oude
+      # Authentik nog niet is overgenomen) wacht cf-authentik en probeert het
+      # opnieuw.
+      - file:
+          path: /etc/systemd/system/cf-authentik.service
+          template: cf-authentik.service.tmpl
+      - command:
+          title: cf-authentik inschakelen
+          run: systemctl daemon-reload && systemctl enable cf-authentik && systemctl start --no-block cf-authentik
+          unless: systemctl is-enabled --quiet cf-authentik
+      # Veranderde versie, compose.yaml of instellingen: hier opnieuw starten.
+      - command:
+          title: Authentik herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/authentik-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/authentik-ctl.sh unchanged
+      - directory: { path: /etc/keepalived/conf.d, mode: "0755" }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# Media, sjablonen en certificaten van de VIP-node naar de andere nodes.
+# Zonder --delete: een bestand dat een andere node kreeg terwijl hij het VIP
+# had, verdwijnt nooit door een sync.
+syncs:
+  - name: Authentik-media
+    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else if eq .params.sync_minutes 1 }}* * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
+    source: /opt/cf-authentik/files/
+    target: /opt/cf-authentik/files/
+    delete: false
+    alert: true
+    timeout_seconds: 900
+
+# Authentik start pas als de database er is (na de uitrol); daarom
+# controleert de uitrol alleen het VIP.
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+
+services:
+  - { name: authentik, kind: app, unit: cf-authentik, port: 9000 }
+  - { name: keepalived, kind: vip, unit: keepalived }

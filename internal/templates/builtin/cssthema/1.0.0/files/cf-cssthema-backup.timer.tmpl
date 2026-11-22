@@ -1,0 +1,11 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+[Unit]
+Description=Nachtelijke back-up van cssthema ({{ .cluster.slug }})
+
+[Timer]
+OnCalendar=*-*-* 03:25
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

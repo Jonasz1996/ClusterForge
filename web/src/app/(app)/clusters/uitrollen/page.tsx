@@ -1,0 +1,1094 @@
+"use client";
+
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { slugify } from "@/components/inventory/ClusterForm";
+import { CopyBlock } from "@/components/inventory/InstallAgent";
+import { fieldId, ParamInput, paramHint } from "@/components/inventory/ParamInput";
+import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import { Alert, Button, Card, cx, Input, Label, PageHeader, Select, Textarea } from "@/components/ui";
+import { ApiError } from "@/lib/api/client";
+import { mib, planDeployment, useDeploy, useTemplates, type DeployInput, type DeployPlan, type Template, type TemplateParam } from "@/lib/deploy";
+import { environments, useIsAdmin, useNodes, type Environment } from "@/lib/inventory";
+import { usePveHosts } from "@/lib/pvehosts";
+import { useProxmoxConnections, useProxmoxResources, useSyncProxmox, type ProxmoxResources, type ProxmoxStorage } from "@/lib/proxmox";
+import { agentServerURL } from "@/lib/agentEndpoints";
+
+export default function DeployPage() {
+  return (
+    <Suspense>
+      <DeployInner />
+    </Suspense>
+  );
+}
+
+type Form = {
+  template: string;
+  name: string;
+  slug: string;
+  slugTouched: boolean;
+  environment: Environment;
+  description: string;
+  params: Record<string, string>;
+  proxmoxId: string;
+  imageVmid: string;
+  storage: string;
+  bridge: string;
+  vlan: string;
+  network: "dhcp" | "static";
+  firstIp: string;
+  gateway: string;
+  dns: string;
+  sshKeys: string;
+  // null: het adres van deze server.
+  serverUrl: string | null;
+  // database: na de uitrol MariaDB Galera op de nodes.
+  database: boolean;
+  // where: nieuwe VM's uit de golden image, nieuwe CT's uit een
+  // CT-template, of bestaande nodes (zoals CT's met een agent), met per
+  // node-id een rol.
+  // newct: nieuwe CT's die de agent op de Proxmox-host maakt (fase 17), met
+  // cf-agent er meteen in.
+  where: "vm" | "ct" | "newct" | "existing";
+  // Bij newct: containertemplate (leeg is de nieuwste Debian 13) en
+  // privileged.
+  ostemplate: string;
+  privileged: boolean;
+  existing: Record<string, string>;
+  // placement: per node (rol/volgnummer) de gekozen Proxmox-host en
+  // storage; leeg kiest ClusterForge.
+  placement: Record<string, Placement>;
+};
+
+// Placement: bij newct ook CTID, adres en resources per node; leeg kiest
+// ClusterForge (of de template).
+type Placement = { host: string; storage: string; vmid?: string; address?: string; cpu?: string; memory?: string; disk?: string };
+
+const placementEmpty = (p: Placement) => Object.values(p).every((v) => v === undefined || v === "");
+const num = (v: string | undefined) => (v && /^\d+$/.test(v.trim()) ? Number(v.trim()) : undefined);
+
+const placementKey = (role: string, index: number) => `${role}/${index}`;
+
+const emptyForm: Form = {
+  template: "",
+  name: "",
+  slug: "",
+  slugTouched: false,
+  environment: "lab",
+  description: "",
+  params: {},
+  proxmoxId: "",
+  imageVmid: "",
+  storage: "",
+  bridge: "vmbr0",
+  vlan: "",
+  network: "static",
+  firstIp: "",
+  gateway: "",
+  dns: "",
+  sshKeys: "",
+  serverUrl: null,
+  database: false,
+  where: "vm",
+  ostemplate: "",
+  privileged: false,
+  existing: {},
+  placement: {},
+};
+
+// paramValue is de ingevulde waarde, of de standaard van de template.
+function paramValue(f: Form, p: TemplateParam) {
+  return f.params[p.name] ?? p.default ?? (p.type === "bool" ? "false" : "");
+}
+
+// toInput zet het formulier om naar de aanvraag; lege optionele waarden
+// blijven weg, zodat de server ze kiest.
+function toInput(f: Form, t: Template | undefined): DeployInput {
+  const params: Record<string, unknown> = {};
+  for (const p of t?.params ?? []) {
+    const v = paramValue(f, p).trim();
+    if (p.type === "bool") params[p.name] = v === "true";
+    else if (v === "") continue;
+    else if (p.type === "int") params[p.name] = /^-?\d+$/.test(v) ? Number(v) : v;
+    else params[p.name] = v;
+  }
+  const database = t?.database
+    ? { database: { engine: t.database.engine } }
+    : f.database && t?.cluster_type !== "kubernetes"
+      ? { database: { engine: "mariadb" } }
+      : {};
+  const cluster = { name: f.name.trim(), slug: f.slug.trim(), environment: f.environment, description: f.description.trim() };
+  if (f.where === "existing") {
+    const roles = new Set((t?.roles ?? []).map((r) => r.name));
+    return {
+      template: f.template,
+      cluster,
+      params,
+      existing_nodes: Object.entries(f.existing)
+        .filter(([, role]) => roles.has(role))
+        .map(([node_id, role]) => ({ node_id, role })),
+      ...database,
+    };
+  }
+  // Een CT meldt zich aan vanaf zijn vaste adres, en SSH-sleutels kan
+  // Proxmox bij een kloon van een CT niet zetten.
+  const ct = f.where === "ct";
+  const newct = f.where === "newct";
+  const network = ct || newct ? "static" : f.network;
+  return {
+    template: f.template,
+    cluster,
+    params,
+    target: {
+      proxmox_id: f.proxmoxId,
+      ...(newct
+        ? { create: "ct" as const, ostemplate: f.ostemplate.trim(), privileged: f.privileged }
+        : { image_vmid: Number(f.imageVmid) || 0 }),
+      storage: f.storage,
+      bridge: f.bridge.trim(),
+      vlan: f.vlan.trim() === "" ? null : Number(f.vlan),
+      network,
+      first_ip: network === "static" ? f.firstIp.trim() : "",
+      gateway: network === "static" ? f.gateway.trim() : "",
+      dns: network === "static" ? f.dns.split(/[\s,]+/).filter(Boolean) : [],
+      ssh_keys: ct ? "" : f.sshKeys,
+      placement: Object.entries(f.placement)
+        .filter(([, p]) => !placementEmpty(p))
+        .map(([key, p]) => {
+          const cut = key.lastIndexOf("/");
+          const base = { role: key.slice(0, cut), index: Number(key.slice(cut + 1)), host: p.host, storage: p.storage };
+          if (!newct) return base;
+          return {
+            ...base,
+            vmid: num(p.vmid),
+            address: p.address?.trim() || undefined,
+            cpu: num(p.cpu),
+            memory_mib: num(p.memory),
+            disk_gib: num(p.disk),
+          };
+        }),
+    },
+    server_url: (f.serverUrl ?? "").trim(),
+    ...database,
+  };
+}
+
+function useDebounced<T>(value: T, ms: number) {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+function DeployInner() {
+  const search = useSearchParams();
+  const router = useRouter();
+  const isAdmin = useIsAdmin();
+  const templates = useTemplates();
+  const conns = useProxmoxConnections();
+  const [form, setForm] = useState<Form>(emptyForm);
+  const [error, setError] = useState<ApiError | null>(null);
+  const deploy = useDeploy();
+
+  // Wat niet gekozen is, krijgt een startwaarde: de template uit de URL, de
+  // eerste Proxmox-koppeling, de eerste golden image en het adres van deze
+  // server.
+  const template =
+    templates.data?.find((t) => t.name === (form.template || search.get("template"))) ?? templates.data?.[0];
+  const proxmoxId = form.proxmoxId || conns.data?.items[0]?.id || "";
+  const resources = useProxmoxResources(proxmoxId);
+  // Kubernetes komt altijd op nieuwe VM's.
+  const where = template?.cluster_type === "kubernetes" ? "vm" : form.where;
+  const ct = where === "ct";
+  const newct = where === "newct";
+  // CT's (kloon of nieuw) gebruiken storage met rootdir.
+  const ctDisk = ct || newct;
+  const pveHosts = usePveHosts();
+  const pveReady = useMemo(() => (pveHosts.data?.hosts ?? []).filter((h) => h.online && h.supported), [pveHosts.data]);
+  const images = useMemo(
+    () =>
+      (resources.data?.guests ?? [])
+        .filter((g) => g.type === (ct ? "lxc" : "qemu") && g.template)
+        .sort((a, b) => a.vmid - b.vmid),
+    [resources.data, ct],
+  );
+  const storages = useMemo(() => {
+    const seen = new Map<string, ProxmoxStorage>();
+    for (const s of resources.data?.storages ?? []) {
+      if (holds(s, ctDisk) && !seen.has(s.name)) seen.set(s.name, s);
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [resources.data, ctDisk]);
+  const sync = useSyncProxmox();
+
+  const imageVmid = form.imageVmid || (images[0] ? String(images[0].vmid) : "");
+  const origin = agentServerURL();
+  const setWhere = (w: Form["where"]) => setForm((f) => ({ ...f, where: w, imageVmid: "", storage: "", placement: {} }));
+  const eff: Form = { ...form, template: template?.name ?? "", proxmoxId, imageVmid, serverUrl: form.serverUrl ?? origin, where };
+
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const setParam = (name: string, v: string) => setForm((f) => ({ ...f, params: { ...f.params, [name]: v } }));
+
+  const input = toInput(eff, template);
+  const ready =
+    template !== undefined &&
+    form.name.trim() !== "" &&
+    form.slug !== "" &&
+    (where === "existing"
+      ? Object.keys(form.existing).length > 0
+      : proxmoxId !== "" && (where === "newct" ? pveReady.length > 0 : imageVmid !== ""));
+  const planInput = useDebounced(ready ? JSON.stringify(input) : "", 600);
+  const plan = useQuery({
+    queryKey: ["deploy-plan", planInput],
+    queryFn: async () => planDeployment(JSON.parse(planInput) as DeployInput),
+    enabled: isAdmin && planInput !== "",
+    retry: false,
+    staleTime: 10_000,
+    placeholderData: keepPreviousData,
+  });
+  const planError = plan.error instanceof ApiError ? plan.error : null;
+  // Het laatste geslaagde voorbeeld blijft staan bij een fout, zodat je de
+  // keuze per node kunt aanpassen.
+  const [lastPlan, setLastPlan] = useState<DeployPlan | undefined>(undefined);
+  if (plan.data && plan.data !== lastPlan) setLastPlan(plan.data);
+  const setPlacement = (key: string, p: Placement) => setForm((f) => ({ ...f, placement: { ...f.placement, [key]: p } }));
+  // Een fout van het voorbeeld markeert het veld al tijdens het invullen; een
+  // fout bij het uitrollen gaat voor.
+  const fieldError = error?.field ? error : planError?.field ? planError : null;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const res = await deploy.mutateAsync(input);
+      router.push(`/taken/detail?id=${res.job.id}`);
+    } catch (err) {
+      const ae = err instanceof ApiError ? err : new ApiError(0, "unknown", "Uitrollen mislukt");
+      setError(ae);
+      const el = ae.field ? document.getElementById(fieldId(ae.field)) : null;
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.focus({ preventScroll: true });
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+  }
+
+  if (!isAdmin) return <Alert>Alleen een beheerder kan clusters uitrollen.</Alert>;
+
+  const bad = (field: string) => (fieldError?.field === field ? "border-red-500 ring-2 ring-red-500/20" : undefined);
+  const noConnections = conns.data && conns.data.items.length === 0;
+
+  return (
+    <form onSubmit={submit} className="space-y-6">
+      <div className="text-sm">
+        <Link href="/clusters" className="text-slate-500 hover:underline">
+          ← Clusters
+        </Link>
+      </div>
+      <PageHeader
+        title="Cluster uitrollen"
+        description="ClusterForge kloont de VM's uit een golden image in Proxmox, of neemt je bestaande nodes (zoals CT's), installeert de software van de template en controleert of het cluster werkt."
+        actions={
+          <Link
+            href="/clusters/samenstellen"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Zelf samenstellen
+          </Link>
+        }
+      />
+      {error && !error.field && <Alert>{error.message}</Alert>}
+      {error?.field && <Alert>Controleer het gemarkeerde veld: {error.message}</Alert>}
+
+      <QueryState q={templates}>
+        <Card title="Template">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FieldRow error={fieldError} field="template" label="Template">
+              <Select
+                id={fieldId("template")}
+                value={eff.template}
+                onChange={(e) => setForm((f) => ({ ...f, template: e.target.value, params: {} }))}
+              >
+                {templates.data?.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.title} ({t.version})
+                  </option>
+                ))}
+              </Select>
+            </FieldRow>
+          </div>
+          {template && <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">{template.description}</p>}
+        </Card>
+      </QueryState>
+
+      <Card title="Cluster">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FieldRow error={fieldError} field="cluster.name" label="Naam">
+            <Input
+              id={fieldId("cluster.name")}
+              className={bad("cluster.name")}
+              required
+              value={form.name}
+              placeholder="Webservers"
+              onChange={(e) => {
+                const name = e.target.value;
+                setForm((f) => ({ ...f, name, slug: f.slugTouched ? f.slug : slugify(name).slice(0, 40) }));
+              }}
+            />
+          </FieldRow>
+          <FieldRow error={fieldError} field="cluster.slug" label="Slug" hint={slugHint(form.slug || "<slug>", template)}>
+            <Input
+              id={fieldId("cluster.slug")}
+              className={bad("cluster.slug")}
+              required
+              value={form.slug}
+              maxLength={40}
+              onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value, slugTouched: true }))}
+            />
+          </FieldRow>
+          <FieldRow error={fieldError} field="cluster.environment" label="Omgeving">
+            <Select id={fieldId("cluster.environment")} value={form.environment} onChange={(e) => set("environment", e.target.value as Environment)}>
+              {environments.map((x) => (
+                <option key={x.value} value={x.value}>
+                  {x.label}
+                </option>
+              ))}
+            </Select>
+          </FieldRow>
+          <FieldRow error={fieldError} field="cluster.description" label="Beschrijving">
+            <Input id={fieldId("cluster.description")} value={form.description} onChange={(e) => set("description", e.target.value)} />
+          </FieldRow>
+        </div>
+      </Card>
+
+      {template && template.params.length > 0 && (
+        <Card title="Instellingen">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {template.params.map((p) => (
+              <FieldRow error={fieldError} key={p.name} field={`params.${p.name}`} label={p.label} hint={paramHint(p)}>
+                <ParamInput p={p} value={paramValue(form, p)} onChange={(v) => setParam(p.name, v)} className={bad(`params.${p.name}`)} />
+              </FieldRow>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {template && template.database && (
+        <Card title="Database">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Deze template krijgt altijd{" "}
+            {template.database.engine === "postgresql"
+              ? "PostgreSQL met Patroni en etcd, met een eigen VIP op de primary,"
+              : "MariaDB Galera,"}{" "}
+            op de nodes met de rol {template.database.role}. Na de uitrol zet ClusterForge de database er vanzelf op; de
+            template maakt daarna zelf de database, de gebruiker en het schema klaar. Volg het bij de taak van de database
+            op de pagina van het cluster.
+          </p>
+        </Card>
+      )}
+
+      {template && template.cluster_type !== "kubernetes" && !template.database && (
+        <Card title="Database">
+          <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" id={fieldId("database")} checked={form.database} onChange={(e) => set("database", e.target.checked)} />
+            MariaDB Galera erbij, op elke node
+          </label>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            Na de uitrol zet ClusterForge een databasecluster op de nodes zelf, zodat de app haar database naast zich heeft. Daarna
+            kun je bij Databases een bestaande database naar dit cluster verhuizen. Galera heeft minstens drie nodes nodig; met
+            minder komt de database er niet en zegt het logboek waarom.
+          </p>
+          {form.database && plan.data && plan.data.nodes.length < 3 && (
+            <div className="mt-3">
+              <Alert kind="info">
+                Dit cluster krijgt {plan.data.nodes.length} {plan.data.nodes.length === 1 ? "node" : "nodes"}. Kies er minstens drie,
+                of voeg de database later toe met een scheidsrechter.
+              </Alert>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {template && template.cluster_type !== "kubernetes" && (
+        <Card title="Waar">
+          <fieldset>
+            <legend className="sr-only">Waar komt het cluster</legend>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" checked={form.where === "vm"} onChange={() => setWhere("vm")} />
+                Nieuwe VM&apos;s in Proxmox
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" checked={form.where === "ct"} onChange={() => setWhere("ct")} />
+                Nieuwe CT&apos;s uit een CT-template
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" checked={form.where === "newct"} onChange={() => setWhere("newct")} />
+                Nieuwe CT&apos;s, volledig automatisch (agent op de host)
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" id={fieldId("existing")} checked={form.where === "existing"} onChange={() => setWhere("existing")} />
+                Bestaande nodes, zoals CT&apos;s
+              </label>
+            </div>
+          </fieldset>
+          {form.where === "ct" && (
+            <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+              ClusterForge kloont de CT&apos;s uit een CT-template met cf-agent, zet hostname, adres, CPU, geheugen en schijf, en start ze. De
+              agent in elke CT meldt zich dan zelf aan, alleen vanaf het vaste adres dat de uitrol hem geeft.
+            </p>
+          )}
+          {form.where === "newct" && (
+            <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-400">
+              <p>
+                De agent op de Proxmox-host maakt elke CT met pct create (CPU, RAM, schijf, CTID en adres kies je per node in het voorbeeld
+                onderaan), haalt zo nodig de nieuwste Debian 13-template op, zet de SSH-sleutels van de host en die van hieronder erin, zet
+                cf-agent in de CT en meldt hem aan. Daarna rolt ClusterForge het cluster uit zoals altijd.
+              </p>
+              {pveHosts.data && pveReady.length === 0 && (
+                <Alert kind="info">
+                  Nog geen Proxmox-host met een agent die dit kan. Installeer de agent één keer op je Proxmox-hosts (Nodes → Agent
+                  installeren) of werk hem bij (Nodes → Agents bijwerken). Zie{" "}
+                  <Link href="/proxmox/hosts" className="font-medium underline">
+                    Proxmox-hosts
+                  </Link>
+                  .
+                </Alert>
+              )}
+              {pveReady.length > 0 && (
+                <p>
+                  Hosts die klaar zijn: <strong>{pveReady.map((h) => h.pve_node).join(", ")}</strong>.
+                </p>
+              )}
+            </div>
+          )}
+          {form.where === "existing" && (
+            <ExistingNodes
+              template={template}
+              value={form.existing}
+              onChange={(existing) => set("existing", existing)}
+              error={fieldError?.field === "existing" ? fieldError.message : null}
+            />
+          )}
+        </Card>
+      )}
+
+      {where !== "existing" && (
+        <>
+          <Card title="Proxmox">
+            {noConnections ? (
+              <Alert kind="info">
+                Er is nog geen Proxmox gekoppeld.{" "}
+                <Link href="/proxmox" className="font-medium underline">
+                  Koppel Proxmox
+                </Link>{" "}
+                en kom dan terug.
+              </Alert>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldRow error={fieldError} field="target.proxmox_id" label="Proxmox">
+                    <Select
+                      id={fieldId("target.proxmox_id")}
+                      value={proxmoxId}
+                      onChange={(e) => setForm((f) => ({ ...f, proxmoxId: e.target.value, imageVmid: "", storage: "", placement: {} }))}
+                    >
+                      {conns.data?.items.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FieldRow>
+                  {newct ? (
+                    <FieldRow
+                      error={fieldError}
+                      field="target.ostemplate"
+                      label="Containertemplate"
+                      hint="Leeg is de nieuwste debian-13-standard; de host haalt hem zelf op als hij er nog niet staat."
+                    >
+                      <Input
+                        id={fieldId("target.ostemplate")}
+                        className={bad("target.ostemplate")}
+                        placeholder="nieuwste Debian 13"
+                        value={form.ostemplate}
+                        onChange={(e) => set("ostemplate", e.target.value)}
+                      />
+                    </FieldRow>
+                  ) : (
+                    <FieldRow
+                      error={fieldError}
+                      field="target.image_vmid"
+                      label={ct ? "CT-template" : "Golden image"}
+                      hint={ct ? "Een CT-template met cf-agent, gemaakt met ct-template.sh." : "Een VM-template met cloud-init, qemu-guest-agent en cf-agent."}
+                    >
+                      <Select
+                        id={fieldId("target.image_vmid")}
+                        className={bad("target.image_vmid")}
+                        value={imageVmid}
+                        onChange={(e) => set("imageVmid", e.target.value)}
+                      >
+                        {images.length === 0 && <option value="">{ct ? "Geen CT-templates gevonden" : "Geen VM-templates gevonden"}</option>}
+                        {images.map((g) => (
+                          <option key={g.vmid} value={g.vmid}>
+                            {g.name} ({ct ? "CT" : "VM"} {g.vmid} op {g.host})
+                          </option>
+                        ))}
+                      </Select>
+                    </FieldRow>
+                  )}
+                  <FieldRow
+                    error={fieldError}
+                    field="target.storage"
+                    label="Storage"
+                    hint={`Voor alle ${ctDisk ? "CT's" : "VM's"}; per node kies je host en storage in het voorbeeld onderaan.`}
+                  >
+                    <Select id={fieldId("target.storage")} className={bad("target.storage")} value={form.storage} onChange={(e) => set("storage", e.target.value)}>
+                      <option value="">{newct ? "Automatisch (meeste ruimte)" : ct ? "Zoals de CT-template" : "Zoals de golden image"}</option>
+                      {storages.map((st) => (
+                        <option key={st.name} value={st.name}>
+                          {st.name}
+                          {st.shared ? ` (gedeeld, ${gb(st.maxdisk - st.disk)} vrij)` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </FieldRow>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FieldRow error={fieldError} field="target.bridge" label="Bridge">
+                      <Input id={fieldId("target.bridge")} className={bad("target.bridge")} value={form.bridge} onChange={(e) => set("bridge", e.target.value)} />
+                    </FieldRow>
+                    <FieldRow error={fieldError} field="target.vlan" label="VLAN">
+                      <Input
+                        id={fieldId("target.vlan")}
+                        className={bad("target.vlan")}
+                        inputMode="numeric"
+                        placeholder="geen"
+                        value={form.vlan}
+                        onChange={(e) => set("vlan", e.target.value)}
+                      />
+                    </FieldRow>
+                  </div>
+                  {newct && (
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                      <input type="checkbox" checked={form.privileged} onChange={(e) => set("privileged", e.target.checked)} />
+                      Privileged CT&apos;s (alleen als de software het echt vraagt)
+                    </label>
+                  )}
+                </div>
+                {resources.data && images.length === 0 && ct && (
+                  <div className="space-y-2 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800">
+                    <p>
+                      Er staat nog geen CT-template in deze Proxmox. Maak er een door dit als root op een Proxmox-host te draaien; daarna
+                      verschijnt hij hier na de volgende synchronisatie.
+                    </p>
+                    <CopyBlock
+                      text={`curl -fsSL ${origin}/install/ct-template.sh | bash -s -- --server ${origin}${
+                        origin.startsWith("http://") ? " --allow-http" : ""
+                      } --storage local-lvm`}
+                    />
+                  </div>
+                )}
+                {resources.data && images.length === 0 && !ct && (
+                  <div className="space-y-2 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800">
+                    <p>
+                      Er staat nog geen golden image in deze Proxmox. Maak er een door dit als root op een Proxmox-host te draaien; daarna
+                      verschijnt hij hier na de volgende synchronisatie.
+                    </p>
+                    <CopyBlock text={`curl -fsSL ${origin}/install/golden-image.sh | bash -s -- --server ${origin} --storage local-lvm`} />
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Netwerk en toegang">
+            <div className="space-y-4">
+              <fieldset hidden={ct || newct}>
+                <legend className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Adressen van de nodes</legend>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <label className="inline-flex items-center gap-2">
+                    <input type="radio" id={fieldId("target.network")} checked={form.network === "static"} onChange={() => set("network", "static")} />
+                    Vaste adressen
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input type="radio" checked={form.network === "dhcp"} onChange={() => set("network", "dhcp")} />
+                    DHCP
+                  </label>
+                </div>
+              </fieldset>
+              {(ct || newct) && (
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Een CT krijgt altijd een vast adres. Laat je de gateway leeg, dan is het het eerste adres van het subnet; de eerste drie
+                  adressen (gateway en firewalls) krijgt geen node.
+                </p>
+              )}
+              {ct || newct || form.network === "static" ? (
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <FieldRow error={fieldError} field="target.first_ip" label="Eerste adres" hint="Met prefix; de volgende nodes krijgen de adressen erna.">
+                    <Input
+                      id={fieldId("target.first_ip")}
+                      className={bad("target.first_ip")}
+                      required
+                      placeholder="10.0.20.11/24"
+                      value={form.firstIp}
+                      onChange={(e) => set("firstIp", e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow error={fieldError} field="target.gateway" label="Gateway">
+                    <Input
+                      id={fieldId("target.gateway")}
+                      className={bad("target.gateway")}
+                      required
+                      placeholder="10.0.20.1"
+                      value={form.gateway}
+                      onChange={(e) => set("gateway", e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow error={fieldError} field="target.dns" label="DNS-servers" hint="Gescheiden door komma's.">
+                    <Input id={fieldId("target.dns")} className={bad("target.dns")} placeholder="10.0.20.1" value={form.dns} onChange={(e) => set("dns", e.target.value)} />
+                  </FieldRow>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  De nodes krijgen hun adres van de DHCP-server. Zorg dat het VIP buiten de DHCP-pool valt.
+                </p>
+              )}
+              {!ct && (
+                <FieldRow
+                  error={fieldError}
+                  field="target.ssh_keys"
+                  label="Publieke SSH-sleutels"
+                  hint={
+                    newct
+                      ? "Eén per regel, voor root in de CT. De sleutels van root op de Proxmox-host gaan er altijd in, zodat de host de CT kan bereiken."
+                      : "Eén per regel, voor de gebruiker debian. Zonder sleutel kom je alleen via de console van Proxmox binnen."
+                  }
+                >
+                  <Textarea
+                    id={fieldId("target.ssh_keys")}
+                    className={cx("font-mono text-xs", bad("target.ssh_keys"))}
+                    rows={3}
+                    placeholder="ssh-ed25519 AAAA… jij@laptop"
+                    value={form.sshKeys}
+                    onChange={(e) => set("sshKeys", e.target.value)}
+                  />
+                </FieldRow>
+              )}
+              <FieldRow
+                error={fieldError}
+                field="server_url"
+                label="Adres van ClusterForge"
+                hint={
+                  newct
+                    ? "Hiermee meldt cf-agent in elke nieuwe CT zich aan; de CT's moeten het kunnen bereiken, en NATS op poort 4222."
+                    : ct
+                    ? "De CT's melden zich aan bij het adres uit de CT-template; ze moeten het kunnen bereiken, en NATS op poort 4222."
+                    : "Hiermee melden de nieuwe VM's zich aan; ze moeten het kunnen bereiken, en NATS op poort 4222."
+                }
+              >
+                <Input id={fieldId("server_url")} className={bad("server_url")} value={eff.serverUrl ?? ""} onChange={(e) => set("serverUrl", e.target.value)} />
+              </FieldRow>
+            </div>
+          </Card>
+        </>
+      )}
+
+      <Card title="Voorbeeld">
+        <Preview
+          ready={ready}
+          existing={where === "existing"}
+          loading={plan.isFetching}
+          plan={plan.data ?? (where === "existing" ? undefined : lastPlan)}
+          error={plan.error}
+          placement={
+            where === "existing"
+              ? undefined
+              : {
+                  ct: ctDisk,
+                  newct,
+                  ready: pveReady.map((h) => h.pve_node),
+                  value: form.placement,
+                  onChange: setPlacement,
+                  resources: resources.data,
+                  defaultStorage: form.storage,
+                  refreshing: sync.isPending,
+                  onRefresh: () => proxmoxId && sync.mutate(proxmoxId),
+                }
+          }
+        />
+      </Card>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={() => router.push("/clusters")}>
+          Annuleren
+        </Button>
+        <Button type="submit" disabled={deploy.isPending || !ready}>
+          {deploy.isPending ? "Bezig…" : "Uitrollen"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function FieldRow({
+  field,
+  label,
+  hint,
+  error,
+  children,
+}: {
+  field: string;
+  label: string;
+  hint?: ReactNode;
+  error: ApiError | null;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <Label htmlFor={fieldId(field)}>{label}</Label>
+      {children}
+      {error?.field === field ? (
+        <p className="mt-1 text-xs text-red-700 dark:text-red-300">{error.message}</p>
+      ) : (
+        hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>
+      )}
+    </div>
+  );
+}
+
+// slugHint toont hoe de nodes gaan heten; met meer dan één rol staat de rol
+// in de naam, zoals leren-server-01 en leren-worker-01.
+function slugHint(slug: string, t: Template | undefined) {
+  const roles = t?.roles ?? [];
+  if (roles.length > 1) return `De nodes heten ${roles.map((r) => `${slug}-${r.name}-01`).join(", ")}, …`;
+  return `De nodes heten ${slug}-01, ${slug}-02, …`;
+}
+
+type PlacementProps = {
+  ct: boolean;
+  // newct: CTID, adres en resources zijn per node in te vullen, en alleen
+  // hosts met een agent (ready) kunnen.
+  newct: boolean;
+  ready: string[];
+  value: Record<string, Placement>;
+  onChange: (key: string, p: Placement) => void;
+  resources: ProxmoxResources | undefined;
+  defaultStorage: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+};
+
+// holds zegt of er schijven van een CT (rootdir) of VM (images) op een
+// storage mogen.
+function holds(s: ProxmoxStorage, ct: boolean) {
+  return s.content === "" || s.content.split(",").includes(ct ? "rootdir" : "images");
+}
+
+function gb(bytes: number) {
+  const g = bytes / 2 ** 30;
+  return g >= 1000 ? `${(g / 1024).toFixed(1)} TB` : `${Math.floor(g)} GB`;
+}
+
+function Preview({
+  ready,
+  existing,
+  loading,
+  plan,
+  error,
+  placement,
+}: {
+  ready: boolean;
+  existing: boolean;
+  loading: boolean;
+  plan: DeployPlan | undefined;
+  error: unknown;
+  placement?: PlacementProps;
+}) {
+  if (!ready)
+    return (
+      <p className="text-sm text-slate-500">
+        {existing
+          ? "Vul een naam in en kies de nodes; dan verschijnt hier wat er op komt."
+          : "Vul een naam in en kies Proxmox en een golden image; dan verschijnt hier wat er gemaakt wordt."}
+      </p>
+    );
+  const errorAlert = error ? <Alert>{error instanceof Error ? error.message : "Controleren mislukt"}</Alert> : null;
+  if (!plan || (error && !placement)) return errorAlert ?? <p className="text-sm text-slate-500">{loading ? "Controleren…" : ""}</p>;
+  const hosts = [...(placement?.resources?.hosts ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <div className={cx("space-y-3", loading && "opacity-60")}>
+      {errorAlert}
+      {placement && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Kies per node de Proxmox-host en de storage, of laat ClusterForge kiezen: die spreidt de nodes over de online hosts.
+          </p>
+          <Button type="button" variant="secondary" onClick={placement.onRefresh} disabled={placement.refreshing}>
+            {placement.refreshing ? "Proxmox lezen…" : "Proxmox opnieuw lezen"}
+          </Button>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className={tableClass}>
+          <thead className="border-b border-slate-200 dark:border-slate-800">
+            <tr>
+              <th className={thClass}>Node</th>
+              {existing && <th className={thClass}>Rol</th>}
+              {placement?.newct && <th className={thClass}>CTID</th>}
+              <th className={thClass}>Adres</th>
+              {!existing && (
+                <>
+                  <th className={thClass}>Proxmox-host</th>
+                  <th className={thClass}>Storage</th>
+                  <th className={`${thClass} text-right`}>vCPU</th>
+                  <th className={`${thClass} text-right`}>{placement?.newct ? "RAM (MB)" : "Geheugen"}</th>
+                  <th className={`${thClass} text-right`}>{placement?.newct ? "Schijf (GB)" : "Schijf"}</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {plan.nodes.map((n) => (
+              <tr key={n.hostname}>
+                <td className={`${tdClass} font-medium`}>{n.hostname}</td>
+                {existing && <td className={tdClass}>{n.role}</td>}
+                {placement?.newct ? (
+                  <NewCTCells n={n} p={placement} />
+                ) : (
+                  <td className={tdClass}>{n.address || <span className="text-slate-500">DHCP</span>}</td>
+                )}
+                {!existing && (
+                  <>
+                    {placement ? (
+                      <PlacementCells n={n} hosts={hosts} p={placement} />
+                    ) : (
+                      <>
+                        <td className={tdClass}>{n.host}</td>
+                        <td className={tdClass}>{n.storage}</td>
+                      </>
+                    )}
+                    {placement?.newct ? (
+                      <ResourceCells n={n} p={placement} />
+                    ) : (
+                      <>
+                        <td className={`${tdClass} text-right tabular-nums`}>{n.cpu}</td>
+                        <td className={`${tdClass} text-right tabular-nums`}>{mib(n.memory_mib)}</td>
+                        <td className={`${tdClass} text-right tabular-nums`}>{n.disk_gib} GB</td>
+                      </>
+                    )}
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {plan.vip && (
+        <p className="text-sm text-slate-700 dark:text-slate-300">
+          VIP <strong>{plan.vip}</strong>
+          {plan.vrid !== null && <> met VRRP-id {plan.vrid}</>}. Na het uitrollen controleert ClusterForge dat een node het VIP heeft.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// NewCTCells: CTID en adres van een nieuwe CT; leeg neemt wat
+// ClusterForge voorstelt (het eerste vrije nummer, het volgende adres).
+function NewCTCells({ n, p }: { n: DeployPlan["nodes"][number]; p: PlacementProps }) {
+  const key = placementKey(n.role, n.index);
+  const cur = p.value[key] ?? { host: "", storage: "" };
+  return (
+    <>
+      <td className={tdClass}>
+        <Input
+          aria-label={`CTID van ${n.hostname}`}
+          className="w-24"
+          inputMode="numeric"
+          placeholder={n.vmid ? String(n.vmid) : "auto"}
+          value={cur.vmid ?? ""}
+          onChange={(e) => p.onChange(key, { ...cur, vmid: e.target.value })}
+        />
+      </td>
+      <td className={tdClass}>
+        <Input
+          aria-label={`Adres van ${n.hostname}`}
+          className="w-44"
+          placeholder={n.address}
+          value={cur.address ?? ""}
+          onChange={(e) => p.onChange(key, { ...cur, address: e.target.value })}
+        />
+      </td>
+    </>
+  );
+}
+
+// ResourceCells: CPU, RAM (MB) en schijf (GB) van een nieuwe CT; leeg is
+// wat de template vraagt.
+function ResourceCells({ n, p }: { n: DeployPlan["nodes"][number]; p: PlacementProps }) {
+  const key = placementKey(n.role, n.index);
+  const cur = p.value[key] ?? { host: "", storage: "" };
+  const cell = (field: "cpu" | "memory" | "disk", ph: number, label: string) => (
+    <td className={`${tdClass} text-right`}>
+      <Input
+        aria-label={`${label} van ${n.hostname}`}
+        className="w-20 text-right"
+        inputMode="numeric"
+        placeholder={String(ph)}
+        value={cur[field] ?? ""}
+        onChange={(e) => p.onChange(key, { ...cur, [field]: e.target.value })}
+      />
+    </td>
+  );
+  return (
+    <>
+      {cell("cpu", n.cpu, "vCPU")}
+      {cell("memory", n.memory_mib, "Geheugen (MB)")}
+      {cell("disk", n.disk_gib, "Schijf (GB)")}
+    </>
+  );
+}
+
+// PlacementCells kiest de Proxmox-host en de storage van één node. De
+// keuzes komen uit de laatste lezing van Proxmox (elke 20 s).
+function PlacementCells({
+  n,
+  hosts,
+  p,
+}: {
+  n: DeployPlan["nodes"][number];
+  hosts: ProxmoxResources["hosts"];
+  p: PlacementProps;
+}) {
+  const key = placementKey(n.role, n.index);
+  const cur = p.value[key] ?? { host: "", storage: "" };
+  const host = cur.host || n.host;
+  const storages = (p.resources?.storages ?? [])
+    .filter((s) => (s.shared || s.host === host) && holds(s, p.ct))
+    .filter((s, i, all) => all.findIndex((x) => x.name === s.name) === i)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const standard = cur.storage ? p.defaultStorage || "zoals de template" : n.storage || "zoals de template";
+  return (
+    <>
+      <td className={tdClass}>
+        <Select
+          aria-label={`Proxmox-host van ${n.hostname}`}
+          className="min-w-40"
+          value={cur.host}
+          onChange={(e) => {
+            const h = e.target.value || n.host;
+            // Een storage die op de nieuwe host niet bestaat, valt weg.
+            const keep = (p.resources?.storages ?? []).some((s) => s.name === cur.storage && (s.shared || s.host === h));
+            p.onChange(key, { ...cur, host: e.target.value, storage: keep ? cur.storage : "" });
+          }}
+        >
+          <option value="">{cur.host ? "Automatisch" : `Automatisch (${n.host})`}</option>
+          {hosts.map((h) => (
+            <option key={h.name} value={h.name} disabled={h.status !== "online" || (p.newct && !p.ready.includes(h.name))}>
+              {h.name} ·{" "}
+              {h.status !== "online"
+                ? "offline"
+                : p.newct && !p.ready.includes(h.name)
+                  ? "geen agent"
+                  : `${gb(h.maxmem - h.mem)} geheugen vrij`}
+            </option>
+          ))}
+        </Select>
+      </td>
+      <td className={tdClass}>
+        <Select
+          aria-label={`Storage van ${n.hostname}`}
+          className="min-w-48"
+          value={cur.storage}
+          onChange={(e) => p.onChange(key, { ...cur, storage: e.target.value })}
+        >
+          <option value="">Standaard ({standard})</option>
+          {storages.map((s) => (
+            <option key={s.name} value={s.name} disabled={s.status !== "" && s.status !== "available"}>
+              {s.name} · {s.maxdisk > 0 ? `${gb(s.maxdisk - s.disk)} vrij` : "ruimte onbekend"}
+              {s.shared ? " · gedeeld" : ""}
+            </option>
+          ))}
+        </Select>
+      </td>
+    </>
+  );
+}
+
+// ExistingNodes geeft elke bestaande node zonder cluster een rol van de
+// template. Een node zonder agent kan niet: daar kan niets op.
+function ExistingNodes({
+  template,
+  value,
+  onChange,
+  error,
+}: {
+  template: Template;
+  value: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+  error: string | null;
+}) {
+  const nodes = useNodes();
+  const free = (nodes.data ?? []).filter((n) => n.cluster_id === null).sort((a, b) => a.hostname.localeCompare(b.hostname));
+  const setRole = (id: string, role: string) => {
+    const next = { ...value };
+    if (role === "") delete next[id];
+    else next[id] = role;
+    onChange(next);
+  };
+  return (
+    <div className="mt-4 space-y-3">
+      <p className="text-sm text-slate-600 dark:text-slate-400">
+        Geef elke node een rol. Hier staan de nodes die nog in geen cluster zitten: maak de CT&apos;s in Proxmox, installeer de agent met
+        een token zonder cluster (Nodes → Agent installeren), en ze verschijnen hier. ClusterForge maakt dan geen VM&apos;s maar zet de
+        software van de template op deze nodes; hun hostnames blijven.
+      </p>
+      {nodes.isLoading ? (
+        <p className="text-sm text-slate-500">Laden…</p>
+      ) : free.length === 0 ? (
+        <Alert kind="info">Er is geen node zonder cluster. Installeer eerst de agent op je CT&apos;s.</Alert>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className={tableClass}>
+            <thead className="border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th className={thClass}>Node</th>
+                <th className={thClass}>Adres</th>
+                <th className={thClass}>Rol</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {free.map((n) => (
+                <tr key={n.id}>
+                  <td className={`${tdClass} font-medium`}>{n.hostname}</td>
+                  <td className={tdClass}>{n.primary_ip ?? <span className="text-slate-500">onbekend</span>}</td>
+                  <td className={tdClass}>
+                    {n.agent ? (
+                      <Select aria-label={`Rol van ${n.hostname}`} value={value[n.id] ?? ""} onChange={(e) => setRole(n.id, e.target.value)}>
+                        <option value="">Niet gebruiken</option>
+                        {template.roles.map((r) => (
+                          <option key={r.name} value={r.name}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <span className="text-slate-500">geen agent</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {error && <p className="text-xs text-red-700 dark:text-red-300">{error}</p>}
+    </div>
+  );
+}

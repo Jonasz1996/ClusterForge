@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-brand-50: oklch(0.97 0.02 250);
+  --color-brand-100: oklch(0.93 0.04 250);
+  --color-brand-500: oklch(0.58 0.15 250);
+  --color-brand-600: oklch(0.51 0.15 250);
+  --color-brand-700: oklch(0.45 0.14 250);
+}
+
+/* Donker alleen op het scherm: afgedrukt is alles licht, ook in donkere modus.
+   Zonder keuze volgt het thema het systeem; Instellingen of de knop rechtsboven
+   zet data-theme="light" of "dark" op <html>. */
+@custom-variant dark {
+  @media screen {
+    &:where([data-theme="dark"], [data-theme="dark"] *) {
+      @slot;
+    }
+  }
+  @media screen and (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+html {
+  color-scheme: light dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media print {
+  html {
+    color-scheme: light;
+  }
+}
+
+@page {
+  margin: 15mm;
+}
+
+/* uPlot-legende in de stijl van de rest van de interface. */
+.cf-chart .u-legend {
+  font-size: 0.75rem;
+  text-align: left;
+  color: var(--color-slate-600);
+}
+.cf-chart .u-legend .u-marker {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+.cf-chart .u-legend th {
+  font-weight: 500;
+}
+@media screen and (prefers-color-scheme: dark) {
+  .cf-chart .u-legend {
+    color: var(--color-slate-400);
+  }
+}
+
+/* Een venster zonder inhoud (een kaart die niets te tonen heeft) neemt geen
+   plaats in het raster in. */
+.cf-tile:has(> .cf-tile-body:empty) {
+  display: none;
+}

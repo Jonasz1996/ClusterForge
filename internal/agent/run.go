@@ -1,0 +1,617 @@
+package agent
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
+)
+
+// Agent houdt de verbinding met de server, stuurt heartbeats, metrics en
+// facts, en voert de commando's van de server uit.
+type Agent struct {
+	Config    *Config
+	Version   string
+	Log       *slog.Logger
+	Collector *Collector
+
+	// consoles telt de open consolesessies (fase 26 M7).
+	consoles atomic.Int32
+	// dockerMu en dockerC: de client voor de Docker-socket (fase 28),
+	// gedeeld zodat verbindingen hergebruikt worden.
+	dockerMu sync.Mutex
+	dockerC  *dockerAPI
+	// ConsoleCommand maakt het programma van een consolesessie; nil
+	// gebruikt qm, pct en login. Tests vervangen het.
+	ConsoleCommand func(req protocol.ConsoleRequest, password string) *exec.Cmd
+
+	// Intervallen; nul gebruikt de standaard uit protocol. Tests maken ze kort.
+	HeartbeatInterval time.Duration
+	MetricsInterval   time.Duration
+	FactsInterval     time.Duration
+	// StatePath is het bestand waarin de agent onderhoud en power-commando's
+	// onthoudt; leeg gebruikt DefaultStatePath.
+	StatePath string
+	// Exec voert de systeemcommando's van een commando uit (systemctl); nil
+	// gebruikt exec. Tests vervangen het.
+	Exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// ExecStdin is Exec met invoer op stdin, voor de opdrachten aan
+	// MariaDB; het geeft stdout en stderr samen terug. nil gebruikt exec,
+	// tenzij Exec vervangen is.
+	ExecStdin func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
+	// Stream voert een programma uit met in op stdin (mag nil zijn) en
+	// stdout naar out, voor een dump en het terugzetten ervan; de fout
+	// heeft de laatste regel van stderr. nil gebruikt exec, tenzij Exec
+	// vervangen is.
+	Stream func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error
+	// Dial verbindt met de oude MariaDB bij een verhuizing; nil is
+	// net.Dialer.
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// WebDial verbindt voor de publicatie (fase 35): lokale API's, de
+	// ontdekking en de controle van een adres; nil is net.Dialer. Tests
+	// sturen het naar een testserver.
+	WebDial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// NPMSnapshotDir en NPMContainer: waar de kopieën van NPM staan (leeg is
+	// /var/lib/cf-npm/cf-snapshots) en welke container NPM is (leeg: de
+	// container met image nginx-proxy-manager, cf-npm eerst). Voor tests.
+	NPMSnapshotDir string
+	NPMContainer   string
+	// DumpDir is de map met de dumps van de databases; leeg is
+	// protocol.DBDumpDir. Tests gebruiken een map.
+	DumpDir string
+	// SpoolDir is de buffer van een verhuizing tussen dump en import; leeg
+	// is defaultSpoolDir onder Root. Tests gebruiken een map.
+	SpoolDir string
+	// ProbeInterval is hoe vaak een schrijftest schrijft; nul is
+	// protocol.DBProbeInterval. Tests zetten hem korter.
+	ProbeInterval time.Duration
+	// Now geeft de tijd voor de naam van een dump; nil is time.Now.
+	Now func() time.Time
+	// StartRun en StopRun starten en stoppen een run (fase 10); nil
+	// gebruikt systemd-run en systemctl stop. Tests vervangen ze.
+	// OpenNflog luistert op de NFLOG-groep van de firewall (fase 16); nil
+	// gebruikt netlink. Tests vervangen het.
+	OpenNflog OpenNflog
+	StartRun  func(ctx context.Context, id string) error
+	StopRun   func(ctx context.Context, id string) error
+	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
+	// Tests gebruiken een map.
+	Root string
+	// Journal is het wijzigingsjournaal; nil maakt er een met de standaard
+	// paden.
+	Journal *Journal
+	// JournalInterval, ConnsSample en ConnsInterval; nul gebruikt de
+	// standaard uit protocol.
+	JournalInterval time.Duration
+	ConnsSample     time.Duration
+	ConnsInterval   time.Duration
+	// CronRunsInterval is hoe vaak de agent de runs van beheerde cronjobs
+	// stuurt; nul is vijf seconden.
+	CronRunsInterval time.Duration
+	// SyncSSH is het ssh-commando van rsync bij een proefrun van een sync;
+	// leeg is ssh met de sleutel in protocol.SyncDir. Tests vervangen het.
+	SyncSSH string
+	// AddressPoll is hoe vaak de agent naar zijn adressen kijkt; bij een
+	// wijziging stuurt hij meteen een heartbeat. Nul is één seconde.
+	AddressPoll time.Duration
+	// KubeletHealthz is de healthz van de kubelet; leeg is die op
+	// 127.0.0.1:10248. Tests vervangen het.
+	KubeletHealthz string
+	// PatroniURL is de REST-API van Patroni; leeg is DefaultPatroniURL.
+	// Tests vervangen het.
+	PatroniURL string
+	// BinaryPath is de binary die draait; leeg is os.Executable. Zelf
+	// bijwerken vervangt hem.
+	BinaryPath string
+	// HTTPClient haalt een nieuwe agent; nil is http.DefaultClient.
+	HTTPClient *http.Client
+	// RollbackAfter is hoe lang een nieuwe agent heeft om met de server te
+	// praten; nul is protocol.UpgradeRollbackAfter.
+	RollbackAfter time.Duration
+	// Restart herstart de agent na een update; nil is systemctl restart.
+	Restart func()
+	// ConfigPath is agent.json; leeg is DefaultConfigPath. Herconfigureren
+	// schrijft het.
+	ConfigPath string
+	// ReconfigRollbackAfter is hoe lang de agent na een herconfiguratie
+	// heeft om met de server te praten; nul is
+	// protocol.ReconfigureRollbackAfter.
+	ReconfigRollbackAfter time.Duration
+	// TestNATS test een nieuw NATS-adres voor een herconfiguratie; nil
+	// verbindt echt. Tests vervangen het.
+	TestNATS func(ctx context.Context, c Config) error
+
+	nc    *nats.Conn
+	conns ConnTracker
+	// hbMu bewaakt lastAddrs en lastHB.
+	hbMu      sync.Mutex
+	lastAddrs string
+	lastHB    time.Time
+	factsNow  chan struct{}
+	connected chan struct{}
+	// stateMu bewaakt StatePath; zie updateState.
+	stateMu sync.Mutex
+	faults  *Faults
+	kube    *kubeBridge
+	db      *dbState
+	// cronMu bewaakt cron, wat de agent uit de journal over cron las.
+	cronMu sync.Mutex
+	// fw telt het verkeer dat ufw weggooit; fwMu laat één
+	// firewallwijziging tegelijk toe (fase 16).
+	fw   fwMonitor
+	fwMu sync.Mutex
+	cron *cronLog
+	// self is de binary die draait; rolledBack de sha256 van een update die
+	// teruggezet werd, confirmed of deze agent zijn update bevestigde en
+	// unconfirmed of hij de nieuwe van een update is die dat nog moet.
+	self        selfBinary
+	rolledBack  atomic.Value
+	confirmed   atomic.Bool
+	unconfirmed atomic.Bool
+	// reconfRolledBack is het NATS-adres van een herconfiguratie die
+	// teruggezet werd; reconfConfirmed of deze agent zijn herconfiguratie
+	// al bevestigde.
+	reconfRolledBack atomic.Value
+	reconfConfirmed  atomic.Bool
+}
+
+// Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
+// verbinding het op de achtergrond proberen.
+func (a *Agent) Connect() error {
+	kp, err := nkeys.FromSeed([]byte(a.Config.NkeySeed))
+	if err != nil {
+		return err
+	}
+	pub, err := kp.PublicKey()
+	if err != nil {
+		return err
+	}
+	if a.Collector == nil {
+		a.Collector = &Collector{}
+	}
+	if a.Collector.PrimaryAddress == nil {
+		a.Collector.PrimaryAddress = func() string { return outboundAddress(a.Config.NatsURL) }
+	}
+	if a.Journal == nil {
+		// Tests geven de agent een eigen wortel en een nep-systemctl; het
+		// journaal leest dan daar.
+		root := a.Root
+		if root == "" {
+			root = a.Collector.Root
+		}
+		a.Journal = &Journal{Root: root, Run: a.Collector.Run, Log: a.Log}
+		if a.StatePath != "" {
+			a.Journal.Path = filepath.Join(filepath.Dir(a.StatePath), "journal.json")
+		}
+	}
+	if a.Collector.OnUnits == nil {
+		a.Collector.OnUnits = a.Journal.ObserveUnits
+	}
+	a.initFaults()
+	a.initKube()
+	a.factsNow = make(chan struct{}, 1)
+	a.connected = make(chan struct{}, 1)
+	a.nc, err = nats.Connect(a.Config.NatsURL,
+		nats.Nkey(pub, kp.Sign),
+		nats.Secure(protocol.PinnedTLSConfig(a.Config.NatsCertSHA256)),
+		nats.CustomInboxPrefix(protocol.InboxPrefix(a.Config.NodeID)),
+		nats.Name("cf-agent "+a.Version),
+		nats.MaxReconnects(-1),
+		nats.ReconnectWait(2*time.Second),
+		nats.ReconnectJitter(time.Second, time.Second),
+		nats.RetryOnFailedConnect(true),
+		nats.ConnectHandler(func(*nats.Conn) {
+			a.Log.Info("verbonden met ClusterForge", "url", a.Config.NatsURL)
+			a.signal(a.connected)
+			a.signal(a.factsNow)
+		}),
+		nats.ReconnectHandler(func(*nats.Conn) {
+			a.Log.Info("opnieuw verbonden met ClusterForge")
+			a.signal(a.factsNow)
+		}),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				a.Log.Warn("verbinding met ClusterForge verbroken", "err", err)
+			}
+		}),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+			if errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) {
+				a.Log.Error("ClusterForge weigert deze agent; is hij ingetrokken? Meld hem opnieuw aan met cf-agent enroll", "err", err)
+				return
+			}
+			a.Log.Warn("NATS-fout", "err", err)
+		}),
+	)
+	if err != nil {
+		return err
+	}
+	// Een subscription overleeft herverbindingen; nats.go zet hem zelf terug.
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCommands), a.onCommand); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectKube), a.onKube); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDB), a.onDB); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCron), a.onCron); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectRun), a.onRun); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCrowdSec), a.onCrowdSec); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectFirewall), a.onFirewall); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectStacks), a.onStacks); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDocker), a.onDocker); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectWeb), a.onWeb); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectPVE), a.onPVE); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectLogs), a.onLogs); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectSecurity), a.onSecurity); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectConsole), a.onConsole)
+	return err
+}
+
+func (a *Agent) signal(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// Run stuurt heartbeats, metrics en facts tot ctx afloopt.
+func (a *Agent) Run(ctx context.Context) error {
+	// Vóór de eerste verzoeken: een buffer van een import die een herstart
+	// afbrak, staat er anders voor altijd.
+	a.clearSpool()
+	if a.nc == nil {
+		if err := a.Connect(); err != nil {
+			return err
+		}
+	}
+	defer a.nc.Close()
+	if a.nc.IsConnected() {
+		a.signal(a.factsNow)
+	}
+	hbEvery, metricsEvery, factsEvery := a.HeartbeatInterval, a.MetricsInterval, a.FactsInterval
+	if hbEvery == 0 {
+		hbEvery = protocol.HeartbeatInterval
+	}
+	if metricsEvery == 0 {
+		metricsEvery = protocol.MetricsInterval
+	}
+	if factsEvery == 0 {
+		factsEvery = protocol.FactsInterval
+	}
+
+	a.resumeUpgrade(ctx)
+	a.resumeReconfigure(ctx)
+	// Op FreeBSD (OPNsense) zijn ufw, nft/tc, journald, /proc en systemd
+	// er niet; die lussen zouden alleen fouten loggen.
+	linux := hostOS != "freebsd"
+	if linux {
+		a.firewallResume(ctx)
+		a.firewallMonitor(ctx)
+		a.releaseHolds(ctx)
+		// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
+		if res := a.faults.ClearAll(ctx); !res.OK {
+			a.Log.Error("achtergebleven storingen terugdraaien mislukt", "err", res.Error)
+		} else if len(res.Output) > 0 {
+			a.Log.Warn("achtergebleven storingen teruggedraaid", "output", strings.Join(res.Output, "; "))
+		}
+		go a.faultLoop(ctx)
+	}
+	go a.factsLoop(ctx, factsEvery)
+	go a.metricsLoop(ctx, metricsEvery)
+	if linux {
+		go a.journalLoop(ctx, or(a.JournalInterval, protocol.JournalInterval))
+		go a.connsLoop(ctx, or(a.ConnsSample, protocol.ConnsSample), or(a.ConnsInterval, protocol.ConnsInterval))
+		go a.cronRunsLoop(ctx, or(a.CronRunsInterval, 5*time.Second))
+	} else {
+		a.opnResume(ctx)
+	}
+
+	t := time.NewTicker(hbEvery)
+	defer t.Stop()
+	addr := time.NewTicker(or(a.AddressPoll, time.Second))
+	defer addr.Stop()
+	a.sendHeartbeat(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-a.connected:
+			a.sendHeartbeat(ctx)
+		case <-t.C:
+			a.sendHeartbeat(ctx)
+		case <-addr.C:
+			// Een VIP die komt of gaat, staat zo binnen een seconde in de
+			// server in plaats van bij de volgende heartbeat.
+			if a.addressesChanged() {
+				a.sendHeartbeat(ctx)
+			}
+		}
+	}
+}
+
+func (a *Agent) addresses() []string {
+	if a.Collector.Addresses != nil {
+		return a.Collector.Addresses()
+	}
+	return hostAddresses()
+}
+
+func addrKey(addrs []string) string {
+	s := slices.Clone(addrs)
+	slices.Sort(s)
+	return strings.Join(s, ",")
+}
+
+// addressesChanged is true als de adressen anders zijn dan in de laatste
+// heartbeat, hoogstens één keer per seconde.
+func (a *Agent) addressesChanged() bool {
+	key := addrKey(a.addresses())
+	a.hbMu.Lock()
+	defer a.hbMu.Unlock()
+	return key != a.lastAddrs && time.Since(a.lastHB) >= time.Second
+}
+
+func (a *Agent) sendHeartbeat(ctx context.Context) {
+	if !a.nc.IsConnected() {
+		return
+	}
+	hb := a.Collector.Heartbeat(ctx, a.Version)
+	if !a.unconfirmed.Load() {
+		hb.BinarySHA256 = a.binarySum()
+	}
+	hb.Arch = agentPlatform()
+	hb.UpgradeRolledBack, _ = a.rolledBack.Load().(string)
+	hb.ReconfigureRolledBack, _ = a.reconfRolledBack.Load().(string)
+	if a.Config != nil {
+		hb.ServerURL, hb.NatsURL = a.Config.ServerURL, a.Config.NatsURL
+	}
+	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {
+		a.Log.Warn("heartbeat sturen mislukt", "err", err)
+		return
+	}
+	a.hbMu.Lock()
+	a.lastAddrs, a.lastHB = addrKey(hb.Addresses), time.Now()
+	a.hbMu.Unlock()
+}
+
+// journalLoop leest het journaal en stuurt wat er wacht, bij elke interval
+// en na een (her)verbinding.
+func (a *Agent) journalLoop(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if err := a.Journal.Collect(ctx); err != nil {
+			a.Log.Warn("journaal bewaren mislukt", "err", err)
+		}
+		if err := a.sendChanges(ctx); err != nil {
+			if errors.Is(err, nats.ErrNoResponders) {
+				a.Log.Debug("de server neemt het journaal nog niet aan", "err", err)
+			} else {
+				a.Log.Warn("journaal sturen mislukt", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// sendChanges stuurt de wachtende regels in porties van MaxChanges, elk als
+// request; pas na de Ack vergeet de agent ze.
+func (a *Agent) sendChanges(ctx context.Context) error {
+	for ctx.Err() == nil {
+		if !a.nc.IsConnected() {
+			return nil
+		}
+		batch := a.Journal.Next()
+		if len(batch.Entries) == 0 {
+			return nil
+		}
+		data, err := envelope(protocol.TypeChanges, batch)
+		if err != nil {
+			return err
+		}
+		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		msg, err := a.nc.RequestWithContext(rctx, protocol.Subject(a.Config.NodeID, protocol.SubjectEvents), data)
+		cancel()
+		if err != nil {
+			return err
+		}
+		var ack protocol.Ack
+		if err := json.Unmarshal(msg.Data, &ack); err != nil {
+			return err
+		}
+		if !ack.OK {
+			return errors.New("server: " + ack.Error)
+		}
+		if err := a.Journal.Sent(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// connsLoop bekijkt de verbindingen elke sample en stuurt elke interval een
+// samenvatting. Een samenvatting die niet weg kan, vervalt.
+func (a *Agent) connsLoop(ctx context.Context, sample, every time.Duration) {
+	st := time.NewTicker(sample)
+	defer st.Stop()
+	send := time.NewTicker(every)
+	defer send.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-st.C:
+			a.Collector.SampleConns(&a.conns, now)
+		case now := <-send.C:
+			c, ok := a.conns.Take(now)
+			if !ok || !a.nc.IsConnected() {
+				continue
+			}
+			if err := a.publish(protocol.SubjectEvents, protocol.TypeConns, c); err != nil {
+				a.Log.Warn("verbindingen sturen mislukt", "err", err)
+			}
+		}
+	}
+}
+
+// metricsLoop stuurt elke interval een batch metrics. Een batch die niet weg
+// kan, vervalt: de tellers lopen door en de volgende batch is weer actueel.
+func (a *Agent) metricsLoop(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	var sizesAt time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if !a.nc.IsConnected() {
+			continue
+		}
+		m := a.Collector.Metrics()
+		sizes := time.Since(sizesAt) >= dbSizesEvery
+		if sizes {
+			sizesAt = time.Now()
+		}
+		m.Samples = append(m.Samples, a.dbMetrics(ctx, sizes)...)
+		if len(m.Samples) > protocol.MaxSamples {
+			m.Samples = m.Samples[:protocol.MaxSamples]
+		}
+		if err := a.publish(protocol.SubjectMetrics, protocol.TypeMetrics, m); err != nil {
+			a.Log.Warn("metrics sturen mislukt", "err", err)
+		}
+	}
+}
+
+// factsLoop stuurt facts bij (her)verbinden en elke interval. Lukt het niet,
+// dan probeert hij het na een halve minuut opnieuw.
+func (a *Agent) factsLoop(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	var retry <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-a.factsNow:
+		case <-t.C:
+		case <-retry:
+		}
+		retry = nil
+		if err := a.sendFacts(ctx); err != nil {
+			a.Log.Warn("facts sturen mislukt", "err", err)
+			retry = time.After(30 * time.Second)
+		}
+	}
+}
+
+func (a *Agent) sendFacts(ctx context.Context) error {
+	if !a.nc.IsConnected() {
+		return errors.New("niet verbonden")
+	}
+	f := a.Collector.Facts(ctx)
+	f.Faults = a.faults.Active()
+	f.Kube = a.kubeFacts(ctx, f.Hostname)
+	data, err := envelope(protocol.TypeFacts, f)
+	if err != nil {
+		return err
+	}
+	rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	msg, err := a.nc.RequestWithContext(rctx, protocol.Subject(a.Config.NodeID, protocol.SubjectFacts), data)
+	if err != nil {
+		return err
+	}
+	var ack protocol.Ack
+	if err := json.Unmarshal(msg.Data, &ack); err != nil {
+		return err
+	}
+	if !ack.OK {
+		return errors.New("server: " + ack.Error)
+	}
+	// De server nam iets van deze agent aan: een nieuwe agent werkt.
+	a.confirmUpgrade(ctx)
+	a.confirmReconfigure(ctx)
+	return nil
+}
+
+func (a *Agent) publish(kind, typ string, body any) error {
+	data, err := envelope(typ, body)
+	if err != nil {
+		return err
+	}
+	return a.nc.Publish(protocol.Subject(a.Config.NodeID, kind), data)
+}
+
+func envelope(typ string, body any) ([]byte, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	id := make([]byte, 8)
+	_, _ = rand.Read(id)
+	return json.Marshal(protocol.Envelope{V: protocol.Version, ID: hex.EncodeToString(id), Type: typ, TS: time.Now().UTC(), Body: b})
+}
+
+// outboundAddress is het lokale adres waarmee de node de server bereikt.
+// Er wordt niets verstuurd: een UDP-"verbinding" kiest alleen de route.
+func outboundAddress(natsURL string) string {
+	u, err := url.Parse(natsURL)
+	if err != nil {
+		return ""
+	}
+	conn, err := net.Dial("udp", u.Host)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = conn.Close() }()
+	if a, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+		return a.IP.String()
+	}
+	return ""
+}

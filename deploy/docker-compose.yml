@@ -1,0 +1,122 @@
+# Productie-opzet op één VM of LXC. Zet de waarden in een .env-bestand naast
+# dit bestand (zie .env.example) en zet de server achter je reverse proxy met TLS.
+services:
+  server:
+    # Standaard bouwt `docker compose up -d --build` het image hier zelf (vraagt
+    # zo'n 3 GB geheugen). Zonder bouwen: CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0
+    # (of :pr-97, :47d7ecc uit CI) in .env en `docker compose pull && docker compose up -d`.
+    image: ${CF_IMAGE:-clusterforge-server:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        # Zichtbaar in de webinterface en op /api/v1/health; zie de docs bij Bijwerken.
+        VERSION: ${CF_VERSION:-dev}
+        # Minder geheugen bij het bouwen, ten koste van tijd; zie de docs bij Bijwerken.
+        GOFLAGS: ${CF_BUILD_GOFLAGS:-}
+        GOGC: ${CF_BUILD_GOGC:-}
+    restart: unless-stopped
+    # Lopende taken krijgen bij het stoppen tot 15 seconden om zich netjes in
+    # de wachtrij terug te zetten; de standaard van 10 is te kort.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clusterforge-server", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # De eerste start voert alle databasemigraties uit.
+      start_period: 120s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_started
+    environment:
+      CF_DATABASE_URL: postgres://clusterforge:${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD}@postgres:5432/clusterforge?sslmode=disable
+      CF_LISTEN: ":8080"
+      CF_SECURE_COOKIES: ${CF_SECURE_COOKIES:-true}
+      CF_TRUST_PROXY_HEADERS: ${CF_TRUST_PROXY_HEADERS:-false}
+      CF_SESSION_TTL: ${CF_SESSION_TTL:-12h}
+      CF_SESSION_MAX_AGE: ${CF_SESSION_MAX_AGE:-720h}
+      CF_NATS_ADVERTISE: ${CF_NATS_ADVERTISE:-}
+      # Waar de webserver op de host luistert; op 127.0.0.1 (achter een proxy
+      # op dezelfde host) leidt ClusterForge geen intern adres voor agents af.
+      CF_HTTP_BIND: ${CF_BIND:-127.0.0.1}
+      CF_VICTORIAMETRICS_URL: http://victoriametrics:8428
+      CF_GRAFANA_NODE_URL: ${CF_GRAFANA_NODE_URL:-}
+      CF_GRAFANA_CLUSTER_URL: ${CF_GRAFANA_CLUSTER_URL:-}
+      CF_DRIFT_INTERVAL: ${CF_DRIFT_INTERVAL:-15m}
+      CF_MASTER_KEY: ${CF_MASTER_KEY:-}
+      CF_TEST_WINDOW: ${CF_TEST_WINDOW:-zo 03:00-05:00}
+      CF_LOG_LEVEL: ${CF_LOG_LEVEL:-info}
+      CF_SANDBOX_STORAGE: ${CF_SANDBOX_STORAGE:-}
+      CF_SANDBOX_BOOT_TIMEOUT: ${CF_SANDBOX_BOOT_TIMEOUT:-}
+      CF_JOURNAL_SSH_LOGINS: ${CF_JOURNAL_SSH_LOGINS:-}
+      CF_DOCS_USERNAMES: ${CF_DOCS_USERNAMES:-}
+      # Het eigen image: Instellingen → ClusterForge zelf toont het en
+      # bijwerken kiest de tag ernaast (fase 45).
+      CF_IMAGE: ${CF_IMAGE:-}
+      # Het testvenster rekent op deze klok, met zomer- en wintertijd.
+      TZ: ${TZ:-Europe/Brussels}
+    volumes:
+      # Gedeeld met de scannercontainer: daar zet "Scannercontainer koppelen"
+      # het aanmeldbestand.
+      - scanner:/var/lib/clusterforge/scanner
+      # Verhuizen naar het eigen cluster (fase 45): de agent op de host zet
+      # hier de dump; de server geeft hem (alleen lezen) aan de nieuwe
+      # VIP-node met de eenmalige sleutel van de taak.
+      - ${CF_EXPORT_DIR:-/var/lib/clusterforge-export}:/var/lib/clusterforge/export:ro
+    ports:
+      - "${CF_BIND:-127.0.0.1}:8080:8080"
+      # Agents verbinden hier rechtstreeks mee (TLS), niet via de reverse proxy.
+      - "${CF_NATS_BIND:-0.0.0.0}:4222:4222"
+
+  # Scannercontainer (fase 27): cf-agent met nmap, in het netwerk van de host
+  # zodat hij je VLAN's ziet zoals de server. Alleen met het profiel scanner:
+  # COMPOSE_PROFILES=scanner in .env. Daarna Kwetsbaarheden → Scans →
+  # "Scannercontainer koppelen"; hij meldt zich vanzelf aan als cf-scanner en
+  # scant alleen binnen de eigen scopes.
+  scanner:
+    profiles: [scanner]
+    image: ${CF_IMAGE:-clusterforge-server:local}-scanner
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: scanner
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    depends_on:
+      - server
+    environment:
+      TZ: ${TZ:-Europe/Brussels}
+    volumes:
+      - scanner:/etc/clusterforge
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clusterforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD}
+      POSTGRES_DB: clusterforge
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clusterforge"]
+      interval: 5s
+      retries: 10
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.153.0
+    restart: unless-stopped
+    command: ["-retentionPeriod=${CF_VM_RETENTION:-90d}"]
+    volumes: [vmdata:/victoria-metrics-data]
+    # Alleen nodig als Grafana de metrics rechtstreeks leest. VictoriaMetrics
+    # heeft geen login; open dit alleen naar je Grafana.
+    ports:
+      - "${CF_VM_BIND:-127.0.0.1}:8428:8428"
+
+volumes:
+  pgdata:
+  vmdata:
+  scanner:

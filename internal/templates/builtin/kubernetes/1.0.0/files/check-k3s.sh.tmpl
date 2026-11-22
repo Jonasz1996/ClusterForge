@@ -1,0 +1,9 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Keepalived houdt het VIP alleen op een server waarvan k3s draait en de
+# API antwoordt. 401 telt ook: de API antwoordt dan, maar zonder login.
+/usr/bin/systemctl is-active --quiet k3s || exit 1
+code=$(/usr/bin/curl -sk --max-time 2 -o /dev/null -w '%{http_code}' https://127.0.0.1:6443/readyz) || exit 1
+[ "$code" = 200 ] || [ "$code" = 401 ]

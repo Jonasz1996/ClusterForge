@@ -1,0 +1,710 @@
+// Command clusterforge-server is de centrale server van ClusterForge.
+//
+//	clusterforge-server serve                     start de server (voert migraties uit)
+//	clusterforge-server migrate                   voert alleen de migraties uit
+//	clusterforge-server admin create -username X  maakt een beheerder aan
+//	clusterforge-server version                   toont de versie
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"runtime/debug"
+	"strings"
+	"syscall"
+	"time"
+	// De tijdzones zitten in de binary, ook in een image zonder tzdata: het
+	// testvenster rekent met zomer- en wintertijd.
+	_ "time/tzdata"
+
+	"github.com/google/uuid"
+	"golang.org/x/term"
+
+	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agentconf"
+	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
+	"github.com/Jonasz1996/clusterforge/internal/aiverslag"
+	"github.com/Jonasz1996/clusterforge/internal/assistant"
+	"github.com/Jonasz1996/clusterforge/internal/auth"
+	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/commands"
+	"github.com/Jonasz1996/clusterforge/internal/components"
+	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
+	"github.com/Jonasz1996/clusterforge/internal/crowdsec"
+	"github.com/Jonasz1996/clusterforge/internal/databases"
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/disaster"
+	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
+	"github.com/Jonasz1996/clusterforge/internal/dockerhost"
+	"github.com/Jonasz1996/clusterforge/internal/docs"
+	"github.com/Jonasz1996/clusterforge/internal/drift"
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/failover"
+	"github.com/Jonasz1996/clusterforge/internal/firewall"
+	"github.com/Jonasz1996/clusterforge/internal/gitops"
+	"github.com/Jonasz1996/clusterforge/internal/heal"
+	"github.com/Jonasz1996/clusterforge/internal/httpapi"
+	"github.com/Jonasz1996/clusterforge/internal/incidents"
+	"github.com/Jonasz1996/clusterforge/internal/inventory"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/journal"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
+	"github.com/Jonasz1996/clusterforge/internal/kubenodes"
+	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
+	"github.com/Jonasz1996/clusterforge/internal/live"
+	"github.com/Jonasz1996/clusterforge/internal/logs"
+	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/opnsense"
+	"github.com/Jonasz1996/clusterforge/internal/pbs"
+	"github.com/Jonasz1996/clusterforge/internal/planner"
+	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/publish"
+	"github.com/Jonasz1996/clusterforge/internal/pvehost"
+	"github.com/Jonasz1996/clusterforge/internal/recipes"
+	"github.com/Jonasz1996/clusterforge/internal/reports"
+	"github.com/Jonasz1996/clusterforge/internal/risk"
+	"github.com/Jonasz1996/clusterforge/internal/rollout"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
+	"github.com/Jonasz1996/clusterforge/internal/security"
+	"github.com/Jonasz1996/clusterforge/internal/selfhost"
+	"github.com/Jonasz1996/clusterforge/internal/soc"
+	"github.com/Jonasz1996/clusterforge/internal/stacks"
+	"github.com/Jonasz1996/clusterforge/internal/status"
+	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/internal/truenas"
+	"github.com/Jonasz1996/clusterforge/internal/updates"
+	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
+	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
+	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
+)
+
+// version wordt bij het bouwen gezet met -ldflags "-X main.version=...".
+var version = "dev"
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "fout:", err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	if len(args) == 0 {
+		return usage()
+	}
+	switch args[0] {
+	case "serve":
+		return serve()
+	case "migrate":
+		return migrateOnly()
+	case "healthcheck":
+		return healthcheck()
+	case "admin":
+		if len(args) < 2 || args[1] != "create" {
+			return usage()
+		}
+		return adminCreate(args[2:])
+	case "version":
+		fmt.Println(version)
+		return nil
+	default:
+		return usage()
+	}
+}
+
+func usage() error {
+	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|healthcheck|version>`)
+}
+
+func newLogger(level string) *slog.Logger {
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(level)); err != nil {
+		l = slog.LevelInfo
+	}
+	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: l}))
+}
+
+func serve() error {
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg.LogLevel)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := store.Migrate(ctx, pool); err != nil {
+		return err
+	}
+
+	q := store.New(pool)
+	ev := events.NewWriter(q, log)
+	authSvc, err := auth.NewService(q, ev, cfg.SessionTTL)
+	if err != nil {
+		return err
+	}
+	authSvc.SetMaxAge(cfg.SessionMaxAge)
+	if n, err := q.CountUsers(ctx); err == nil && n == 0 {
+		log.Warn("er bestaan nog geen gebruikers; maak een beheerder aan met: clusterforge-server admin create -username <naam>")
+	}
+
+	var box *secrets.Box
+	if cfg.MasterKey != nil {
+		if box, err = secrets.New(cfg.MasterKey); err != nil {
+			return err
+		}
+	} else {
+		log.Warn("CF_MASTER_KEY is niet gezet; Proxmox koppelen kan pas met een masterkey")
+	}
+
+	eval := status.NewEvaluator(pool, ev, log)
+	ingest := metrics.NewIngester(cfg.VictoriaMetricsURL, q, log)
+	// In het eigen cluster (fase 45) schrijft de server ook naar
+	// VictoriaMetrics op de andere nodes.
+	ingest.SetMirrors(os.Getenv("CF_VICTORIAMETRICS_MIRRORS"))
+	if !ingest.Enabled() {
+		log.Warn("CF_VICTORIAMETRICS_URL is niet gezet; metrics van agents worden niet bewaard")
+	}
+	bus, err := agentbus.Start(ctx, cfg.NATSListen, pool, ev, log, agentbus.Hooks{
+		Metrics: func(ctx context.Context, nodeID uuid.UUID, m protocol.Metrics) error {
+			return ingest.Ingest(ctx, nodeID, m, time.Now())
+		},
+		Changed: eval.Kick,
+	})
+	if err != nil {
+		return err
+	}
+	defer bus.Close()
+	bus.SetFingerprintKey(box.Derive(secrets.PurposeFile))
+	bus.SetJournalLogins(cfg.JournalLogins)
+	hub := live.NewHub(pool, log)
+	runner := jobs.NewRunner(pool, ev, log)
+	pve := proxmox.NewService(pool, ev, log, box, runner)
+	pve.Changed = eval.Kick
+	life := lifecycle.NewService(pool, ev, log, runner, bus)
+	life.Changed = eval.Kick
+	dep := deploy.NewService(pool, ev, log, runner, box, pve, bus)
+	dep.Changed = eval.Kick
+	// Kubernetes via de kube-brug van de agents; ook de controle kube_ready
+	// na een uitrol.
+	kub := kube.NewService(pool, bus, log)
+	kub.EnableDrain(runner, ev)
+	kub.Metrics, kub.Changed = ingest, eval.Kick
+	dep.Kube = kub
+	// Een node van een Kubernetes-cluster gaat eerst leeg voor onderhoud of
+	// een herstart.
+	life.Kube = kub
+	// Een worker weghalen: leegmaken, de VM uit en weg, en de node uit
+	// ClusterForge.
+	kinv := inventory.NewService(pool, ev)
+	kinv.Disconnect = bus.Disconnect
+	kn := kubenodes.NewService(pool, ev, runner, kub, pve, kinv, dep)
+	// De MariaDB- en PostgreSQL-servers op de nodes, via agentprotocol 9.
+	dbs := databases.NewService(pool, bus, log)
+	// De cronjobs en timers op de nodes, via agentprotocol 16.
+	crons := cronjobs.NewService(pool, bus, ev, log)
+	bus.SetCronRuns(crons.HandleRuns)
+	// Zelfherstel: elke minuut heal inspect op elke node met een
+	// databaseserver, via agentprotocol 22.
+	hl := heal.NewService(pool, bus, dbs.Overview, log)
+	hl.EnableRun(runner, ev)
+	hl.Changed = func() { eval.Kick(); dbs.Kick() }
+	// Agents bijwerken: met de knop, en vanzelf na een serverupdate.
+	upg := agentupgrade.NewService(pool, ev, log, runner, bus, cfg.AgentDir, version)
+	upg.Changed = eval.Kick
+	// Tussenfase: het adres voor agents en agents omzetten (protocol 47).
+	acf := agentconf.NewService(pool, ev, log, runner, bus)
+	acf.Advertise, acf.HTTPPort, acf.NATSPort = cfg.NATSAdvertise, agentconf.PortOf(cfg.Listen, 8080), bus.Port()
+	acf.HTTPLoopback = cfg.HTTPBindLoopback()
+	acf.Changed = eval.Kick
+	// Fase 45: ClusterForge werkt zichzelf bij vanuit de webinterface en
+	// verhuist naar een eigen cluster (template clusterforge).
+	self := selfhost.NewService(pool, ev, log, runner, bus, bus, box, acf)
+	self.Version, self.Image, self.Cluster, self.Advertise = version, os.Getenv("CF_IMAGE"), os.Getenv("CF_SELF_CLUSTER"), cfg.NATSAdvertise
+	self.MasterKey, self.VMURL = cfg.MasterKey, cfg.VictoriaMetricsURL
+	self.LoadSettings()
+	// Fase 10: pakketten en Docker bijwerken, en eigen commando's draaien.
+	upd := updates.NewService(pool, ev, runner, bus)
+	cmds := commands.NewService(pool, ev, runner, bus, upd)
+	// Fase 14: CrowdSec op de nodes, via agentprotocol 28 en runs.
+	csec := crowdsec.NewService(pool, ev, runner, bus, log)
+	csec.Box = box
+	// Fase 41: schijfbewaking en veilig opruimen, via scripttaken.
+	dsk := diskwatch.NewService(pool, ev, runner, bus, log)
+	// Zabbix-agents: zabbix-agent2 met een eigen PSK per node, via runs en de Zabbix API.
+	zba := zabbixagent.NewService(pool, ev, runner, bus, log)
+	zbm := zabbixmon.NewService(pool, ev, zba, log)
+	zba.Box = box
+	// Fase 21: Docker-stacks via agentprotocol 33 en runs.
+	stk := stacks.NewService(pool, ev, runner, bus, log)
+	stk.Box = box
+	stk.Syncs = crons
+	// Fase 23: logs lezen via agentprotocol 34.
+	lgs := logs.NewService(pool, ev, bus, log)
+	// Fase 16: ufw op de nodes, via agentprotocol 30.
+	fw := firewall.NewService(pool, ev, runner, bus, log)
+	// Fase 25: het beveiligingsoverzicht (SOC) over CrowdSec, de firewall
+	// en de logins heen; elk kwartier een momentopname voor de trend.
+	socs := soc.NewService(pool, log)
+	// Fase 27: kwetsbaarheden (Debian Security Tracker, CISA KEV) via agentprotocol 40.
+	secs := security.NewService(pool, ev, bus, log)
+	// Een eigen spiegel van de feeds, bijvoorbeeld als de server niet zelf naar buiten mag.
+	if u := os.Getenv("CF_SECURITY_DEBIAN_URL"); u != "" {
+		secs.DebianURL = u
+	}
+	if u := os.Getenv("CF_SECURITY_KEV_URL"); u != "" {
+		secs.KEVURL = u
+	}
+	// Het SOC telt de kwetsbaarheden en de verharding mee.
+	socs.Vulns = secs.SOCVulns
+	// Fase 33: wat Zabbix ziet, in de dekking en "Nu belangrijk".
+	socs.Zabbix = zbm.SOC
+	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
+	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
+	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
+	// Docker zoals Portainer (fase 28): lezen en wijzigen via de agent.
+	dkr := dockerhost.NewService(pool, ev, log, runner, bus)
+	pvh.Sync = pve
+	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
+	pvh.Box = box
+	// Fase 32: Proxmox Backup Server via de agent (protocol 49).
+	pbsSvc := pbs.NewService(pool, ev, log, runner, bus)
+	pbsSvc.Box, pbsSvc.Hosts = box, pvh
+	opnSvc := opnsense.NewService(pool, ev, log, runner, bus)
+	tnSvc := truenas.NewService(pool, ev, log, runner, bus)
+	aivSvc := aiverslag.NewService(pool, ev, log, runner, bus)
+	aivSvc.Version = version
+	pub := publish.NewService(pool, ev, log, runner, bus, box)
+	pub.Sync = crons
+	opnSvc.Box = box
+	dep.Hosts = pvh
+	// Een database als onderdeel van een cluster: MariaDB Galera op de
+	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
+	// het plan.
+	cmps := components.NewService(pool, ev, log, runner, bus, dep)
+	cmps.Changed = eval.Kick
+	cmps.DBChanged = dbs.Kick
+	// Een database verhuizen begint bij een server onder Databases.
+	cmps.Overview = dbs.Overview
+	memory := metrics.NewClient(cfg.VictoriaMetricsURL)
+	cmps.Memory = func(ctx context.Context) (map[uuid.UUID]float64, error) { return memory.MemoryP95(ctx, time.Now()) }
+	runner.OnFinished(components.Kind, func(context.Context, store.Job) { dbs.Kick() })
+	// Onderhoud en herstarten van een node met een database: eerst
+	// overschakelen, daarna wachten tot de node weer meedoet.
+	life.DB = cmps
+	// Fase 15: de failover van de master schakelt bij Patroni eerst over.
+	upd.DB = cmps
+	kn.Changed = eval.Kick
+	// Zelf samengestelde clusters (fase 9) staan als template in de
+	// database; ze komen in het register voor de controle hieronder.
+	if err := recipes.NewService(pool, ev).LoadBlueprints(ctx); err != nil {
+		log.Error("samengestelde templates laden mislukt", "err", err)
+	}
+	// Een cluster rendert alleen met de templateversie waarmee het is
+	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
+	if missing, err := dep.MissingTemplates(ctx); err != nil {
+		log.Error("templateversies controleren mislukt", "err", err)
+	} else {
+		for _, m := range missing {
+			log.Error("templateversie ontbreekt in deze server; zet de server terug op een versie die haar kent", "cluster", m)
+		}
+	}
+	bk := backups.NewService(pool, ev, log, pve)
+	bk.SandboxStorage, bk.BootTimeout, bk.Window = cfg.SandboxStorage, cfg.SandboxBootTimeout, cfg.TestWindow
+	bk.Running = dep.Running
+	bk.EnableVerify(runner, bus)
+	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
+	drf.Interval = cfg.DriftInterval
+	drf.Components = cmps
+	// Na een uitrol, een node- of VM-actie meteen opnieuw kijken; na een
+	// rampoefening in elk cluster dat ze raakte.
+	recheck := func(ctx context.Context, j store.Job) {
+		switch {
+		case j.NodeID != nil:
+			drf.KickNode(*j.NodeID)
+		case j.ClusterID != nil:
+			for _, id := range append([]uuid.UUID{*j.ClusterID}, j.SlotClusters...) {
+				if err := drf.Kick(ctx, &id); err != nil {
+					log.Warn("driftcontrole na taak plannen mislukt", "job", j.ID, "err", err)
+				}
+			}
+		}
+	}
+	fo := failover.NewService(pool, ev, log, runner, bus)
+	fo.Changed = eval.Kick
+	fo.Proxmox, fo.Window, fo.DB = pve, cfg.TestWindow, cmps
+	// De assistent; zonder masterkey kan hij niet aan en zeggen de
+	// instellingen waarom.
+	asst := assistant.NewService(pool, ev, log, box)
+	// Fase 15: release notes voor Fix voorstellen, en na een mislukte
+	// automatische Docker-update vanzelf een voorstel.
+	upd.Notes = &updates.Sources{}
+	upd.Assist = upd.AutoFix(asst)
+	// De health score rekent elke minuut; de planner legt elke dag een
+	// momentopname vast voor de trend.
+	rsk := risk.NewService(pool, ev, log, metrics.NewClient(cfg.VictoriaMetricsURL), bk)
+	// Het rapport Herstelbaarheid; de planner bewaart elke eerste van de
+	// maand dat van de maand ervoor.
+	rep := reports.NewService(pool, log)
+	rep.Backups, rep.Risk = bk, rsk
+	// Geplande failovertests, back-upcontroles en DR-repetities; als een
+	// test klaar is en het testslot vrijkomt, kijkt de planner meteen of er
+	// een wacht.
+	var dis *disaster.Service
+	sched := planner.NewScheduler(pool, log,
+		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
+		planner.Task{Name: "automatisch bijwerken", Tick: upd.AutoTick},
+		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
+		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
+		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
+		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune},
+		planner.Task{Name: "incidenten automatisch analyseren", Tick: asst.AutoAnalyze},
+		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }},
+		planner.Task{Name: "rapport Herstelbaarheid bewaren", Tick: rep.Save})
+	// Rampoefeningen in lab en test; de wat-als voorspelt, de meting kijkt
+	// of het klopte.
+	dis = disaster.NewService(pool, ev, log, runner, bus)
+	dis.Changed, dis.Probes = eval.Kick, fo.ProbeFor
+	dis.Proxmox, dis.World = pve, rsk.World
+	// De DR-repetitie draait als back-upcontrole van een heel cluster, ook
+	// gepland in het testvenster.
+	dis.Backups, dis.Window = bk, cfg.TestWindow
+	for _, kind := range []string{failover.KindTest, backups.KindVerify, disaster.KindRun, backups.KindRehearsal} {
+		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
+	}
+	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
+	ro.Changed = eval.Kick
+	// Syncs die de template vraagt (fase 11, zoals Nginx Proxy Manager):
+	// na een gelukte uitrol of wijziging als beheerde cronjob.
+	templateSyncs := func(ctx context.Context, j store.Job) {
+		if j.ClusterID == nil || j.Status != store.JobStatusSucceeded {
+			return
+		}
+		syncs, err := dep.TemplateSyncs(ctx, *j.ClusterID)
+		if err != nil {
+			log.Error("syncs van de template lezen mislukt", "cluster", *j.ClusterID, "err", err)
+			return
+		}
+		ts := make([]cronjobs.TemplateSync, len(syncs))
+		for i, sy := range syncs {
+			ts[i] = cronjobs.TemplateSync{Name: sy.Name, Schedule: sy.Schedule, Source: sy.Source, Target: sy.Target, Before: sy.Before,
+				Delete: sy.Delete, Exclude: sy.Exclude, Alert: sy.Alert, TimeoutSeconds: sy.TimeoutSeconds}
+		}
+		crons.EnsureTemplateSyncs(ctx, *j.ClusterID, ts)
+	}
+	dep.OnFinished(templateSyncs)
+	ro.OnFinished(templateSyncs)
+	// Een node die een nieuwe k3s krijgt, gaat eerst leeg.
+	ro.Kube = kub
+	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore,
+		disaster.KindRun, disaster.KindRestore, components.Kind} {
+		runner.OnFinished(kind, recheck)
+	}
+	// De status en impact van de diensten, en daarna de incidenten, rekenen
+	// na elke ronde van de evaluator, na diens commit.
+	dps := deps.NewService(pool, ev, log)
+	// De wat-als en de SPOF's lezen de infrastructuur uit de Proxmox-sync en
+	// de afhankelijkheden.
+	tp := topo.NewService(pool, ev, log, cfg.NATSAdvertise)
+	// Verbindingen naar NATS en de webinterface worden nooit een
+	// afhankelijkheid.
+	dps.Self = func(ctx context.Context) deps.Skip {
+		urls, _ := q.ListGitServerURLs(ctx)
+		return deps.SelfSkip(tp.OwnIPs(ctx), deps.Ports(append([]string{cfg.Listen, cfg.NATSListen, cfg.NATSAdvertise}, urls...)...))
+	}
+	rsk.Topo, rsk.Deps = tp, dps
+	// De wat-als kent de meerderheid van Galera en etcd.
+	rsk.DB = cmps
+	det := incidents.NewDetector(pool, ev, log)
+	eval.After = func(ctx context.Context) error {
+		return errors.Join(dps.Evaluate(ctx), det.Detect(ctx))
+	}
+	// What Broke rekent de oorzaak van elk incident, meteen als de detector
+	// iets veranderde en daarna elke 30 s tot een uur na het einde.
+	analyzer := whatbroke.NewAnalyzer(pool, metrics.NewClient(cfg.VictoriaMetricsURL), log)
+	// De health score rekent ook meteen als een incident opende,
+	// veranderde of sloot.
+	det.Changed = func() {
+		analyzer.Kick()
+		rsk.Kick()
+	}
+	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
+	// toepassing kijkt het meteen of een plan verouderd is.
+	git := gitops.NewService(pool, ev, log, box, dep, ro)
+	// Een nieuwe versie van een samengesteld cluster met alleen een extra
+	// DATABASE verandert op geen node iets; de instructies lopen dan toch.
+	git.Applied = cmps.RecipeDatabaseFor
+	for _, kind := range []string{deploy.Kind, rollout.Kind} {
+		runner.OnFinished(kind, func(context.Context, store.Job) { git.Kick(false) })
+	}
+	// De documentatie schrijft zichzelf opnieuw tien minuten na een
+	// wijziging en elke nacht.
+	dcs := docs.NewService(pool, log)
+	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
+	dcs.Components = cmps
+	dcs.Opts = docs.Opts{Usernames: cfg.DocsUsernames}
+	goLoop(ctx, log, "hub", hub.Run)
+	goLoop(ctx, log, "eval", eval.Run)
+	goLoop(ctx, log, "ingest", ingest.Run)
+	goLoop(ctx, log, "pve", pve.Run)
+	goLoop(ctx, log, "bk", bk.Run)
+	goLoop(ctx, log, "drf", drf.Run)
+	goLoop(ctx, log, "sched", sched.Run)
+	goLoop(ctx, log, "dps", dps.Run)
+	goLoop(ctx, log, "analyzer", analyzer.Run)
+	goLoop(ctx, log, "rsk", rsk.Run)
+	goLoop(ctx, log, "dcs", dcs.Run)
+	goLoop(ctx, log, "kub", kub.Run)
+	goLoop(ctx, log, "dbs", dbs.Run)
+	goLoop(ctx, log, "crons", crons.Run)
+	goLoop(ctx, log, "heal", hl.Run)
+	goLoop(ctx, log, "upg", upg.Run)
+	goLoop(ctx, log, "cmps", cmps.Run)
+	goLoop(ctx, log, "crowdsec", csec.Loop)
+	goLoop(ctx, log, "zabbixagent", zba.Loop)
+	goLoop(ctx, log, "opnsense", opnSvc.Loop)
+	goLoop(ctx, log, "opnflows", opnSvc.FlowsLoop)
+	goLoop(ctx, log, "opnauto", opnSvc.AutoLoop)
+	goLoop(ctx, log, "publish", pub.Loop)
+	goLoop(ctx, log, "publish-feeds", pub.FeedLoop)
+	goLoop(ctx, log, "zabbixmon", zbm.Loop)
+	goLoop(ctx, log, "firewall", fw.Loop)
+	goLoop(ctx, log, "security", secs.Loop)
+	goLoop(ctx, log, "soc", socs.Run)
+	goLoop(ctx, log, "docker", dkr.Loop)
+	goLoop(ctx, log, "pbs", pbsSvc.Watch)
+	goLoop(ctx, log, "truenas", tnSvc.Watch)
+	goLoop(ctx, log, "aiverslag", aivSvc.Watch)
+	if git.Enabled() {
+		goLoop(ctx, log, "git", git.Run)
+	}
+	jobsDone := make(chan struct{})
+	go func() {
+		defer close(jobsDone)
+		runner.Run(ctx)
+	}()
+
+	log.Info("testvenster", "venster", cfg.TestWindow.String(), "tijdzone", time.Local.String())
+
+	srv := &http.Server{
+		Addr: cfg.Listen,
+		Handler: httpapi.New(httpapi.Deps{
+			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
+			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
+			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+		}).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	go cleanupSessions(ctx, log, authSvc)
+
+	errc := make(chan error, 1)
+	go func() {
+		log.Info("clusterforge-server gestart", "listen", cfg.Listen, "version", version)
+		errc <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errc:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+	case <-ctx.Done():
+		log.Info("afsluiten")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		// Lopende taken zetten zichzelf terug in de wachtrij en gaan na de
+		// herstart verder.
+		select {
+		case <-jobsDone:
+		case <-shutdownCtx.Done():
+		}
+	}
+	return nil
+}
+
+func cleanupSessions(ctx context.Context, log *slog.Logger, a *auth.Service) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n, err := a.CleanupSessions(ctx); err != nil {
+				log.Error("verlopen sessies opruimen", "err", err)
+			} else if n > 0 {
+				log.Info("verlopen sessies opgeruimd", "count", n)
+			}
+		}
+	}
+}
+
+// goLoop draait een achtergrondlus in een eigen goroutine. Een panic in de
+// lus haalt niet de hele server (met NATS en alle agents) onderuit: hij
+// wordt gelogd en de lus start na even wachten opnieuw.
+func goLoop(ctx context.Context, log *slog.Logger, name string, run func(context.Context)) {
+	go func() {
+		for ctx.Err() == nil {
+			if !runLoop(ctx, log, name, run) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(10 * time.Second):
+			}
+		}
+	}()
+}
+
+// runLoop geeft true terug als de lus door een panic stopte.
+func runLoop(ctx context.Context, log *slog.Logger, name string, run func(context.Context)) (panicked bool) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("panic in achtergrondlus; hij start opnieuw", "loop", name, "panic", p, "stack", string(debug.Stack()))
+			panicked = true
+		}
+	}()
+	run(ctx)
+	return false
+}
+
+// healthcheck vraagt /api/v1/health aan de eigen server, voor de
+// healthcheck van Docker: het image heeft geen curl of wget.
+func healthcheck() error {
+	listen := os.Getenv("CF_LISTEN")
+	if listen == "" {
+		listen = ":8080"
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("CF_LISTEN: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	c := &http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get("http://" + net.JoinHostPort(host, port) + "/api/v1/health")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health: %s", resp.Status)
+	}
+	return nil
+}
+
+func migrateOnly() error {
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := store.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	fmt.Println("migraties uitgevoerd")
+	return nil
+}
+
+func adminCreate(args []string) error {
+	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
+	username := fs.String("username", "", "gebruikersnaam (verplicht)")
+	role := fs.String("role", "admin", "rol: admin of viewer")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *username == "" {
+		return errors.New("-username is verplicht")
+	}
+	password, err := readPassword()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg.LogLevel)
+	ctx := context.Background()
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := store.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	q := store.New(pool)
+	authSvc, err := auth.NewService(q, events.NewWriter(q, log), cfg.SessionTTL)
+	if err != nil {
+		return err
+	}
+	u, err := authSvc.CreateUser(ctx, events.System(), *username, password, store.UserRole(*role))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("gebruiker %s aangemaakt met rol %s\n", u.Username, u.Role)
+	return nil
+}
+
+// readPassword vraagt het wachtwoord twee keer in een terminal, of leest één
+// regel van stdin als die geen terminal is (handig in scripts).
+func readPassword() (string, error) {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			return "", fmt.Errorf("wachtwoord lezen van stdin: %w", err)
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+	fmt.Fprint(os.Stderr, "Wachtwoord: ")
+	p1, err := term.ReadPassword(fd)
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprint(os.Stderr, "Herhaal wachtwoord: ")
+	p2, err := term.ReadPassword(fd)
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	if string(p1) != string(p2) {
+		return "", errors.New("wachtwoorden komen niet overeen")
+	}
+	return string(p1), nil
+}

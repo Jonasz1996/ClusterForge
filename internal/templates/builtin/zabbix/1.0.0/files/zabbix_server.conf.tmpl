@@ -1,0 +1,32 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Zabbix server in HA-modus: elke server is een HA-node, één is actief. De
+# database is MariaDB Galera via het VIP, dus één node schrijft.
+
+LogType=console
+PidFile=/run/cf-zabbix-server/zabbix_server.pid
+SocketDir=/run/cf-zabbix-server
+ListenPort=10051
+
+HANodeName={{ .node.hostname }}
+NodeAddress={{ .node.address }}:10051
+
+DBHost={{ .params.vip }}
+DBPort=3306
+DBName=zabbix
+DBUser=zabbix
+# Het wachtwoord staat in /etc/zabbix/cf-zabbix_server-db.conf, alleen voor
+# root leesbaar; systemd zet het hier neer voor de Zabbix server.
+Include=/run/credentials/cf-zabbix-server.service/db.conf
+# MariaDB uit Debian 13 is nieuwer dan de versies die Zabbix 7.0 bij zijn
+# uitgave kende.
+AllowUnsupportedDBVersions=1
+
+Timeout=10
+CacheSize=128M
+ValueCacheSize=128M
+HistoryCacheSize=64M
+TrendCacheSize=16M
+StartDBSyncers=4
+LogSlowQueries=3000

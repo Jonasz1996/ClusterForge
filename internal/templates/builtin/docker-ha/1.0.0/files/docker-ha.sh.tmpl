@@ -1,0 +1,185 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# Docker-hosts met keepalived. ClusterForge (pagina Containers) zet de
+# Compose-projecten op de nodes en schrijft de lijst $LIST: per stack de
+# naam, de map, de compose-bestanden, de plaatsing (alle, vip, node of uit)
+# en of hij kritiek is. Dit script gebruikt die lijst voor keepalived:
+#
+#   docker-ha.sh check            keepalived: mag deze node het VIP houden?
+#   docker-ha.sh master | backup  keepalived: deze node kreeg of verloor het VIP
+#   docker-ha.sh reconcile        stacks met plaatsing vip starten (met VIP) of
+#                                 stoppen (zonder VIP)
+#   docker-ha.sh status           de stacks op deze node
+#   docker-ha.sh keepalived | keepalived-ok
+#   docker-ha.sh old-sync-off | old-sync-ok
+#
+# Zonder VIP doet keepalived niet mee en start en stopt alleen ClusterForge.
+set -u
+# De CF_DHA_*-variabelen zijn er alleen voor de tests van ClusterForge.
+LIST=${CF_DHA_LIST:-/etc/clusterforge/stacks.list}
+STATE=${CF_DHA_STATE:-/run/cf-docker-ha}
+STAGED=${CF_DHA_STAGED:-/usr/local/lib/clusterforge/docker-ha/keepalived.conf}
+CONF=${CF_DHA_CONF:-/etc/keepalived/keepalived.conf}
+VIP='{{ with .params.vip }}{{ . }}{{ end }}'
+# Zo lang na het krijgen van het VIP mag een kritieke stack nog opstarten.
+GRACE='{{ .params.grace_seconds }}'
+MASTER=$STATE/master
+TAB=$(printf '\t')
+
+log() { logger -t cf-docker-ha "$*" 2>/dev/null; echo "$*" >&2; }
+has_vip() { [ -n "$VIP" ] && ip -o addr show | grep -q " $VIP/"; }
+
+# compose <naam> <map> <bestanden met komma's> <argumenten>
+compose() {
+  n=$1 d=$2 f=$3
+  shift 3
+  args=""
+  for x in $(echo "$f" | tr ',' ' '); do args="$args -f $d/$x"; done
+  # shellcheck disable=SC2086
+  docker compose -p "$n" --project-directory "$d" $args "$@"
+}
+
+# De regels van de lijst: naam, map, bestanden, plaatsing, kritiek.
+lines() { [ -f "$LIST" ] && grep -v '^#' "$LIST" | grep -v '^$'; }
+
+# Draait het project gezond? Elke container draait (of staat gepauzeerd voor
+# een sync, of stopte netjes met 0) en geen enkele is unhealthy.
+healthy() {
+  out=$(docker ps -a --filter "label=com.docker.compose.project=$1" --format '{{"{{"}}.State{{"}}"}}|{{"{{"}}.Status{{"}}"}}' 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  echo "$out" | while IFS='|' read -r state status; do
+    case "$state" in
+      running | paused) ;;
+      exited) case "$status" in "Exited (0)"*) ;; *) exit 1 ;; esac ;;
+      *) exit 1 ;;
+    esac
+    case "$status" in *"(unhealthy)"*) exit 1 ;; esac
+  done
+}
+
+check() {
+  if ! timeout 15 docker info >/dev/null 2>&1; then
+    log "Docker antwoordt niet"
+    return 1
+  fi
+  has_vip || return 0
+  since=$(cat "$MASTER" 2>/dev/null || echo 0)
+  case "$since" in '' | *[!0-9]*) since=0 ;; esac
+  [ $(($(date +%s) - since)) -lt "$GRACE" ] && return 0
+  bad=""
+  while IFS="$TAB" read -r name _dir _files place crit; do
+    [ "$crit" = 1 ] || continue
+    [ "$place" = uit ] && continue
+    healthy "$name" || bad="$bad $name"
+  done <<LIJST
+$(lines)
+LIJST
+  if [ -n "$bad" ]; then
+    log "kritieke stack niet gezond:$bad; het VIP gaat naar een andere node"
+    return 1
+  fi
+  return 0
+}
+
+# Met het VIP: de stacks met plaatsing vip starten; zonder: stoppen. Altijd
+# één tegelijk (flock), en telkens volgens wie nu het VIP heeft.
+reconcile() {
+  mkdir -p "$STATE"
+  exec 9>"$STATE/lock"
+  flock 9
+  if has_vip; then want=up; else want=stop; fi
+  while IFS="$TAB" read -r name dir files place _crit; do
+    [ "$place" = vip ] || continue
+    if [ "$want" = up ]; then
+      log "VIP hier: $name starten"
+      compose "$name" "$dir" "$files" up -d --remove-orphans </dev/null || log "$name starten mislukt"
+    else
+      log "VIP weg: $name stoppen"
+      compose "$name" "$dir" "$files" stop </dev/null || log "$name stoppen mislukt"
+    fi
+  done <<LIJST
+$(lines)
+LIJST
+}
+
+status() {
+  if [ -z "$VIP" ]; then
+    echo "Geen VIP: keepalived doet niet mee."
+  elif has_vip; then
+    echo "Deze node heeft het VIP $VIP."
+  else
+    echo "Deze node heeft het VIP $VIP niet."
+  fi
+  while IFS="$TAB" read -r name _dir _files place crit; do
+    [ -n "$name" ] || continue
+    h=gezond
+    healthy "$name" || h="niet gezond"
+    k=""
+    [ "$crit" = 1 ] && k=", kritiek"
+    echo "$name ($place$k): $h"
+  done <<LIJST
+$(lines)
+LIJST
+}
+
+keepalived_ok() {
+  [ -n "$VIP" ] || return 0
+  command -v keepalived >/dev/null 2>&1 && cmp -s "$STAGED" "$CONF" &&
+    systemctl is-enabled --quiet keepalived && systemctl is-active --quiet keepalived
+}
+
+keepalived_install() {
+  [ -n "$VIP" ] || return 0
+  if ! command -v keepalived >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y keepalived || exit 1
+  fi
+  mkdir -p "$(dirname "$CONF")"
+  if ! cmp -s "$STAGED" "$CONF"; then
+    [ -f "$CONF" ] && cp -p "$CONF" "$CONF.voor-clusterforge.$(date +%Y%m%d%H%M%S)"
+    install -m 0640 "$STAGED" "$CONF" || exit 1
+    changed=1
+  fi
+  systemctl enable keepalived || exit 1
+  if ! systemctl is-active --quiet keepalived; then
+    systemctl start keepalived || exit 1
+  elif [ "${changed:-0}" = 1 ]; then
+    systemctl reload keepalived || systemctl restart keepalived || exit 1
+  fi
+}
+
+# Regels in de crontab van root die het oude sync_docker.sh starten (dat
+# /docker met rsync --delete naar de andere nodes stuurde); die zet
+# ClusterForge in commentaar.
+old_sync() { crontab -l 2>/dev/null | grep -v '^[[:space:]]*#' | grep 'sync_docker'; }
+
+old_sync_off() {
+  old_sync >/dev/null || return 0
+  crontab -l 2>/dev/null | sed '/^[[:space:]]*#/!{/sync_docker/s/^/#cf-docker-ha: vervangen door de syncs van ClusterForge# /}' | crontab - || exit 1
+  log "oude Docker-sync in de crontab van root in commentaar gezet"
+}
+
+case "${1:-}" in
+  check) check ;;
+  master)
+    mkdir -p "$STATE"
+    date +%s >"$MASTER"
+    log "VIP $VIP gekregen"
+    setsid "$0" reconcile >/dev/null 2>&1 </dev/null &
+    ;;
+  backup)
+    rm -f "$MASTER"
+    log "VIP $VIP niet (meer) hier"
+    setsid "$0" reconcile >/dev/null 2>&1 </dev/null &
+    ;;
+  reconcile) reconcile ;;
+  status) status ;;
+  keepalived) keepalived_install ;;
+  keepalived-ok) keepalived_ok ;;
+  old-sync-off) old_sync_off ;;
+  old-sync-ok) ! old_sync >/dev/null ;;
+  *)
+    echo "gebruik: $0 check|master|backup|reconcile|status|keepalived|keepalived-ok|old-sync-off|old-sync-ok" >&2
+    exit 2
+    ;;
+esac

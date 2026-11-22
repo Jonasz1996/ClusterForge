@@ -1,0 +1,199 @@
+package events
+
+// Class zegt wat een regel in de tijdlijn van What Broke betekent: een
+// verandering die oorzaak kan zijn, een symptoom van een storing, of alleen
+// informatie.
+type Class string
+
+const (
+	ClassChange  Class = "change"
+	ClassSymptom Class = "symptom"
+	ClassInfo    Class = "info"
+)
+
+// classes geeft elke action in de catalogus een klasse. Een test faalt als
+// er een ontbreekt. Voor een paar actions hangt het af van de payload; zie
+// ClassOf.
+var classes = map[string]Class{
+	"auth.login": ClassInfo, "auth.login_failed": ClassInfo, "auth.logout": ClassInfo, "auth.session_ended": ClassInfo,
+	"auth.password_changed": ClassInfo, "auth.totp_enabled": ClassInfo, "auth.totp_disabled": ClassInfo,
+	"auth.reauth_failed": ClassInfo, "auth.totp_setup_started": ClassInfo, "auth.rate_limited": ClassInfo,
+	"user.created": ClassInfo, "user.disabled": ClassInfo, "user.enabled": ClassInfo, "user.role_changed": ClassInfo,
+	"user.totp_reset": ClassInfo, "user.sessions_revoked": ClassInfo, "audit.exported": ClassInfo,
+	"audit.throttled": ClassInfo,
+
+	"cluster.created": ClassInfo, "cluster.updated": ClassChange, "cluster.deleted": ClassInfo,
+	"cluster.deployed": ClassChange, "cluster.spec_changed": ClassChange, "secret.created": ClassChange,
+	"cluster.database_added": ClassInfo, "cluster.database_applied": ClassChange, "cluster.database_removed": ClassInfo,
+	"cluster.database_recovering": ClassChange, "cluster.database_recovered": ClassChange, "cluster.database_auto_recover": ClassChange,
+	"cluster.database_resynced": ClassChange, "cluster.database_switchover": ClassChange, "cluster.database_reinitialized": ClassChange,
+	"cluster.database_settings": ClassChange, "cluster.database_updated": ClassChange, "cluster.database_node_added": ClassChange,
+	"cluster.database_down": ClassSymptom, "cluster.database_up": ClassInfo, "cluster.database_node_out": ClassSymptom,
+	"cluster.database_node_back": ClassInfo, "cluster.database_restarted": ClassChange, "cluster.database_failover": ClassSymptom,
+	"cluster.database_state_transfer": ClassInfo,
+	"cluster.database_created":        ClassChange, "cluster.database_dropped": ClassChange, "cluster.database_password": ClassChange,
+	"cluster.database_user_dropped": ClassChange, "cluster.database_trial_ok": ClassInfo, "cluster.database_trial_failed": ClassInfo,
+	"cluster.database_not_added": ClassInfo, "cluster.sync_not_added": ClassInfo, "cluster.database_retired": ClassChange,
+	"cluster.recipe_database": ClassChange, "cluster.recipe_database_failed": ClassSymptom,
+	"recipe.saved": ClassInfo, "recipe.deleted": ClassInfo, "blueprint.saved": ClassInfo,
+	"command.saved": ClassInfo, "command.deleted": ClassInfo,
+	"logs.view_saved": ClassInfo, "logs.view_deleted": ClassInfo,
+	"stack.imported": ClassInfo, "stack.saved": ClassChange, "stack.released": ClassChange, "stack.action": ClassChange,
+	"crowdsec.settings_changed": ClassChange, "crowdsec.node_managed": ClassChange, "crowdsec.node_unmanaged": ClassChange,
+	"crowdsec.node_configured": ClassChange, "crowdsec.applied": ClassChange, "crowdsec.apply_failed": ClassSymptom,
+	"crowdsec.removed": ClassChange, "crowdsec.ban_added": ClassInfo, "crowdsec.ban_removed": ClassInfo, "crowdsec.ban_shared": ClassInfo,
+	"firewall.settings_changed": ClassChange, "firewall.mode_changed": ClassChange, "firewall.applied": ClassChange,
+	"firewall.apply_failed": ClassSymptom, "firewall.rolled_back": ClassSymptom, "firewall.disabled": ClassChange,
+	"firewall.rule_added": ClassChange, "firewall.rule_removed": ClassChange,
+	"security.scope_saved": ClassChange, "security.scope_deleted": ClassChange, "security.finding_accepted": ClassChange,
+	"security.finding_reopened": ClassChange, "security.kev_found": ClassSymptom,
+	"security.scan_saved": ClassChange, "security.scan_deleted": ClassChange, "security.scan_started": ClassChange,
+	"security.scan_done": ClassChange, "security.scan_failed": ClassSymptom, "security.scanner_linked": ClassChange,
+	"crowdsec.console_key_changed": ClassChange, "crowdsec.console_enrolled": ClassChange, "crowdsec.console_enroll_failed": ClassSymptom,
+	"node.software_updated": ClassChange, "node.software_update_failed": ClassInfo, "node.command_ran": ClassChange,
+	"disk.settings_updated": ClassChange, "disk.cleaned": ClassChange,
+	"settings.update_policy": ClassChange, "cluster.update_policy": ClassChange, "cluster.auto_update_skipped": ClassInfo,
+	"cluster.secret_revealed":      ClassInfo,
+	"cluster.database_move_copied": ClassChange, "cluster.database_move_failed": ClassInfo, "cluster.database_moved": ClassChange,
+	"cluster.database_move_cancelled": ClassChange, "cluster.database_locked": ClassChange, "cluster.database_unlocked": ClassChange,
+	"cluster.heal_started": ClassChange, "cluster.heal_done": ClassChange, "cluster.heal_failed": ClassInfo,
+	"cluster.heal_auto_changed": ClassChange, "cluster.heal_auto_paused": ClassInfo,
+	"node.heal_started": ClassChange, "node.heal_done": ClassChange, "node.heal_failed": ClassInfo,
+	"node.created": ClassInfo, "node.updated": ClassChange, "node.deleted": ClassInfo,
+	"vip.created": ClassChange, "vip.updated": ClassChange, "vip.deleted": ClassChange,
+
+	"node.lifecycle_changed": ClassChange,
+
+	"job.queued": ClassChange, "job.succeeded": ClassChange, "job.failed": ClassChange, "job.canceled": ClassInfo,
+	"job.cancel_requested": ClassInfo, "job.retried": ClassChange,
+
+	"agent.enrolled": ClassChange, "agent.enroll_failed": ClassInfo, "agent.command": ClassChange,
+	"node.agent_upgraded": ClassChange, "node.agent_upgrade_failed": ClassInfo,
+	"settings.agent_upgrade_auto": ClassChange, "cluster.agent_upgrade_auto": ClassChange,
+	"settings.agent_upgrade_prod_auto": ClassChange, "agents.prod_upgrade_queued": ClassChange, "agents.prod_upgrade_stopped": ClassChange,
+	"docker.action_requested": ClassChange, "docker.console_opened": ClassInfo,
+	"clusterforge.update_started": ClassInfo, "clusterforge.updated": ClassChange, "clusterforge.update_failed": ClassSymptom,
+	"clusterforge.move_started": ClassInfo, "clusterforge.moved": ClassChange, "clusterforge.move_failed": ClassSymptom,
+	"settings.agent_endpoints": ClassChange, "node.agent_reconfigured": ClassChange, "node.agent_reconfigure_failed": ClassInfo,
+	"agent.revoked": ClassChange, "enrollment_token.created": ClassInfo, "enrollment_token.deleted": ClassInfo,
+	"api_token.created": ClassInfo, "api_token.deleted": ClassInfo,
+	"node.facts_changed": ClassInfo,
+	"node.cron_added":    ClassChange, "node.cron_removed": ClassChange, "node.cron_changed": ClassChange,
+	"node.cron_failed": ClassSymptom, "node.cron_recovered": ClassInfo, "node.cron_logging": ClassChange,
+	"node.cron_disabled": ClassChange, "node.cron_enabled": ClassChange,
+	"cron_job.created": ClassChange, "cron_job.updated": ClassChange, "cron_job.enabled": ClassChange, "cron_job.disabled": ClassChange,
+	"cron_job.deleted": ClassChange, "cron_job.run_requested": ClassChange, "cron_job.run_failed": ClassSymptom, "cron_job.run_stopped": ClassChange,
+	"cron_job.dry_run": ClassInfo,
+
+	"proxmox.created": ClassInfo, "proxmox.updated": ClassInfo, "proxmox.deleted": ClassInfo,
+	"proxmox.sync_requested": ClassInfo, "proxmox.sync_failed": ClassSymptom, "proxmox.sync_recovered": ClassInfo,
+	"pvehost.action_requested":        ClassChange,
+	"publish.settings_changed":        ClassChange,
+	"publish.requested":               ClassChange,
+	"publish.adopted":                 ClassInfo,
+	"publish.released":                ClassInfo,
+	"home_app.override":               ClassInfo,
+	"home_app.doubt":                  ClassInfo,
+	"pbs.api_requested":               ClassChange,
+	"truenas.call_requested":          ClassChange,
+	"aiverslag.call_requested":        ClassChange,
+	"aiverslag.ext_install_requested": ClassChange,
+	"pbs.token_created":               ClassChange,
+	"pbs.linked":                      ClassChange,
+	"zabbixagent.settings_changed":    ClassChange, "zabbixagent.node_managed": ClassChange, "zabbixagent.node_unmanaged": ClassChange,
+	"zabbixagent.psk_rotated": ClassChange, "zabbixagent.apply_failed": ClassInfo,
+	"zabbix.host_linked": ClassInfo, "zabbix.host_unlinked": ClassInfo,
+	"zabbix.dashboard_created": ClassInfo, "zabbix.dashboard_updated": ClassInfo, "zabbix.dashboard_deleted": ClassInfo,
+	"zabbix.problem_started": ClassSymptom, "zabbix.problem_resolved": ClassInfo,
+	"zabbix.problem_acknowledged": ClassInfo,
+	"zabbix.maintenance_started":  ClassChange, "zabbix.maintenance_ended": ClassChange, "zabbix.settings_changed": ClassChange,
+	"proxmox.host_offline": ClassChange, "proxmox.host_online": ClassInfo,
+	"proxmox.self_location_set": ClassInfo, "proxmox.self_location_cleared": ClassInfo,
+	"node.link_proposed": ClassInfo, "node.link_confirmed": ClassChange, "node.link_ignored": ClassInfo,
+	"vm.status_changed": ClassChange, "vm.moved": ClassChange, "vm.missing": ClassChange,
+
+	"backup.fresh": ClassInfo, "backup.stale": ClassInfo, "backup.missing": ClassInfo,
+	"backup.inventory_failed": ClassInfo, "backup.inventory_recovered": ClassInfo, "backup.policy_updated": ClassInfo,
+	"backup.watch_updated": ClassInfo, "backup.sandbox_created": ClassInfo, "backup.sandbox_destroyed": ClassInfo,
+	"backup.sandbox_destroy_failed": ClassInfo, "backup.sandbox_connection_refused": ClassInfo,
+	"backup.verify_finished": ClassInfo, "backup.db_dumped": ClassInfo, "backup.db_dump_suspect": ClassInfo,
+	"backup.db_dump_failed": ClassInfo, "backup.db_restored": ClassChange, "backup.db_restore_failed": ClassInfo,
+	"backup.db_settings": ClassInfo,
+
+	"drift.detected": ClassChange, "drift.changed": ClassChange, "drift.resolved": ClassInfo,
+	"drift.check_failed": ClassInfo, "drift.ignore_added": ClassInfo, "drift.ignore_removed": ClassInfo,
+	"drift.baseline_set": ClassInfo, "drift.remediation_requested": ClassChange,
+
+	"failover_test.created": ClassInfo, "failover_test.updated": ClassInfo, "failover_test.deleted": ClassInfo,
+	"failover.fault_injected": ClassChange, "failover.fault_cleared": ClassChange, "failover.finished": ClassInfo,
+	"disaster_scenario.created": ClassInfo, "disaster_scenario.updated": ClassInfo, "disaster_scenario.deleted": ClassInfo,
+	"disaster.started": ClassInfo, "disaster.fault_injected": ClassChange, "disaster.fault_cleared": ClassChange,
+	"disaster.finished": ClassInfo,
+	"dr.started":        ClassInfo, "dr.aborted": ClassInfo, "dr.finished": ClassInfo, "cluster.recovery_targets_updated": ClassInfo,
+
+	"service.created": ClassInfo, "service.updated": ClassInfo, "service.deleted": ClassInfo,
+	"dependency.created": ClassInfo, "dependency.updated": ClassInfo, "dependency.deleted": ClassInfo,
+	"service.status_changed": ClassSymptom,
+
+	"gitops.repo_connected": ClassInfo, "gitops.repo_updated": ClassInfo, "gitops.repo_disconnected": ClassInfo,
+	"gitops.commit_seen": ClassInfo, "gitops.sync_failed": ClassInfo, "gitops.sync_recovered": ClassInfo,
+	"gitops.file_invalid": ClassInfo, "gitops.file_missing": ClassInfo, "gitops.change_planned": ClassInfo,
+	"gitops.change_superseded": ClassInfo, "gitops.change_approved": ClassInfo, "gitops.change_rejected": ClassInfo,
+	"gitops.change_applied": ClassChange, "gitops.change_failed": ClassChange, "gitops.reapply_requested": ClassChange,
+	"cluster.git_linked": ClassInfo, "cluster.git_unlinked": ClassInfo,
+
+	"node.status_changed": ClassSymptom, "cluster.status_changed": ClassSymptom, "vip.owner_changed": ClassSymptom,
+
+	"incident.opened": ClassInfo, "incident.escalated": ClassInfo, "incident.resolved": ClassInfo,
+	"incident.reopened": ClassInfo, "incident.note_updated": ClassInfo, "incident.analyzed": ClassInfo,
+
+	"assistant.settings_updated": ClassInfo, "assistant.asked": ClassInfo, "assistant.budget_reached": ClassInfo,
+	"risk.grade_changed": ClassInfo, "risk.accepted": ClassInfo, "risk.acceptance_removed": ClassInfo,
+	"docs.target_connected": ClassInfo, "docs.target_updated": ClassInfo, "docs.target_disconnected": ClassInfo,
+	"docs.published": ClassInfo, "docs.publish_failed": ClassInfo, "docs.publish_recovered": ClassInfo,
+	"docs.summary_updated": ClassInfo, "docs.summary_removed": ClassInfo,
+
+	"kube.scaled": ClassChange, "kube.restarted": ClassChange, "kube.rolled_back": ClassChange, "kube.deleted": ClassChange,
+	"kube.cordoned": ClassChange, "kube.uncordoned": ClassChange, "kube.drained": ClassChange, "kube.applied": ClassChange,
+	"kube.node_removed": ClassChange, "kube.rolled_out": ClassChange, "kube.app_status_changed": ClassSymptom,
+	"kube.access_issued": ClassInfo, "kube.access_revoked": ClassInfo, "kube.snapshot_saved": ClassInfo,
+	"kube.snapshot_restored": ClassChange, "kube.snapshot_restore_started": ClassChange,
+}
+
+// HasClass is true als de action een klasse heeft.
+func HasClass(action string) bool {
+	_, ok := classes[action]
+	return ok
+}
+
+// ClassOf geeft de klasse van een event. Een statusovergang is alleen een
+// symptoom als het erger wordt; terug naar gezond is informatie. Een VIP dat
+// verhuist is informatie, een VIP zonder eigenaar een symptoom.
+func ClassOf(action string, payload map[string]any) Class {
+	c, ok := classes[action]
+	if !ok {
+		return ClassInfo
+	}
+	to, _ := payload["to"].(string)
+	switch action {
+	case "node.status_changed", "cluster.status_changed", "kube.app_status_changed":
+		if !Bad(to) {
+			return ClassInfo
+		}
+	case "service.status_changed":
+		impact, _ := payload["impact"].(string)
+		if !Bad(to) && (impact == "" || impact == "none") {
+			return ClassInfo
+		}
+	case "vip.owner_changed":
+		if payload["to"] != nil {
+			return ClassInfo
+		}
+	}
+	return c
+}
+
+// Bad is true voor een status die niet gezond is.
+func Bad(status string) bool {
+	return status == "degraded" || status == "down" || status == "split_brain"
+}

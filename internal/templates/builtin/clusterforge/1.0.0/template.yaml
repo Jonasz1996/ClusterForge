@@ -1,0 +1,218 @@
+name: clusterforge
+version: 1.0.0
+title: ClusterForge zelf (HA)
+description: >-
+  ClusterForge zelf als cluster: drie of vijf nodes met een VIP van
+  keepalived, PostgreSQL met Patroni (een eigen VIP op de primary) en
+  VictoriaMetrics op elke node. De server (met NATS voor de agents) draait
+  alleen op de node met het VIP; valt die weg, dan start een andere node hem
+  met dezelfde database, dezelfde hoofdsleutel en hetzelfde image. De server
+  schrijft de metrics naar VictoriaMetrics op elke node, dus na een failover
+  zijn de grafieken er nog. Je huidige ClusterForge verhuist erheen bij
+  Instellingen → ClusterForge zelf → Verhuizen: een dump van de database,
+  de hoofdsleutel en de instellingen gaan naar het cluster en de agents
+  verhuizen naar het VIP. Bijwerken gaat daarna bij Instellingen, node per
+  node.
+cluster_type: generic
+
+# De server volgt het VIP; terugspringen zou hem zonder reden herstarten.
+failback: false
+
+# PostgreSQL (Patroni) op alle nodes, met een eigen VIP op de primary.
+# ClusterForge maakt daarna de gebruiker en de database clusterforge.
+database:
+  engine: postgresql
+  role: node
+  vip: "{{ .params.db_vip }}"
+  host: "{{ .params.db_vip }}"
+  settings:
+    shared_buffers: 256M
+    max_connections: 200
+  steps:
+    - { kind: db_user, user: clusterforge, password: "{{ .params.db_password }}", grant_on: clusterforge }
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: >-
+      Het adres van ClusterForge: de webinterface op http://VIP:8080 en NATS
+      voor de agents op VIP:4222. Na de verhuizing wijzen alle agents
+      hierheen; zet je reverse proxy (NPM) ook naar dit adres. Niet .1 tot .3
+      van het VLAN (gateways).
+  - name: db_vip
+    type: ipv4
+    label: VIP van de database
+    immutable: true
+    help: Een tweede vrij adres; het staat altijd op de primary van PostgreSQL.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: Patroni wil een meerderheid; met drie mag er één uitvallen.
+    default: 3
+    choices: [3, 5]
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker clusterforge
+    help: Leeg laten maakt er een.
+    length: 32
+  - name: scanner
+    type: bool
+    label: Scannercontainer
+    help: De nmap-scanner van Kwetsbaarheden, naast de server op de node met het VIP. Na de verhuizing koppel je hem opnieuw bij Kwetsbaarheden → Scans.
+    default: true
+  - name: vm_retention
+    type: string
+    label: Metrics bewaren
+    help: Hoe lang VictoriaMetrics de metrics bewaart, op elke node.
+    default: 90d
+    pattern: '[0-9]+[dwy]'
+  - name: sync_minutes
+    type: int
+    label: Sync elke zoveel minuten
+    help: De hoofdsleutel, het image en de instellingen gaan zo vaak van de VIP-node naar de andere nodes. Ze veranderen zelden.
+    default: 5
+    choices: [1, 5, 15, 60]
+  - name: timezone
+    type: string
+    label: Tijdzone
+    default: Europe/Brussels
+    pattern: '[A-Za-z]+(/[A-Za-z0-9_+-]+)*'
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    help: Voor de server, PostgreSQL en VictoriaMetrics.
+    default: 3G
+    min: 2G
+    max: 64G
+  - name: disk
+    type: size
+    label: Schijf per node
+    help: De database, de metrics (op elke node een kopie) en de images.
+    default: 32G
+    min: 16G
+    max: 1T
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # Geen leeg cluster main: Patroni maakt zijn eigen.
+      - directory: { path: /etc/postgresql-common/createcluster.d, mode: "0755" }
+      - file:
+          path: /etc/postgresql-common/createcluster.d/clusterforge.conf
+          content: "# Beheerd door ClusterForge: Patroni maakt het cluster, niet het pakket.\ncreate_main_cluster = false\n"
+          mode: "0644"
+      # psql en pg_dump voor de verhuizing en de back-up bij bijwerken; rsync
+      # en sshd voor de sync.
+      - package: { names: [keepalived, curl, ca-certificates, postgresql-client, rsync, openssh-server, iputils-arping, iputils-ping, iproute2] }
+      # Docker alleen op een node zonder Docker. Een bestaande Docker CE of
+      # docker.io blijft zoals hij is.
+      - command:
+          title: Docker
+          run: |-
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ce() { dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'ok installed'; }
+            if command -v dockerd >/dev/null 2>&1 || ce; then
+              if ! docker compose version >/dev/null 2>&1; then
+                if ce; then apt-get install -y docker-compose-plugin; else apt-get install -y docker-compose; fi
+              fi
+              systemctl is-active --quiet docker || systemctl start docker
+            else
+              apt-get install -y docker.io docker-compose
+              systemctl enable --now docker
+            fi
+          unless: command -v dockerd >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && systemctl is-active --quiet docker
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /etc/cf-clusterforge, mode: "0700" }
+      - directory: { path: /opt/cf-clusterforge, mode: "0755" }
+      # incoming: wat de sync brengt; outgoing: de kopie van de VIP-node.
+      - directory: { path: /var/lib/cf-clusterforge, mode: "0711" }
+      - directory: { path: /var/lib/cf-clusterforge/incoming, mode: "0700" }
+      - directory: { path: /var/lib/cf-clusterforge/vm, mode: "0755" }
+      - directory: { path: /var/backups/cf-clusterforge, mode: "0700" }
+      - file:
+          path: /etc/cf-clusterforge/base.env
+          template: base.env.tmpl
+          mode: "0600"
+      - file:
+          path: /opt/cf-clusterforge/compose.yaml
+          template: compose.yaml.tmpl
+      - file:
+          path: /opt/cf-clusterforge/vm.yaml
+          template: vm.yaml.tmpl
+      - file:
+          path: /usr/local/lib/clusterforge/clusterforge-ctl.sh
+          template: clusterforge-ctl.sh.tmpl
+          mode: "0755"
+      - command:
+          title: mappen voor de server
+          run: /usr/local/lib/clusterforge/clusterforge-ctl.sh mappen
+          unless: /usr/local/lib/clusterforge/clusterforge-ctl.sh mappen-ok
+      # VictoriaMetrics draait op elke node; de server schrijft naar allemaal.
+      - file:
+          path: /etc/systemd/system/cf-clusterforge-vm.service
+          template: cf-clusterforge-vm.service.tmpl
+          notify: [service:cf-clusterforge-vm:restart]
+      - service: { name: cf-clusterforge-vm, enabled: true, state: started }
+      # cf-clusterforge is niet enabled: keepalived start het op de node met
+      # het VIP, en pas na de verhuizing (met een hoofdsleutel).
+      - file:
+          path: /etc/systemd/system/cf-clusterforge.service
+          template: cf-clusterforge.service.tmpl
+      - command:
+          title: server herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/clusterforge-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/clusterforge-ctl.sh unchanged
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# De hoofdsleutel, het image en de instellingen gaan van de VIP-node naar de
+# andere nodes. ClusterForge zet deze sync na de uitrol zelf bij Cronjobs.
+syncs:
+  - name: ClusterForge-sleutel en instellingen
+    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else if eq .params.sync_minutes 1 }}* * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
+    before: /usr/local/lib/clusterforge/clusterforge-ctl.sh snapshot
+    source: /var/lib/cf-clusterforge/outgoing/
+    target: /var/lib/cf-clusterforge/incoming/
+    delete: true
+    alert: true
+    timeout_seconds: 600
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+
+services:
+  - { name: clusterforge, kind: web, unit: cf-clusterforge, port: 8080, depends_on: [keepalived], strength: hard }
+  - { name: clusterforge-nats, kind: app, unit: cf-clusterforge, port: 4222, depends_on: [keepalived], strength: hard }
+  - { name: victoriametrics, kind: app, unit: cf-clusterforge-vm, port: 8428 }
+  - { name: keepalived, kind: vip, unit: keepalived }

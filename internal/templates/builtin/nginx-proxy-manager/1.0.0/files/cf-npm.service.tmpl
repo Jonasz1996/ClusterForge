@@ -1,0 +1,20 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Nginx Proxy Manager. Niet enabled: keepalived start het op de node met het
+# VIP (npm-ctl.sh master of check). Vóór de start zet npm-ctl.sh up de
+# nieuwste geldige kopie van de vorige VIP-node op zijn plaats.
+[Unit]
+Description=Nginx Proxy Manager van {{ .cluster.slug }} (actief op de node met het VIP)
+Requires=docker.service
+# Stopt keepalived, dan stopt NPM ook: anders draait het verder zonder VIP.
+BindsTo=keepalived.service
+After=docker.service keepalived.service network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+ExecStart=/usr/local/lib/clusterforge/npm-ctl.sh up
+ExecStop=/usr/local/lib/clusterforge/npm-ctl.sh down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=90

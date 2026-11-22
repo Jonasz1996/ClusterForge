@@ -1,0 +1,28 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# De applicatie van {{ .cluster.slug }} als container. Instellingen zet je als
+# NAAM=waarde in /etc/cf-app/app.env; na een wijziging: systemctl restart cf-app.
+
+[Unit]
+Description=Eigen applicatie van {{ .cluster.slug }} ({{ .params.image }})
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+# app.env bestaat altijd, zodat docker run --env-file niet faalt; een nieuw
+# bestand is alleen voor root leesbaar.
+UMask=0077
+ExecStartPre=/usr/bin/touch /etc/cf-app/app.env
+ExecStartPre=-/usr/bin/docker rm -f cf-app
+# Zonder registry start de container met de image die er al is.
+ExecStartPre=-/usr/bin/docker pull {{ .params.image }}
+ExecStart=/usr/bin/docker run --rm --name cf-app --env-file /etc/cf-app/app.env -p {{ .params.port }}:{{ .params.container_port }} {{ .params.image }}
+ExecStop=/usr/bin/docker stop cf-app
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

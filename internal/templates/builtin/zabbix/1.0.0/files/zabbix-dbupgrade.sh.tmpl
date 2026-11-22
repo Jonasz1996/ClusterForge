@@ -1,0 +1,38 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Voor de start van cf-zabbix-server (ExecStartPre). Na een grote versie
+# moet de database om, en dat weigert de Zabbix server in HA-modus: "all
+# nodes need to be stopped and Zabbix server started in standalone mode".
+# Dan stoppen alle nodes vanzelf (elk faalt op dezelfde melding). De node
+# met het VIP zet de database dan om met een eenmalige standalone server
+# en stopt hem zodra de upgrade klaar is; daarna start hij gewoon in
+# HA-modus. Draait er nog een HA-node met het oude programma, dan weigert
+# Zabbix de standalone start en probeert systemd het later opnieuw.
+VIP={{ .params.vip }}
+CONF=/etc/zabbix/cf-zabbix_server.conf
+journalctl -u cf-zabbix-server --since -10min -o cat 2>/dev/null | grep -q 'cannot perform database upgrade in HA mode' || exit 0
+ip -o -4 addr show | grep -q " inet $VIP/" || exit 0
+
+dir=$(mktemp -d /tmp/cf-zabbix-upgrade.XXXXXX)
+trap 'rm -rf "$dir"' EXIT
+chown zabbix "$dir"
+grep -v -e '^HANodeName' -e '^NodeAddress' -e '^Include=' -e '^PidFile' -e '^SocketDir' "$CONF" > "$dir/zabbix_server.conf"
+# Het wachtwoord rechtstreeks (dit script draait als root); de Zabbix
+# server leest het voor hij naar de gebruiker zabbix overgaat.
+printf 'Include=/etc/zabbix/cf-zabbix_server-db.conf\nPidFile=%s/zabbix_server.pid\nSocketDir=%s\n' "$dir" "$dir" >> "$dir/zabbix_server.conf"
+echo "database van Zabbix omzetten naar de nieuwe versie (standalone, tijdelijk)"
+mkfifo "$dir/out"
+/usr/sbin/zabbix_server -f -c "$dir/zabbix_server.conf" > "$dir/out" 2>&1 &
+pid=$!
+while IFS= read -r line; do
+	echo "$line"
+	case "$line" in
+	*"database upgrade fully completed"* | *"server #1 started"*)
+		kill "$pid" 2>/dev/null
+		;;
+	esac
+done < "$dir/out"
+wait "$pid"
+exit 0

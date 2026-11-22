@@ -1,0 +1,499 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+#   platform-ctl.sh up | down        het platform starten of stoppen (cf-platform)
+#   platform-ctl.sh check            mag deze node het VIP hebben? (keepalived)
+#   platform-ctl.sh master|backup    keepalived: deze node kreeg of verloor het VIP
+#   platform-ctl.sh unchanged        draait het hier met de huidige code en instellingen?
+#   platform-ctl.sh restart-if-changed
+#                                    opnieuw starten na een nieuwe versie of instelling,
+#                                    met eerst een back-up van de database
+#   platform-ctl.sh db-backup        back-up van de database (/var/backups/cf-platform)
+#   platform-ctl.sh status [--stil]  de stand op deze node (ook voor ClusterForge)
+#   platform-ctl.sh modellen [--check]
+#                                    de modellen van gezichten en zoeken op beeld
+#   platform-ctl.sh geo [--check]    de bronnen van de plaatsnamen (gedeelde data)
+#   platform-ctl.sh replicatie [--check]
+#                                    bestaande volumes naar de replicatie van ClusterForge
+#   platform-ctl.sh compose …        docker compose met de bestanden van het cluster
+#   platform-ctl.sh overstap proef|echt [datamap]
+#                                    van de single-node op deze machine naar het cluster
+#
+# Het cluster staat los van een single-node op dezelfde machine: eigen code
+# (/opt/cf-platform), image (cf-platform:local), project (cf-platform) en
+# datamap (/srv/platform-data, SeaweedFS). Het platform start nergens zolang
+# de markering op de gedeelde datamap ontbreekt; die zet de overstap.
+#
+# Nooit install.sh van het platform op een clusternode: dat maakt een tweede
+# single met SQLite. Een nieuwe versie kies je in ClusterForge (Wijzigen,
+# Versie).
+set -u
+SRC=/opt/cf-platform/src/infra/single
+DATA=/srv/platform-data
+ACTIVE=$DATA/.cf-platform-active
+HASH=/run/cf-platform.hash
+ENV=/etc/clusterforge/platform.env
+VIP='{{ .params.vip }}'
+CLUSTER='{{ .cluster.slug }}'
+REF='{{ .params.platform_ref }}'
+STATUS_DIR=/var/lib/clusterforge/app-status
+BACKUPS=/var/backups/cf-platform
+env_get() { sed -n "s/^$1=//p" "$ENV" | tail -n 1; }
+MODELLEN=$(env_get MODELLEN_ROOT); MODELLEN=${MODELLEN:-/opt/cf-platform/modellen}
+SLEUTELS=$(env_get SLEUTELS_ROOT); SLEUTELS=${SLEUTELS:-/var/lib/cf-platform/sleutels/gezichten}
+BEELD_MAP=siglip2-b32-256
+# Draait deze versie met de analyse (gezichten en zoeken op beeld)?
+analyse_on() { [ "$(env_get ANALYSE)" = aan ] && [ -f "$SRC/compose.analyse.yaml" ]; }
+compose() {
+  set -- -f /etc/clusterforge/platform-cluster.yaml "$@"
+  if analyse_on; then
+    set -- -f "$SRC/compose.analyse.yaml" -f /etc/clusterforge/platform-analyse.yaml "$@"
+  fi
+  docker compose -p cf-platform --project-directory "$SRC" --env-file "$ENV" \
+    -f "$SRC/compose.yaml" -f "$SRC/compose.office.yaml" -f "$SRC/compose.media.yaml" "$@"
+}
+fingerprint() {
+  { cat "$ENV" /etc/clusterforge/platform-cluster.yaml
+    if analyse_on; then
+      cat /etc/clusterforge/platform-analyse.yaml
+      find "$MODELLEN" -path "$MODELLEN/.*" -prune -o -type f -printf '%P %s\n' 2>/dev/null | sort
+    fi
+    docker image inspect -f '{{"{{"}}.Id{{"}}"}}' cf-platform:local 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+say() { echo "== $*"; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+
+# De database van de single (SQLite in de datamap) naar PostgreSQL, met de
+# code van het cluster (app.cli db-copy). --leegmaken: wat er in PostgreSQL
+# staat, gaat eerst weg.
+db_copy() {
+  url=$(sed -n 's/^PLATFORM_DATABASE_URL=//p' /etc/clusterforge/platform.env)
+  docker run --rm --user 10001:10001 -v "$1:/data" -e PLATFORM_DATA_DIR=/data \
+    cf-platform:local python -m app.cli db-copy "$url" --leegmaken
+}
+
+# De bestanden (blobs, media, office) naar SeaweedFS, zonder de SQLite.
+# weed mount zet de tijd van een bestand bij het wegschrijven op "nu", ook als
+# rsync er net de oorspronkelijke tijd op zette. De tweede ronde kopieert niets
+# (--size-only) en zet alleen de tijden terug, zodat een volgende rsync enkel
+# echte wijzigingen meeneemt.
+sync_data() {
+  set -- "$1/" "$DATA/" --exclude=/platform.db --exclude=/platform.db-wal \
+    --exclude=/platform.db-shm --exclude=/backup/ --exclude=/.cf-platform-active
+  rsync -aH --delete --info=stats1 "$@" && rsync -aH --size-only "$@"
+}
+
+overstap() {
+  mode=${1:-}
+  bron=${2:-/opt/platform/data/platform}
+  case "$mode" in proef|echt) ;; *) fail "gebruik: $0 overstap proef|echt [datamap]" ;; esac
+  say "Controles"
+  [ -f "$ACTIVE" ] && fail "het cluster draait al (overstap gedaan op $(cat "$ACTIVE"))"
+  mountpoint -q "$DATA" || fail "$DATA is niet gemount (journalctl -u cf-platform-mount)"
+  [ -f "$bron/platform.db" ] || fail "geen $bron/platform.db: draait de single-node op deze machine?"
+  docker image inspect cf-platform:local >/dev/null 2>&1 || fail "image cf-platform:local ontbreekt; rol het cluster eerst uit"
+  command -v rsync >/dev/null || fail "rsync ontbreekt"
+  echo "bron $bron ($(du -sh "$bron" | cut -f1)), doel $DATA"
+  if [ "$mode" = proef ]; then
+    say "Bestanden kopiëren (de single draait door)"
+    sync_data "$bron" || fail "rsync"
+    say "Database kopiëren naar PostgreSQL (proef)"
+    db_copy "$bron" || fail "db-copy"
+    say "Proef gelukt. Niets gestart; de single draait door. De echte overstap kopieert alleen nog wat erbij kwam."
+    return 0
+  fi
+  single=$(docker ps -aq --filter label=com.docker.compose.project=platform)
+  say "Bestanden kopiëren terwijl de single nog draait"
+  sync_data "$bron" || fail "rsync"
+  if [ -n "$single" ]; then
+    say "Single stoppen (platform-platform-1 en co); start niet meer vanzelf"
+    # shellcheck disable=SC2086
+    docker update --restart=no $single >/dev/null && docker stop $single || fail "single stoppen"
+  fi
+  say "Laatste bestanden kopiëren"
+  sync_data "$bron" || fail "rsync"
+  say "Database kopiëren naar PostgreSQL"
+  db_copy "$bron" || fail "db-copy (de single staat stil: start hem terug met: docker start $(echo $single))"
+  date -Iseconds > "$ACTIVE"
+  say "Overgestapt. Het platform start op de node met het VIP ($VIP)."
+  if has_vip; then systemctl start cf-platform && systemctl --no-pager status cf-platform | head -n 3; fi
+  echo "Terug naar de single: rm $ACTIVE op een node, systemctl stop cf-platform op de VIP-node, docker start $(echo $single)"
+}
+
+
+# --- back-up ---------------------------------------------------------------
+# Een back-up van de database van het platform (pg_dump -Fc via het VIP van de
+# database), vóór elke herstart met een nieuwe versie: de app voert bij de
+# start zijn migraties zelf uit. De vijf nieuwste blijven staan.
+db_backup() {
+  url=$(env_get PLATFORM_DATABASE_URL)
+  rest=${url#*://}; cred=${rest%%@*}; hostdb=${rest#*@}
+  user=${cred%%:*}; pass=${cred#*:}
+  host=${hostdb%%/*}; db=${hostdb#*/}; port=${host##*:}; host=${host%:*}
+  [ "$port" = "$host" ] && port=5432
+  command -v pg_dump >/dev/null || fail "pg_dump ontbreekt"
+  mkdir -p "$BACKUPS" && chmod 0700 "$BACKUPS"
+  rev=$(cat /var/lib/clusterforge/platform-image.rev 2>/dev/null | cut -c1-12)
+  out=$BACKUPS/platform-$(date +%Y%m%d-%H%M%S)-${rev:-onbekend}.dump
+  say "Back-up van de database $db naar $out"
+  PGPASSWORD=$pass pg_dump -Fc -h "$host" -p "$port" -U "$user" -d "$db" -f "$out.deel" &&
+    [ -s "$out.deel" ] && mv "$out.deel" "$out" || { rm -f "$out.deel"; fail "back-up mislukt"; }
+  ls -lh "$out"
+  # shellcheck disable=SC2012
+  ls -1t "$BACKUPS"/platform-*.dump 2>/dev/null | tail -n +6 | while read -r f; do rm -f "$f"; done
+}
+
+# --- controle van een gedownload bestand ------------------------------------
+# ok <pad> <bytes> <sha256>: een gewoon bestand (geen symlink) met precies die
+# grootte en die sha256.
+ok() {
+  [ ! -L "$1" ] && [ -f "$1" ] && [ "$(stat -c %s -- "$1")" = "$2" ] &&
+    [ "$(sha256sum -- "$1" | cut -d' ' -f1)" = "$3" ]
+}
+# ophalen <url> <bytes> <sha256> <doel>
+ophalen() {
+  curl -fsSL --retry 3 --connect-timeout 20 --max-time $((600 + $2 / 1000000)) --max-filesize "$2" -o "$4" "$1" </dev/null &&
+    ok "$4" "$2" "$3"
+}
+name_ok() {
+  case "/$1/" in
+    // | *//* | */./* | */../*) return 1 ;;
+    *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-]*) return 1 ;;
+  esac
+}
+# De regels van models.lock: sha256 bytes naam url.
+lock_lines() {
+  grep -E '^[0-9a-f]{64}[[:space:]]+[1-9][0-9]{0,11}[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+' \
+    "$SRC/../../api/app/analyse/models.lock" 2>/dev/null
+}
+
+# --- plaatsnamen ------------------------------------------------------------
+# De bronnen van de plaatsnamen (DATA_ROOT/geo, zoals install.sh), één keer
+# op de gedeelde bestanden; de app bouwt er bij de start places.sqlite van.
+# De lijst komt uit install.sh van dezelfde versie (geo_bronnen). Het
+# platform (uid 10001) zet ze zelf neer.
+geo_list() {
+  sed -n '/^geo_bronnen() {/,/^BRONNEN/p' "$SRC/install.sh" 2>/dev/null |
+    grep -E '^[A-Za-z0-9._-]+ [0-9]+ [0-9a-f]{64} https://'
+}
+as_app() { setpriv --reuid=10001 --regid=10001 --clear-groups "$@"; }
+geo() {
+  [ "$(env_get PLAATSEN)" = uit ] && { echo "Plaatsnamen: uit"; return 0; }
+  [ -f "$SRC/../../api/app/geo/load.py" ] || { echo "Plaatsnamen: deze versie heeft ze niet"; return 0; }
+  list=$(geo_list)
+  [ -n "$list" ] || { echo "Plaatsnamen: geen bronnen in install.sh"; return 0; }
+  mountpoint -q "$DATA" || { echo "Plaatsnamen: $DATA is niet gemount" >&2; return 1; }
+  [ -d "$DATA/geo" ] || as_app mkdir -m 0750 "$DATA/geo" || return 1
+  missing=0
+  echo "$list" | { while read -r name size sha url; do
+      ok "$DATA/geo/$name" "$size" "$sha" && continue
+      missing=1
+      [ "${1:-}" = --check ] && continue
+      tmp=$(mktemp)
+      if ophalen "$url" "$size" "$sha" "$tmp" &&
+        as_app sh -c 'umask 027 && cat >"$1.part" && mv -f "$1.part" "$1"' sh "$DATA/geo/$name" <"$tmp"; then
+        echo "Plaatsnamen: $name opgehaald"
+        missing=0
+      else
+        echo "Plaatsnamen: kon $name niet ophalen ($url)" >&2
+        rm -f "$tmp"
+        exit 1
+      fi
+      rm -f "$tmp"
+    done
+    [ "${1:-}" != --check ] || [ "$missing" = 0 ]; }
+}
+
+# --- modellen van de analyse ------------------------------------------------
+# Zoals install.sh: de modellen van models.lock in MODELLEN_ROOT, op elke
+# node zelf (de VIP kan overal komen). Zoeken op beeld (SigLIP 2, ±1,55 GB
+# bron) zet de dienst analyse-omzetten van de versie zelf om, zonder netwerk.
+beeld_ready() {
+  lock_lines | while read -r sha size name url; do
+    case $name in "$BEELD_MAP"/bron/*) continue ;; "$BEELD_MAP"/*) ;; *) continue ;; esac
+    ok "$MODELLEN/$name" "$size" "$sha" || exit 1
+  done
+}
+modellen_ready() {
+  lock_lines | while read -r sha size name url; do
+    case $name in "$BEELD_MAP"/*) continue ;; esac
+    [ "$url" = - ] && continue
+    ok "$MODELLEN/$name" "$size" "$sha" || exit 1
+  done || return 1
+  [ "$(env_get BEELD)" != aan ] || ! lock_lines | grep -q " $BEELD_MAP/" || beeld_ready
+}
+analyse_dirs() {
+  mkdir -p "$MODELLEN" "$(dirname "$SLEUTELS")" && chown root:root "$MODELLEN" && chmod 0755 "$MODELLEN" || return 1
+  [ -d "$SLEUTELS" ] || mkdir -m 0700 "$SLEUTELS" || return 1
+  chown 10001:10001 "$SLEUTELS" && chmod 0700 "$SLEUTELS"
+}
+modellen() {
+  if ! analyse_on; then
+    echo "Analyse: uit of niet in deze versie"
+    return 0
+  fi
+  if [ "${1:-}" = --check ]; then
+    [ -d "$SLEUTELS" ] || return 1
+    modellen_ready && return 0
+    # Loopt zoeken op beeld nog op de achtergrond, dan is er niets te doen.
+    systemctl is-active --quiet cf-platform-beeld
+    return $?
+  fi
+  analyse_dirs || fail "de mappen van de analyse"
+  docker image inspect cf-platform:local >/dev/null 2>&1 || fail "image cf-platform:local ontbreekt (platform-src.sh)"
+  rm -rf "$MODELLEN"/.ophalen.* "$MODELLEN"/.beeld.*
+  tmp=$(mktemp -d "$MODELLEN/.ophalen.XXXXXX") || fail "tijdelijke map"
+  rc=0
+  lock_lines | { while read -r sha size name url; do
+      case $name in "$BEELD_MAP"/*) continue ;; esac
+      [ "$url" = - ] && continue
+      name_ok "$name" || { echo "Let op: ongeldige naam in models.lock: $name"; continue; }
+      ok "$MODELLEN/$name" "$size" "$sha" && continue
+      mkdir -p "$(dirname "$MODELLEN/$name")"
+      if ophalen "$url" "$size" "$sha" "$tmp/model" && install -m 0644 -o root -g root "$tmp/model" "$tmp/klaar" &&
+        mv -fT "$tmp/klaar" "$MODELLEN/$name"; then
+        echo "Model geladen: $name"
+      else
+        echo "Kon $name niet ophalen ($url)" >&2
+        rc=1
+      fi
+      rm -f "$tmp/model" "$tmp/klaar"
+    done
+    exit $rc; } || rc=1
+  for f in "$SRC"/../../api/app/analyse/licenties/*.txt; do
+    [ -f "$f" ] && install -m 0644 -o root -g root "$f" "$MODELLEN/${f##*/}"
+  done
+  rm -rf "$tmp"
+  [ "$rc" = 0 ] && echo "Analyse: modellen van gezichten staan klaar in $MODELLEN"
+  if [ "$(env_get BEELD)" = aan ] && lock_lines | grep -q " $BEELD_MAP/" && ! beeld_ready; then
+    # ±1,6 GB ophalen en omzetten duurt langer dan een stap van de uitrol:
+    # op de achtergrond, in een eigen unit (journalctl -u cf-platform-beeld).
+    if systemctl is-active --quiet cf-platform-beeld; then
+      echo "Zoeken op beeld: wordt al opgehaald (journalctl -u cf-platform-beeld)"
+    else
+      systemctl reset-failed cf-platform-beeld 2>/dev/null || true
+      systemd-run --unit cf-platform-beeld --description "Model van zoeken op beeld" --no-block \
+        /usr/local/lib/clusterforge/platform-ctl.sh beeld &&
+        echo "Zoeken op beeld: het model wordt op de achtergrond opgehaald (journalctl -u cf-platform-beeld)"
+    fi
+  fi
+  return $rc
+}
+beeld() {
+  need=0
+  for n in $(lock_lines | awk -v m="$BEELD_MAP/" 'index($3, m) == 1 { print $2 }'); do need=$((need + n * 2)); done
+  avail=$(df --output=avail -B1 "$MODELLEN" | tail -n 1 | tr -d ' ')
+  [ "$avail" -gt $((need + 100000000)) ] || { echo "Zoeken op beeld: te weinig ruimte in $MODELLEN ($((need / 1000000)) MB nodig)" >&2; return 1; }
+  tmp=$(mktemp -d "$MODELLEN/.beeld.XXXXXX") || return 1
+  mkdir -m 0755 "$tmp/bron" "$tmp/nieuw" && mkdir -m 0700 "$tmp/uit" && chown 10004:10003 "$tmp/uit" || { rm -rf "$tmp"; return 1; }
+  if ! lock_lines | while read -r sha size name url; do
+      case $name in "$BEELD_MAP"/bron/*) ;; *) continue ;; esac
+      base=${name##*/}
+      ophalen "$url" "$size" "$sha" "$tmp/bron/.deel" && chmod 0644 "$tmp/bron/.deel" && mv -fT "$tmp/bron/.deel" "$tmp/bron/$base" || {
+        echo "Zoeken op beeld: kon $base niet ophalen" >&2; exit 1; }
+      echo "Bron opgehaald: $name"
+    done; then rm -rf "$tmp"; return 1; fi
+  echo "Zoeken op beeld: het model omzetten (een paar minuten, zonder netwerk)…"
+  if ! OMZET_BRON=$tmp/bron OMZET_UIT=$tmp/uit compose --profile omzetten run --rm --no-deps -T analyse-omzetten </dev/null; then
+    echo "Zoeken op beeld: de omzetting lukte niet" >&2; rm -rf "$tmp"; return 1
+  fi
+  if ! lock_lines | while read -r sha size name url; do
+      case $name in "$BEELD_MAP"/bron/*) continue ;; "$BEELD_MAP"/*) ;; *) continue ;; esac
+      base=${name##*/}; f=$tmp/uit/$base
+      [ ! -L "$f" ] && [ -f "$f" ] &&
+        dd if="$f" of="$tmp/nieuw/$base" iflag=nofollow,nonblock,count_bytes count=$((size + 1)) bs=64K status=none 2>/dev/null &&
+        chmod 0644 "$tmp/nieuw/$base" && ok "$tmp/nieuw/$base" "$size" "$sha" || {
+        echo "Zoeken op beeld: $base klopt niet met models.lock" >&2; exit 1; }
+    done; then rm -rf "$tmp"; return 1; fi
+  [ ! -e "$MODELLEN/$BEELD_MAP" ] || mv -T "$MODELLEN/$BEELD_MAP" "$tmp/oud"
+  mv -T "$tmp/nieuw" "$MODELLEN/$BEELD_MAP" || { [ -e "$tmp/oud" ] && mv -T "$tmp/oud" "$MODELLEN/$BEELD_MAP"; rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  echo "Zoeken op beeld: het model staat klaar"
+  # Draait het platform hier, dan leest de analyse het model bij een nieuwe start.
+  if has_vip && systemctl is-active --quiet cf-platform; then
+    compose up -d --no-deps --force-recreate analyse && fingerprint > "$HASH"
+  fi
+}
+
+# --- replicatie van SeaweedFS -----------------------------------------------
+# Verandert de replicatie in ClusterForge (Wijzigen, Replicatie), dan zet de
+# leider van de masters de bestaande volumes om en maakt hij de ontbrekende
+# kopieën (volume.fix.replication). Nieuwe volumes krijgen de nieuwe waarde
+# al van de master. --check: staan alle volumes al op de gewenste waarde, of
+# is deze node niet de leider?
+REPLICATIE='{{ .params.replication }}'
+weed_leader() {
+  curl -fsS --max-time 5 http://127.0.0.1:9333/cluster/status 2>/dev/null | grep -q '"IsLeader": *true'
+}
+volumes_placements() {
+  # De ReplicaPlacement van elk volume, als xyz, uit de volume server van elke node.
+  curl -fsS --max-time 20 http://127.0.0.1:9333/vol/status 2>/dev/null |
+    grep -o '"ReplicaPlacement": *{[^}]*}' |
+    awk '{ n = r = d = 0
+      if (match($0, /"(node|SameRackCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); n = v }
+      if (match($0, /"(rack|DiffRackCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); r = v }
+      if (match($0, /"(dc|DiffDataCenterCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); d = v }
+      print d r n }'
+}
+replicatie() {
+  weed_leader || { [ "${1:-}" = --check ] && return 0; echo "Niet de leider van de masters; die zet de replicatie om."; return 0; }
+  other=$(volumes_placements | grep -vx "$REPLICATIE" | wc -l)
+  if [ "${1:-}" = --check ]; then
+    [ "$other" = 0 ] || systemctl is-active --quiet cf-platform-replicatie
+    return $?
+  fi
+  if [ "$other" = 0 ]; then echo "Alle volumes staan al op $REPLICATIE"; return 0; fi
+  if [ "${1:-}" != --nu ]; then
+    # Kopieën maken kan uren duren: op de achtergrond, in een eigen unit.
+    systemctl is-active --quiet cf-platform-replicatie && { echo "Replicatie: loopt al (journalctl -u cf-platform-replicatie)"; return 0; }
+    systemctl reset-failed cf-platform-replicatie 2>/dev/null || true
+    systemd-run --unit cf-platform-replicatie --description "SeaweedFS-volumes naar replicatie $REPLICATIE" --no-block \
+      /usr/local/lib/clusterforge/platform-ctl.sh replicatie --nu
+    echo "Replicatie: $other volumes naar $REPLICATIE, op de achtergrond (journalctl -u cf-platform-replicatie)"
+    return 0
+  fi
+  say "$other volumes naar replicatie $REPLICATIE, dan de ontbrekende kopieën maken"
+  printf 'lock\nvolume.configure.replication -replication %s -collectionPattern *\nvolume.fix.replication\nunlock\n' "$REPLICATIE" |
+    /usr/local/bin/weed shell -master=127.0.0.1:9333
+  left=$(volumes_placements | grep -vx "$REPLICATIE" | wc -l)
+  echo "Nog $left volumes niet op $REPLICATIE"
+}
+
+# --- stand voor ClusterForge ------------------------------------------------
+# platform-ctl.sh status schrijft $STATUS_DIR/media-platform.json; de agent
+# stuurt dat mee met de facts (protocol 48). De controles van het platform
+# zelf (app, containers, http, plaatsnamen, analyse) doet alleen de node met
+# het VIP; elke node meldt zijn eigen mount, SeaweedFS, modellen en schijf.
+jesc() { printf '%s' "$1" | tr '\n\r\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+CHECKS=""; VALUES=""; BAD=0
+chk() { # chk <id> <label> <ok 0|1> <red|amber> <detail>
+  CHECKS="$CHECKS${CHECKS:+,}{\"id\":\"$1\",\"label\":\"$(jesc "$2")\",\"ok\":$([ "$3" = 1 ] && echo true || echo false),\"severity\":\"$4\",\"detail\":\"$(jesc "$5")\"}"
+  [ "$3" = 1 ] || BAD=$((BAD + 1))
+  [ -n "$STIL" ] || printf '%-6s %-34s %s\n' "$([ "$3" = 1 ] && echo ok || echo FOUT)" "$2" "$5"
+}
+val() { # val <id> <label> <tekst> [bytes]
+  VALUES="$VALUES${VALUES:+,}{\"id\":\"$1\",\"label\":\"$(jesc "$2")\",\"value\":\"$(jesc "$3")\"${4:+,\"bytes\":$4}}"
+  [ -n "$STIL" ] || printf '       %-34s %s\n' "$2" "$3"
+}
+human() { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "$1 B"; }
+status() {
+  STIL=""; [ "${1:-}" = --stil ] && STIL=1
+  rev=$(cat /var/lib/clusterforge/platform-image.rev 2>/dev/null)
+  role=stand-by; has_vip && role=actief
+  [ -f "$ACTIVE" ] || role=voor-overstap
+  [ -n "$STIL" ] || echo "== $(hostname) ($role), versie $REF ${rev:+(${rev%"${rev#????????????}"})}"
+  # Elke node
+  mnt=0; mountpoint -q "$DATA" && mnt=1
+  chk mount "Bestanden gemount ($DATA)" "$mnt" red "$([ "$mnt" = 1 ] && echo gemount || echo "niet gemount: journalctl -u cf-platform-mount")"
+  sw=0; systemctl is-active --quiet cf-seaweedfs && sw=1
+  chk seaweedfs "SeaweedFS (master, volume, filer)" "$sw" red "$(systemctl is-active cf-seaweedfs 2>/dev/null)"
+  vb=$(du -sb /srv/seaweedfs/volume 2>/dev/null | cut -f1)
+  val volume_bytes "Media op deze node (SeaweedFS-volumes)" "$(human "$vb")" "${vb:-0}"
+  # shellcheck disable=SC2046
+  set -- $(df --output=size,avail -B1 /srv/seaweedfs/volume 2>/dev/null | tail -n 1)
+  size=${1:-0}; avail=${2:-0}
+  val disk_free "Vrij op de schijf van de volumes" "$(human "$avail") van $(human "$size")" "$avail"
+  free_ok=1; sev=amber
+  if [ "$size" -gt 0 ]; then
+    [ $((avail * 100 / size)) -lt 10 ] && free_ok=0
+    [ $((avail * 100 / size)) -lt 5 ] && sev=red
+  fi
+  chk disk "Ruimte voor de volumes" "$free_ok" "$sev" "$(human "$avail") vrij"
+  if analyse_on; then
+    m=0; modellen_ready && m=1
+    chk modellen "Modellen van gezichten en zoeken op beeld" "$m" amber "$([ "$m" = 1 ] && echo klaar || echo "ontbreken: platform-ctl.sh modellen")"
+    mb=$(du -sb "$MODELLEN" 2>/dev/null | cut -f1)
+    val modellen_bytes "Modellen" "$(human "$mb")" "${mb:-0}"
+  fi
+  last=$(ls -1t "$BACKUPS"/platform-*.dump 2>/dev/null | head -n 1)
+  [ -n "$last" ] && val backup "Laatste back-up van de database" "$(basename "$last") ($(human "$(stat -c %s "$last")"))"
+  # Alleen de node met het VIP: het platform zelf.
+  if [ "$role" = actief ]; then
+    app=0; systemctl is-active --quiet cf-platform && app=1
+    chk platform "Platform draait (cf-platform)" "$app" red "$(systemctl is-active cf-platform 2>/dev/null)"
+    if [ "$app" = 1 ]; then
+      bad=$(docker ps -a --filter label=com.docker.compose.project=cf-platform --format '{{"{{"}}.Names{{"}}"}} {{"{{"}}.Status{{"}}"}}' |
+        grep -v ' (healthy)' | grep -v '^[^ ]* Up [^(]*$' | grep -v 'analyse-omzetten' | cut -d' ' -f1 | tr '\n' ' ')
+      chk containers "Containers gezond" "$([ -z "$bad" ] && echo 1 || echo 0)" red "${bad:-alle containers gezond}"
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:80/health)
+      chk http "App antwoordt (/health)" "$([ "$code" = 200 ] && echo 1 || echo 0)" red "http $code"
+      if [ "$(env_get PLAATSEN)" != uit ] && [ -f "$SRC/../../api/app/geo/load.py" ]; then
+        g=0; geo --check >/dev/null 2>&1 && g=1
+        chk geo "Plaatsnamen (geo-bronnen)" "$g" amber "$([ "$g" = 1 ] && echo klaar || echo "ontbreken: platform-ctl.sh geo")"
+      fi
+      if analyse_on; then
+        h=$(docker inspect -f '{{"{{"}}.State.Health.Status{{"}}"}}' cf-platform-analyse-1 2>/dev/null)
+        chk analyse "Analyse (gezichten, zoeken op beeld)" "$([ "$h" = healthy ] && echo 1 || echo 0)" amber "${h:-niet gestart}"
+      fi
+    fi
+  fi
+  mkdir -p "$STATUS_DIR"
+  tmp=$STATUS_DIR/.media-platform.json
+  printf '{"app":"media-platform","title":"Mediaplatform","cluster":"%s","version":"%s","ref":"%s","role":"%s","updated_at":"%s","checks":[%s],"values":[%s]}\n' \
+    "$CLUSTER" "$rev" "$(jesc "$REF")" "$role" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CHECKS" "$VALUES" >"$tmp" &&
+    mv -f "$tmp" "$STATUS_DIR/media-platform.json"
+  [ -n "$STIL" ] || [ "$BAD" = 0 ] || echo "$BAD controle(s) niet in orde"
+  return 0
+}
+
+case "${1:-}" in
+  up)
+    mountpoint -q "$DATA" || { echo "$DATA is niet gemount" >&2; exit 1; }
+    if analyse_on; then analyse_dirs || exit 1; fi
+    # Plaatsnamen: niet fataal; zonder bronnen werkt de rest gewoon.
+    geo --check >/dev/null 2>&1 || timeout 300 "$0" geo || true
+    fingerprint > "$HASH"
+    compose up --no-build --remove-orphans
+    ;;
+  down)
+    compose stop
+    rm -f "$HASH"
+    ;;
+  check)
+    systemctl is-active --quiet cf-platform-mount || exit 1
+    mountpoint -q "$DATA" || exit 1
+    [ -f "$ACTIVE" ] || exit 0
+    # Draait het platform hier maar faalt het, dan geeft deze node het VIP af.
+    systemctl is-failed --quiet cf-platform && exit 1
+    # Na de overstap (of na een herstart) start de node met het VIP het zelf.
+    if has_vip && ! systemctl is-active --quiet cf-platform; then
+      systemctl start --no-block cf-platform
+    fi
+    exit 0
+    ;;
+  master)
+    [ -f "$ACTIVE" ] && systemctl start --no-block cf-platform
+    exit 0
+    ;;
+  backup)
+    systemctl stop --no-block cf-platform
+    exit 0
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-platform || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    systemctl is-active --quiet cf-platform || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ] && exit 0
+    # Een nieuwe versie voert bij de start migraties uit: eerst een back-up.
+    db_backup
+    systemctl restart cf-platform
+    ;;
+  db-backup) db_backup ;;
+  status) shift; status "$@" ;;
+  modellen) shift; modellen "$@" ;;
+  geo) shift; geo "$@" ;;
+  beeld) beeld ;;
+  replicatie) shift; replicatie "$@" ;;
+  compose) shift; compose "$@" ;;
+  overstap)
+    shift
+    overstap "$@"
+    ;;
+  *)
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|compose|overstap" >&2
+    exit 2
+    ;;
+esac

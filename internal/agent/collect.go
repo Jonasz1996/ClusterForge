@@ -1,0 +1,604 @@
+package agent
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
+)
+
+// WatchedServices zijn de systemd-units die de agent volgt. Units die niet
+// bestaan, verschijnen niet in de facts.
+var WatchedServices = []string{
+	"ssh", "keepalived", "nginx", "apache2", "haproxy", "docker", "containerd", "postgresql", "mariadb", "mysql",
+	"redis-server", "memcached", "rabbitmq-server", "php8.1-fpm", "php8.2-fpm", "php8.3-fpm", "php8.4-fpm",
+	"cron", "qemu-guest-agent", "pve-cluster", "pveproxy", "cf-agent",
+	// De container van de template generic.
+	"cf-app",
+	// De template zabbix: ClusterForge en een uitrol wachten tot deze
+	// active zijn.
+	"cf-zabbix-server", "cf-zabbix-db", "cf-zabbix-proxy",
+	// Faalt als de proxy geen server bereikt (een timer start hem elke
+	// minuut).
+	"cf-zabbix-proxy-check",
+	// Kubernetes: k3s op een server, k3s-agent op een worker.
+	"k3s", "k3s-agent",
+	// Databaseclusters: Patroni met etcd voor PostgreSQL, en garb, de
+	// scheidsrechter van Galera.
+	"patroni", "etcd", "garb",
+	// CrowdSec (fase 14) en software waarvoor ClusterForge een
+	// CrowdSec-profiel heeft.
+	"crowdsec", "crowdsec-firewall-bouncer", "caddy", "traefik", "grafana-server", "plexmediaserver", "pvedaemon",
+	// Firewall (fase 16): ufw zelf en units waarvan de poorten open moeten
+	// staan, ook als ze even niet luisteren.
+	"ufw", "cf-npm", "cf-rustdesk", "cf-authentik", "cf-vaultx", "cf-cssthema-api", "cf-cssthema-worker", "cf-homepage-api", "cf-homepage-worker", "cf-homepage-syslog", "cf-homeassistant", "cf-seaweedfs", "cf-platform", "cf-platform-mount", "zabbix-server", "zabbix-agent", "zabbix-agent2",
+	"mosquitto", "smbd", "nfs-server",
+}
+
+// WatchedPatterns zijn units met een variabel deel. postgresql.service is op
+// Debian en Ubuntu een overkoepelende unit die altijd active staat; de
+// instantie, zoals postgresql@16-main, zegt of de database draait. systemctl
+// show vindt via een patroon alleen geladen units, en dat is een instantie
+// zodra ze enabled is of draait.
+var WatchedPatterns = []string{"postgresql@*-main.service"}
+
+// realFilesystems zijn de bestandssysteemtypes die in de facts komen.
+var realFilesystems = []string{"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "vfat", "ntfs3", "bcachefs"}
+
+// Collector leest facts en heartbeatgegevens van het systeem.
+type Collector struct {
+	// Root is de bestandssysteemwortel; leeg is "/". Tests gebruiken een map.
+	Root string
+	// Run voert een commando uit; nil gebruikt exec. Tests vervangen het.
+	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// PrimaryAddress geeft het adres waarmee de node naar buiten gaat.
+	PrimaryAddress func() string
+	// Addresses geeft de IP-adressen voor de heartbeat; nil leest ze van de
+	// interfaces.
+	Addresses func() []string
+	// Interfaces geeft de netwerkinterfaces voor de facts; nil leest ze van
+	// het systeem.
+	Interfaces func() []protocol.Interface
+	// Statfs geeft grootte, vrij en beschikbaar (bytes) van het
+	// bestandssysteem van een pad; nil leest het van het systeem. Tests geven
+	// zo een vaste schijf, los van de machine waarop ze draaien.
+	Statfs func(path string) (size, free, avail uint64, ok bool)
+	// OnUnits krijgt de units van elke heartbeat, voor het journaal. Mag
+	// nil zijn.
+	OnUnits func([]UnitInfo)
+	// HTTPGet haalt een lokale URL op, voor SeaweedFS; nil gebruikt HTTP.
+	HTTPGet func(ctx context.Context, url string) ([]byte, error)
+	// OS is het besturingssysteem (linux of freebsd); leeg is dat van de
+	// agent. Tests zetten het.
+	OS string
+
+	// opn praat met de lokale API van OPNsense (fase 34); opnAPI maakt hem.
+	opnOnce sync.Once
+	opn     *opnAPI
+}
+
+// UnitInfo is wat systemctl show over een gevolgde unit zegt.
+type UnitInfo struct {
+	Name    string
+	Active  string
+	Enabled string
+	Result  string
+	// NRestarts telt de automatische herstarts door systemd.
+	NRestarts int
+	// ActiveEnter en InactiveEnter zijn monotone tijden in microseconden
+	// sinds de boot.
+	ActiveEnter   uint64
+	InactiveEnter uint64
+}
+
+func (u UnitInfo) snap() unitSnap {
+	return unitSnap{
+		Active: u.Active, Enabled: u.Enabled, Result: u.Result, NRestarts: u.NRestarts,
+		ActiveEnter: u.ActiveEnter, InactiveEnter: u.InactiveEnter,
+	}
+}
+
+func (c *Collector) path(p string) string {
+	if c.Root == "" {
+		return p
+	}
+	return filepath.Join(c.Root, p)
+}
+
+func (c *Collector) read(p string) string {
+	b, err := os.ReadFile(c.path(p))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func (c *Collector) run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if c.Run != nil {
+		return c.Run(ctx, name, args...)
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	return cmd.Output()
+}
+
+func (c *Collector) machineID() string {
+	id := c.read("/etc/machine-id")
+	if len(id) != 32 {
+		return ""
+	}
+	return strings.ToLower(id)
+}
+
+// Heartbeat verzamelt de snelle gegevens voor elke heartbeat.
+func (c *Collector) Heartbeat(ctx context.Context, version string) protocol.Heartbeat {
+	hb := protocol.Heartbeat{
+		AgentVersion: version, ProtocolVersion: protocol.Version,
+		Services: map[string]string{},
+	}
+	if c.Addresses != nil {
+		hb.Addresses = c.Addresses()
+	} else {
+		hb.Addresses = hostAddresses()
+	}
+	if c.bsd() {
+		c.bsdHeartbeat(ctx, &hb)
+		return hb
+	}
+	if f := strings.Fields(c.read("/proc/uptime")); len(f) > 0 {
+		up, _ := strconv.ParseFloat(f[0], 64)
+		hb.UptimeSeconds = int64(up)
+	}
+	if f := strings.Fields(c.read("/proc/loadavg")); len(f) >= 3 {
+		for i := range 3 {
+			hb.Load[i], _ = strconv.ParseFloat(f[i], 64)
+		}
+	}
+	units := c.units(ctx)
+	for _, u := range units {
+		hb.Services[u.Name] = heartbeatState(u)
+	}
+	if c.OnUnits != nil && units != nil {
+		c.OnUnits(units)
+	}
+	return hb
+}
+
+// Facts verzamelt de volledige beschrijving van de node.
+func (c *Collector) Facts(ctx context.Context) protocol.Facts {
+	hostname, _ := os.Hostname()
+	f := protocol.Facts{
+		Hostname:  hostname,
+		MachineID: c.machineID(),
+		OS:        c.osRelease(),
+		Kernel:    c.read("/proc/sys/kernel/osrelease"),
+		Arch:      runtime.GOARCH,
+		CPUs:      runtime.NumCPU(),
+	}
+	if c.Interfaces != nil {
+		f.Interfaces = c.Interfaces()
+	} else {
+		f.Interfaces = interfaces()
+	}
+	if c.PrimaryAddress != nil {
+		f.PrimaryAddress = c.PrimaryAddress()
+	}
+	if c.bsd() {
+		c.bsdFacts(ctx, &f)
+		f.DNS = c.nameservers()
+		f.OPNsense = c.opnsense(ctx)
+		if f.OPNsense != nil {
+			f.OS.ID, f.OS.VersionID = "opnsense", f.OPNsense.Version
+			f.OS.PrettyName = strings.TrimSpace("OPNsense " + f.OPNsense.Version + " (" + f.OS.PrettyName + ")")
+		}
+		return f
+	}
+	mem := c.meminfo()
+	f.MemoryBytes, f.SwapBytes = mem["MemTotal"]*1024, mem["SwapTotal"]*1024
+	f.BootTime = c.bootTime()
+	if out, err := c.run(ctx, "systemd-detect-virt"); err == nil || len(out) > 0 {
+		f.Virtualization = strings.TrimSpace(string(out))
+	}
+	f.Filesystems = c.filesystems()
+	f.Services = c.services(ctx)
+	f.Docker = c.docker(ctx)
+	f.Keepalived = c.keepalived(f.Services)
+	f.Upgrades = c.upgrades(ctx)
+	c.netFacts(&f)
+	c.maintenanceFacts(&f)
+	f.Certificates = c.certificates()
+	f.Tools = c.tools()
+	f.Seaweed = c.seaweed(ctx)
+	f.Apps = c.apps()
+	f.Proxmox = c.proxmox(ctx)
+	f.PBS = c.pbs(ctx)
+	f.TrueNAS = c.trueNAS(ctx)
+	f.AIVerslag = c.aiverslag(ctx)
+	return f
+}
+
+// tools zegt of nft en tc er zijn, voor storingsinjectie.
+func (c *Collector) tools() *protocol.Tools {
+	has := func(name string) bool {
+		for _, dir := range []string{"/usr/sbin", "/sbin", "/usr/bin", "/bin"} {
+			if fi, err := os.Stat(c.path(filepath.Join(dir, name))); err == nil && !fi.IsDir() {
+				return true
+			}
+		}
+		return false
+	}
+	return &protocol.Tools{Nft: has("nft"), Tc: has("tc")}
+}
+
+func (c *Collector) osRelease() protocol.OSInfo {
+	s := c.read("/etc/os-release")
+	if s == "" {
+		s = c.read("/usr/lib/os-release")
+	}
+	kv := map[string]string{}
+	for line := range strings.SplitSeq(s, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		if u, err := strconv.Unquote(v); err == nil {
+			v = u
+		} else {
+			v = strings.Trim(v, `'"`)
+		}
+		kv[k] = v
+	}
+	return protocol.OSInfo{ID: kv["ID"], VersionID: kv["VERSION_ID"], Codename: kv["VERSION_CODENAME"], PrettyName: kv["PRETTY_NAME"]}
+}
+
+// meminfo geeft de waarden uit /proc/meminfo in kB.
+func (c *Collector) meminfo() map[string]uint64 {
+	out := map[string]uint64{}
+	for line := range strings.SplitSeq(c.read("/proc/meminfo"), "\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		f := strings.Fields(v)
+		if len(f) == 0 {
+			continue
+		}
+		n, err := strconv.ParseUint(f[0], 10, 64)
+		if err == nil {
+			out[k] = n
+		}
+	}
+	return out
+}
+
+func (c *Collector) bootTime() time.Time {
+	for line := range strings.SplitSeq(c.read("/proc/stat"), "\n") {
+		if v, ok := strings.CutPrefix(line, "btime "); ok {
+			n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+			if err == nil {
+				return time.Unix(n, 0).UTC()
+			}
+		}
+	}
+	return time.Time{}
+}
+
+type fsStat struct{ size, free, avail uint64 }
+
+func (c *Collector) statfs(path string) (fsStat, bool) {
+	if c.Statfs != nil {
+		size, free, avail, ok := c.Statfs(path)
+		return fsStat{size: size, free: free, avail: avail}, ok
+	}
+	return statfs(path)
+}
+
+type mount struct{ device, path, fstype string }
+
+// mounts geeft de echte bestandssystemen uit /proc/mounts.
+func (c *Collector) mounts() []mount {
+	var out []mount
+	seen := map[string]bool{}
+	for line := range strings.SplitSeq(c.read("/proc/mounts"), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 || !slices.Contains(realFilesystems, f[2]) {
+			continue
+		}
+		m := mount{device: f[0], path: unescapeMount(f[1]), fstype: f[2]}
+		// Dezelfde schijf op meerdere plekken (bind mounts) één keer tellen.
+		if seen[m.device] && m.fstype != "zfs" {
+			continue
+		}
+		seen[m.device] = true
+		out = append(out, m)
+	}
+	return out
+}
+
+func (c *Collector) filesystems() []protocol.Filesystem {
+	var out []protocol.Filesystem
+	for _, m := range c.mounts() {
+		st, _ := c.statfs(c.path(m.path))
+		out = append(out, protocol.Filesystem{
+			Mount: m.path, Device: m.device, Type: m.fstype, SizeBytes: st.size, UsedBytes: st.size - st.free,
+		})
+	}
+	return out
+}
+
+// unescapeMount zet \040 en dergelijke in /proc/mounts terug.
+func unescapeMount(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+3 < len(s) {
+			if n, err := strconv.ParseUint(s[i+1:i+4], 8, 8); err == nil {
+				b.WriteByte(byte(n))
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// services leest de toestand van WatchedServices in één systemctl-aanroep.
+func (c *Collector) services(ctx context.Context) []protocol.Service {
+	units := c.units(ctx)
+	if units == nil {
+		return nil
+	}
+	out := make([]protocol.Service, len(units))
+	for i, u := range units {
+		out[i] = protocol.Service{Name: u.Name, Active: u.Active, Enabled: u.Enabled}
+	}
+	return out
+}
+
+// unitProperties zijn de velden die de agent van elke unit leest. Een
+// oudere systemd die er een niet kent, laat hem weg.
+const unitProperties = "Id,LoadState,ActiveState,UnitFileState,Result,NRestarts," +
+	"ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic"
+
+func (c *Collector) units(ctx context.Context) []UnitInfo {
+	args := append([]string{"show", "--property=" + unitProperties}, unitNames()...)
+	out, err := c.run(ctx, "systemctl", args...)
+	if err != nil && len(out) == 0 {
+		return nil
+	}
+	return parseUnits(out)
+}
+
+func unitNames() []string {
+	out := make([]string, 0, len(WatchedServices)+len(WatchedPatterns))
+	for _, s := range WatchedServices {
+		out = append(out, s+".service")
+	}
+	return append(out, WatchedPatterns...)
+}
+
+func parseSystemctlShow(out []byte) []protocol.Service {
+	var res []protocol.Service
+	for _, u := range parseUnits(out) {
+		res = append(res, protocol.Service{Name: u.Name, Active: u.Active, Enabled: u.Enabled})
+	}
+	return res
+}
+
+func parseUnits(out []byte) []UnitInfo {
+	res := []UnitInfo{}
+	for block := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n\n") {
+		kv := map[string]string{}
+		for line := range strings.SplitSeq(block, "\n") {
+			if k, v, ok := strings.Cut(line, "="); ok {
+				kv[k] = v
+			}
+		}
+		if kv["Id"] == "" || kv["LoadState"] == "not-found" {
+			continue
+		}
+		u := UnitInfo{
+			Name: strings.TrimSuffix(kv["Id"], ".service"), Active: kv["ActiveState"], Enabled: kv["UnitFileState"],
+			Result: kv["Result"],
+		}
+		u.NRestarts, _ = strconv.Atoi(kv["NRestarts"])
+		u.ActiveEnter, _ = strconv.ParseUint(kv["ActiveEnterTimestampMonotonic"], 10, 64)
+		u.InactiveEnter, _ = strconv.ParseUint(kv["InactiveEnterTimestampMonotonic"], 10, 64)
+		res = append(res, u)
+	}
+	return res
+}
+
+func (c *Collector) docker(ctx context.Context) *protocol.Docker {
+	out, err := c.run(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+	if err != nil {
+		return nil
+	}
+	d := &protocol.Docker{Version: strings.TrimSpace(string(out))}
+	if ps, err := c.run(ctx, "docker", "ps", "-q"); err == nil {
+		d.Containers = len(strings.Fields(string(ps)))
+	}
+	run := func(ctx context.Context, argv ...string) ([]byte, error) { return c.run(ctx, argv[0], argv[1:]...) }
+	exists := func(p string) bool {
+		_, err := os.Stat(c.path(p))
+		return err == nil
+	}
+	if ps, err := discoverCompose(ctx, run, exists, ""); err == nil {
+		d.Projects = ps
+	} else if ls, err := c.run(ctx, "docker", "compose", "ls", "-a", "--format", "json"); err == nil {
+		d.Projects = parseComposeLs(ls)
+	}
+	return d
+}
+
+func (c *Collector) keepalived(services []protocol.Service) *protocol.Keepalived {
+	conf := c.keepalivedConf()
+	i := slices.IndexFunc(services, func(s protocol.Service) bool { return s.Name == "keepalived" })
+	if conf == "" && i < 0 {
+		return nil
+	}
+	k := &protocol.Keepalived{VIPs: parseKeepalivedVIPs(conf), Instances: parseKeepalivedInstances(conf)}
+	if i >= 0 {
+		k.Active = services[i].Active
+	}
+	return k
+}
+
+// keepalivedConf is keepalived.conf met de bestanden van zijn includes
+// erachter, één niveau diep, zoals de VIP's van de database in conf.d.
+func (c *Collector) keepalivedConf() string {
+	conf := c.read("/etc/keepalived/keepalived.conf")
+	var b strings.Builder
+	b.WriteString(conf)
+	n := 0
+	for _, node := range parseConfBlocks(conf) {
+		if len(node.words) != 2 || node.words[0] != "include" || !strings.HasPrefix(node.words[1], "/") {
+			continue
+		}
+		files, _ := filepath.Glob(c.path(node.words[1]))
+		for _, f := range files {
+			if n++; n > 32 {
+				break
+			}
+			if inc, err := os.ReadFile(f); err == nil {
+				b.WriteString("\n" + string(inc))
+			}
+		}
+	}
+	return b.String()
+}
+
+// parseKeepalivedVIPs haalt de adressen uit de virtual_ipaddress-blokken.
+// Includes worden niet gevolgd.
+func parseKeepalivedVIPs(conf string) []string {
+	var vips []string
+	// in is de diepte van het virtual_ipaddress-blok waarin we zitten, of -1.
+	depth, in, entered := 0, -1, false
+	sc := bufio.NewScanner(strings.NewReader(conf))
+	for sc.Scan() {
+		line := sc.Text()
+		if i := strings.IndexAny(line, "#!"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		if entered && depth == in && len(fields) > 0 && fields[0] != "}" && fields[0] != "{" {
+			addr, _, _ := strings.Cut(fields[0], "/")
+			if net.ParseIP(addr) != nil && !slices.Contains(vips, addr) {
+				vips = append(vips, addr)
+			}
+		}
+		if len(fields) > 0 && (fields[0] == "virtual_ipaddress" || fields[0] == "virtual_ipaddress_excluded") {
+			in, entered = depth+1, false
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		switch {
+		case in >= 0 && !entered && depth >= in:
+			entered = true
+		case entered && depth < in:
+			in, entered = -1, false
+		}
+	}
+	return vips
+}
+
+const maxUpgradePackages = 200
+
+// upgrades telt de beschikbare upgrades volgens de laatste apt update. De
+// agent draait zelf geen apt update; dat verandert het systeem.
+func (c *Collector) upgrades(ctx context.Context) *protocol.Upgrades {
+	out, err := c.run(ctx, "apt-get", "-s", "-o", "Debug::NoLocking=1", "dist-upgrade")
+	if err != nil {
+		return nil
+	}
+	return parseAptSimulation(out)
+}
+
+func parseAptSimulation(out []byte) *protocol.Upgrades {
+	u := &protocol.Upgrades{Packages: []string{}}
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 2 || f[0] != "Inst" {
+			continue
+		}
+		u.Total++
+		if strings.Contains(sc.Text(), "-security") {
+			u.Security++
+		}
+		if len(u.Packages) < maxUpgradePackages {
+			u.Packages = append(u.Packages, f[1])
+		}
+	}
+	return u
+}
+
+// interfaces geeft de netwerkinterfaces behalve loopback.
+func interfaces() []protocol.Interface {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []protocol.Interface
+	for _, i := range ifs {
+		if i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		pi := protocol.Interface{Name: i.Name, MAC: i.HardwareAddr.String(), Up: i.Flags&net.FlagUp != 0, Addresses: []string{}}
+		addrs, _ := i.Addrs()
+		for _, a := range addrs {
+			pi.Addresses = append(pi.Addresses, a.String())
+		}
+		out = append(out, pi)
+	}
+	return out
+}
+
+// hostAddresses geeft alle bruikbare IP-adressen zonder prefix, ook op lo
+// (LVS-DR zet VIP's soms daar), behalve loopback en link-local.
+func hostAddresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || ipn.IP.IsLoopback() || ipn.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		out = append(out, ipn.IP.String())
+	}
+	return out
+}
+
+// heartbeatState is de toestand van een unit voor de heartbeat. Een unit
+// die na een fout wacht tot systemd hem opnieuw start (Restart=, de
+// toestand activating met een Result anders dan success), heet
+// auto-restart: systemctl is-active zegt dan activating, en zo zou een
+// dienst die steeds crasht nooit opvallen. Niet failed: een uitrol wacht
+// op zo'n dienst (hij kan nog op iets anders wachten), en stopt bij failed.
+func heartbeatState(u UnitInfo) string {
+	if u.Active == "activating" && u.Result != "" && u.Result != "success" {
+		return "auto-restart"
+	}
+	return u.Active
+}

@@ -1,0 +1,375 @@
+// cf-agent draait op elke node: hij meldt zich aan bij ClusterForge, stuurt
+// daarna heartbeats, metrics en facts over één uitgaande NATS-verbinding en
+// voert de commando's van de server uit.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
+	"os/exec"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/Jonasz1996/clusterforge/internal/agent"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
+)
+
+// version wordt bij het bouwen gezet met -ldflags "-X main.version=...".
+var version = "dev"
+
+const usage = `cf-agent: de ClusterForge-agent
+
+Gebruik:
+  cf-agent enroll -server https://clusterforge.example -token cfe_...
+  cf-agent run       verbindt met ClusterForge (zo start systemd hem); nog niet
+                     aangemeld, dan wacht hij op /etc/clusterforge/enroll.json;
+                     met /etc/clusterforge/claim.json (CT-template) meldt hij
+                     zich zonder token aan zodra een uitrol op zijn hostname wacht
+  cf-agent facts     toont de facts van deze machine
+  cf-agent check db [postgresql]
+                     exit 0 als de database op deze node mag schrijven: MariaDB
+                     Synced en Primary in Galera, of PostgreSQL de primary van
+                     Patroni; keepalived roept dit aan voor het VIP
+  cf-agent fault-clear
+                     draait achtergebleven storingen van een rampoefening terug;
+                     cf-agent-fault-clear.service doet dit bij elke start
+  cf-agent verify -  leest een controle-aanvraag (JSON) van stdin en schrijft het
+                     resultaat naar stdout; de back-upcontrole start dit in een
+                     teruggezette sandbox
+  cf-agent cron-run <id>
+                     draait een beheerde cronjob van ClusterForge; de timer
+                     cf-cron-<id>.timer start dit
+  cf-agent run-exec <id>
+                     voert een run van ClusterForge uit (script, apt of
+                     docker); de agent start dit met systemd-run
+  cf-agent sync-receive --from <node>
+                     ontvangt een bestandssync; alleen via de sleutel van
+                     een bron in authorized_keys
+  cf-agent self-check
+                     print versie, protocol en architectuur als JSON; een
+                     agent die zichzelf bijwerkt, controleert zo de nieuwe
+  cf-agent upgrade-rollback
+                     zet de oude agent terug als de nieuwe niet met de server
+                     praat; de timer cf-agent-rollback start dit
+  cf-agent reconfigure-rollback
+                     zet het oude agent.json terug als de agent de server op
+                     het nieuwe adres niet bereikt; de timer
+                     cf-agent-reconfig-rollback start dit
+  cf-agent opn-rollback -id <wijziging>
+                     draait een OPNsense-wijziging terug die ClusterForge niet
+                     op tijd bevestigde; de terugdraaitimer start dit
+  cf-agent version
+`
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	var err error
+	switch os.Args[1] {
+	case "enroll":
+		err = enroll(os.Args[2:])
+	case "run":
+		err = run(os.Args[2:], log)
+	case "verify":
+		os.Exit(verify(os.Args[2:]))
+	case "fault-clear":
+		err = faultClear(os.Args[2:], log)
+	case "check":
+		os.Exit(check(os.Args[2:]))
+	case "cron-run":
+		os.Exit(cronRun(os.Args[2:]))
+	case "run-exec":
+		os.Exit(runExec(os.Args[2:]))
+	case "stack-pause":
+		// Geen commando: als voorbereiding van een sync zegt het de agent
+		// welke stacks hij rond de tweede kopie pauzeert (fase 21).
+		fmt.Println("cf-agent stack-pause werkt alleen als voorbereiding van een sync van ClusterForge")
+	case "sync-receive":
+		os.Exit(syncReceive(os.Args[2:]))
+	case "facts":
+		f := (&agent.Collector{}).Facts(context.Background())
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		err = enc.Encode(f)
+	case "self-check":
+		err = json.NewEncoder(os.Stdout).Encode(agent.SelfCheckOf(version))
+	case "upgrade-rollback":
+		err = upgradeRollback(os.Args[2:], log)
+	case "reconfigure-rollback":
+		err = reconfigureRollback(os.Args[2:], log)
+	case "opn-rollback":
+		err = opnRollback(os.Args[2:], log)
+	case "version", "-version", "--version":
+		fmt.Println(version)
+	case "help", "-h", "--help":
+		fmt.Print(usage)
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fout:", err)
+		os.Exit(1)
+	}
+}
+
+// verify voert de diepe back-upcontrole uit en geeft de exitcode: 0, ook als
+// controles falen, of 3 bij een ongeldige aanvraag.
+func verify(args []string) int {
+	if len(args) != 1 || args[0] != "-" {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent verify - (de aanvraag komt als JSON op stdin)")
+		return protocol.VerifyInvalid
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	v := &agent.Verifier{Version: version}
+	return v.Main(ctx, os.Stdin, os.Stdout)
+}
+
+// check is cf-agent check db [mariadb|postgresql]: exit 0 als de database
+// op deze node mag schrijven, anders 1 met de reden op stderr. keepalived
+// roept dit elke twee seconden aan, dus het moet snel klaar zijn.
+func check(args []string) int {
+	if len(args) < 1 || len(args) > 2 || args[0] != "db" {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent check db [mariadb|postgresql]")
+		return 2
+	}
+	engine := ""
+	if len(args) == 2 {
+		engine = args[1]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	if err := (&agent.Agent{}).CheckDB(ctx, engine); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// cronRun draait een beheerde cronjob en geeft de exitcode van de run.
+// SIGTERM (systemctl stop) stopt de job.
+func cronRun(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent cron-run <id>")
+		return 2
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return (&agent.CronRunner{}).Main(ctx, args[0])
+}
+
+// runExec voert een run uit en geeft 0 als hij lukte. SIGTERM (systemctl
+// stop) stopt hem.
+func runExec(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent run-exec <id>")
+		return 2
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return (&agent.RunExecutor{}).Main(ctx, args[0])
+}
+
+func syncReceive(args []string) int {
+	fl := flag.NewFlagSet("sync-receive", flag.ExitOnError)
+	from := fl.String("from", "", "de node-id van de bron")
+	_ = fl.Parse(args)
+	return (&agent.SyncReceiver{}).Main(*from, os.Getenv("SSH_ORIGINAL_COMMAND"))
+}
+
+// faultClear draait de storingen in de state terug, ook als de agent niet
+// start. Zonder state is er niets te doen.
+func faultClear(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("fault-clear", flag.ExitOnError)
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt; de storingen staan ernaast")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := agent.NewFaults(*statePath, nil, log)
+	res := f.ClearAll(ctx)
+	for _, line := range res.Output {
+		fmt.Println(line)
+	}
+	if !res.OK {
+		return errors.New(res.Error)
+	}
+	return nil
+}
+
+// upgradeRollback zet de oude agent terug als de nieuwe zijn update niet
+// bevestigde. De bewaarde oude agent draait dit zelf.
+func upgradeRollback(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("upgrade-rollback", flag.ExitOnError)
+	bin := fl.String("binary", "/usr/local/bin/cf-agent", "de binary van cf-agent.service")
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt; de update-status staat ernaast")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return agent.RollbackUpgrade(ctx, *bin, *statePath, log, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	})
+}
+
+// reconfigureRollback zet het oude agent.json terug als de agent de server
+// op het nieuwe adres niet bereikte.
+func reconfigureRollback(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("reconfigure-rollback", flag.ExitOnError)
+	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt; de herconfiguratie-status staat ernaast")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return agent.RollbackReconfigure(ctx, *config, *statePath, log, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	})
+}
+
+// opnRollback draait een OPNsense-wijziging terug die ClusterForge niet op
+// tijd bevestigde. De terugdraaitimer van de wijziging start dit.
+func opnRollback(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("opn-rollback", flag.ExitOnError)
+	id := fl.String("id", "", "nummer van de wijziging")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	return agent.RollbackOPNChange(ctx, *id, log)
+}
+
+func enroll(args []string) error {
+	fl := flag.NewFlagSet("enroll", flag.ExitOnError)
+	server := fl.String("server", "", "URL van ClusterForge, bijvoorbeeld https://clusterforge.example")
+	token := fl.String("token", "", "enrollmenttoken uit de webinterface")
+	caFile := fl.String("ca", "", "extra CA-certificaat (PEM) voor de HTTPS-verbinding")
+	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
+	allowHTTP := fl.Bool("allow-http", false, "aanmelden over http toestaan (onveilig: alleen in een vertrouwd netwerk)")
+	_ = fl.Parse(args)
+	if *token == "" {
+		*token = os.Getenv("CF_ENROLL_TOKEN")
+	}
+	if *server == "" || *token == "" {
+		return errors.New("-server en -token zijn verplicht")
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return doEnroll(ctx, *server, *token, *caFile, *config, *allowHTTP)
+}
+
+func doEnroll(ctx context.Context, server, token, caFile, config string, allowHTTP bool) error {
+	c, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: server, Token: token, CAFile: caFile, Version: version, AllowHTTP: allowHTTP})
+	if err != nil {
+		return err
+	}
+	if err := c.Save(config); err != nil {
+		return err
+	}
+	fmt.Printf("aangemeld als node %s; configuratie in %s\n", c.NodeID, config)
+	return nil
+}
+
+func run(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("run", flag.ExitOnError)
+	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
+	enrollFile := fl.String("enroll-file", agent.DefaultEnrollPath, "eenmalig aanmeldbestand als er nog geen configuratie is")
+	claimFile := fl.String("claim-file", agent.DefaultClaimPath, "in een CT-template: zonder token aanmelden zodra een uitrol op deze hostname wacht")
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt")
+	_ = fl.Parse(args)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	// Een sandbox van de back-upcontrole is een kopie van een node, met
+	// dezelfde sleutel. Die mag nooit als de node binnenkomen.
+	if agent.InSandbox("") {
+		log.Info("dit is een sandbox van de back-upcontrole (serienummer " + protocol.SandboxSerial + "); de agent verbindt niet en wacht tot hij gestopt wordt")
+		<-ctx.Done()
+		return nil
+	}
+	c, err := agent.LoadConfig(*config)
+	if errors.Is(err, fs.ErrNotExist) {
+		c, err = waitEnroll(ctx, log, *config, *enrollFile, *claimFile)
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	a := &agent.Agent{Config: c, Version: version, Log: log, StatePath: *statePath, ConfigPath: *config}
+	log.Info("cf-agent gestart", "version", version, "node", c.NodeID, "nats", c.NatsURL)
+	return a.Run(ctx)
+}
+
+// waitEnroll wacht tot de agent aangemeld is: via een aanmeldbestand, dat
+// ClusterForge in een nieuwe VM uit een golden image zet, via cf-agent
+// enroll, of in een CT uit een CT-template zonder token (claimFile).
+func waitEnroll(ctx context.Context, log *slog.Logger, config, enrollFile, claimFile string) (*agent.Config, error) {
+	log.Info("nog niet aangemeld; wachten op een aanmeldbestand of cf-agent enroll", "bestand", enrollFile)
+	var nextClaim time.Time
+	claimWaiting := false
+	for {
+		delay := 2 * time.Second
+		if c, err := agent.LoadConfig(config); err == nil {
+			return c, nil
+		}
+		e, err := agent.LoadEnrollFile(enrollFile)
+		switch {
+		case err == nil:
+			log.Info("aanmelden met het aanmeldbestand", "server", e.Server)
+			if err := doEnroll(ctx, e.Server, e.Token, "", config, e.AllowHTTP); err != nil {
+				log.Error("aanmelden mislukt; straks opnieuw", "err", err)
+				delay = 15 * time.Second
+				break
+			}
+			_ = os.Remove(enrollFile)
+			return agent.LoadConfig(config)
+		case !errors.Is(err, fs.ErrNotExist):
+			// Misschien nog half geschreven.
+			log.Error("aanmeldbestand onleesbaar", "err", err)
+			delay = 5 * time.Second
+		case time.Now().After(nextClaim):
+			nextClaim = time.Now().Add(10 * time.Second)
+			cl, err := agent.LoadClaimFile(claimFile)
+			if errors.Is(err, fs.ErrNotExist) {
+				break
+			}
+			if err != nil {
+				log.Error("claimbestand onleesbaar", "err", err)
+				break
+			}
+			c, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: cl.Server, Claim: true, Version: version, AllowHTTP: cl.AllowHTTP})
+			switch {
+			case errors.Is(err, agent.ErrNotClaimed):
+				if !claimWaiting {
+					log.Info("CT uit een CT-template: wachten tot een uitrol in ClusterForge deze hostname aanmeldt", "server", cl.Server)
+					claimWaiting = true
+				}
+			case err != nil:
+				log.Error("aanmelden zonder token mislukt; straks opnieuw", "err", err)
+				nextClaim = time.Now().Add(30 * time.Second)
+			default:
+				if err := c.Save(config); err != nil {
+					return nil, err
+				}
+				log.Info("aangemeld zonder token", "node", c.NodeID)
+				_ = os.Remove(claimFile)
+				return c, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}

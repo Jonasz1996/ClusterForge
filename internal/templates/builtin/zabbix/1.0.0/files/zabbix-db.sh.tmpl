@@ -1,0 +1,131 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Zet de database zabbix, de gebruiker zabbix en het schema van Zabbix klaar
+# zodra MariaDB Galera op deze node Synced is. De database komt na de uitrol;
+# tot dan wacht dit script. Alleen de node met het VIP {{ .params.vip }} schrijft, de
+# andere zien het resultaat via Galera. Is het schema er, dan stopt het.
+set -u
+
+VIP={{ .params.vip }}
+PASSWORD={{ .params.db_password }}
+# De gebruiker zabbix mag verbinden vanaf elke server en vanaf het VIP (een
+# verbinding van de node met het VIP naar het VIP komt van het VIP zelf).
+HOSTS="{{ range .nodes }}{{ if eq .role "server" }}{{ .address }} {{ end }}{{ end }}$VIP"
+
+# De proxy's met hun PSK: met versleuteling psk zet de node met het VIP de
+# sleutel en identiteit bij elke proxy die in Zabbix al bestaat (op naam).
+PROXIES="{{ range .nodes }}{{ if eq .role "proxy" }}{{ .hostname }} {{ end }}{{ end }}"
+ENCRYPTION={{ .params.proxy_encryption }}
+PSK_IDENTITY='{{ .params.proxy_psk_identity }}'
+PSK={{ sha256 (print .params.db_password "/zabbix-proxy-psk") }}
+
+sql() { mariadb --protocol=socket -N -B -e "$1" 2>/dev/null; }
+
+has_vip() { ip -o -4 addr show | grep -q " $VIP/"; }
+
+ready() {
+	[ -e /etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf ] || return 1
+	[ "$(sql "SHOW STATUS LIKE 'wsrep_local_state_comment'" | cut -f2)" = Synced ]
+}
+
+# done: het schema staat er. Gebruikers (Admin, guest) komen pas met de
+# data van het schema, dus een rij in users betekent een geladen schema. De
+# tabel config bestaat vanaf Zabbix 7.4 niet meer (die heet nu settings),
+# dus die telt niet als enige teken.
+done_() {
+	for t in users settings config; do
+		case "$(sql "SELECT COUNT(*) FROM zabbix.$t")" in
+		'' | 0) ;;
+		*) return 0 ;;
+		esac
+	done
+	return 1
+}
+
+users() {
+	for h in $HOSTS; do
+		sql "CREATE USER IF NOT EXISTS 'zabbix'@'$h' IDENTIFIED BY '$PASSWORD'" &&
+			sql "ALTER USER 'zabbix'@'$h' IDENTIFIED BY '$PASSWORD'" &&
+			sql "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'$h'" || return 1
+	done
+}
+
+proxies() {
+	[ "$ENCRYPTION" = psk ] || return 0
+	for p in $PROXIES; do
+		sql "UPDATE zabbix.proxy SET tls_connect = 2, tls_accept = 2, tls_psk_identity = '$PSK_IDENTITY', tls_psk = '$PSK'
+			WHERE name = '$p' AND (tls_connect <> 2 OR tls_accept <> 2 OR tls_psk_identity <> '$PSK_IDENTITY' OR tls_psk <> '$PSK')"
+	done
+}
+
+schema() {
+	if [ -e /usr/share/zabbix/sql-scripts/mysql/server.sql.gz ]; then
+		set -- /usr/share/zabbix/sql-scripts/mysql/server.sql.gz
+	elif [ -e /usr/share/zabbix-server-mysql/schema.sql.gz ]; then
+		d=/usr/share/zabbix-server-mysql
+		set -- "$d/schema.sql.gz" "$d/images.sql.gz" "$d/data.sql.gz"
+	else
+		echo "het schema van Zabbix staat niet waar het hoort (zabbix-server-mysql)" >&2
+		return 1
+	fi
+	echo "schema van Zabbix laden uit $*"
+	zcat "$@" | mariadb --protocol=socket zabbix
+}
+
+setup() {
+	sql "CREATE DATABASE IF NOT EXISTS zabbix CHARACTER SET utf8mb4 COLLATE utf8mb4_bin" || {
+		echo "database zabbix maken mislukt" >&2
+		return 1
+	}
+	users || {
+		echo "gebruiker zabbix maken mislukt" >&2
+		return 1
+	}
+	n=$(sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'zabbix'")
+	if [ "${n:-0}" != 0 ]; then
+		# Nooit iets wissen: bestaande tabellen zijn misschien echte data.
+		echo "de database zabbix heeft al $n tabellen maar geen gebruikers; ClusterForge laadt geen schema over bestaande tabellen. Kijk de database zelf na (mariadb zabbix)" >&2
+		return 1
+	fi
+	schema || {
+		echo "schema laden mislukt" >&2
+		return 1
+	}
+	echo "database zabbix staat klaar"
+}
+
+waited=""
+while :; do
+	if ready; then
+		if done_; then
+			if has_vip; then
+				users || exit 1
+			fi
+			echo "database en schema van Zabbix zijn klaar"
+			# Blijven draaien: de dienst staat zo active, en daar wachten
+			# een uitrol en een herstel op. Elke minuut de PSK van de
+			# proxy's bijwerken, ook voor een proxy die je later in Zabbix
+			# toevoegt.
+			while :; do
+				if has_vip; then
+					proxies
+				fi
+				sleep 60
+			done
+		fi
+		if has_vip; then
+			setup || exit 1
+			continue
+		fi
+		msg="wachten tot de node met $VIP het schema laadt"
+	else
+		msg="wachten op MariaDB Galera; die zet ClusterForge er na de uitrol op"
+	fi
+	if [ "$msg" != "$waited" ]; then
+		echo "$msg"
+		waited=$msg
+	fi
+	sleep 15
+done

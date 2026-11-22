@@ -1,0 +1,204 @@
+name: home-assistant
+version: 1.0.0
+title: Home Assistant (HA)
+description: >-
+  Home Assistant (Docker) op drie of vijf nodes met een VIP van keepalived en
+  MariaDB Galera op elke node. Home Assistant draait alleen op de node met het
+  VIP, en die node moet een database hebben die mag schrijven. De
+  geschiedenis (recorder) staat in Galera, dus elke node heeft ze meteen. De
+  rest van /config (.storage, YAML, SQLite van integraties zoals zigbee.db)
+  kopieert de VIP-node elke paar minuten consistent, en ClusterForge zet die
+  kopie met een sync op de andere nodes. Krijgt een andere node het VIP, dan
+  zet die de nieuwste geldige kopie op zijn plaats en start Home Assistant.
+  De database homeassistant en zijn gebruiker komen er na de uitrol vanzelf
+  bij. USB-sticks (Zigbee, Z-Wave) verhuizen niet mee: gebruik een
+  netwerkcoördinator of MQTT op een eigen machine.
+cluster_type: generic
+
+# Het VIP volgt Home Assistant en de database; terugspringen zou Home
+# Assistant zonder reden stoppen en elders starten.
+failback: false
+
+# Na de uitrol zet ClusterForge MariaDB Galera op alle nodes, met de database
+# en de gebruiker van Home Assistant.
+database:
+  engine: mariadb
+  role: node
+  host: "{{ .params.vip }}"
+  steps:
+    - { kind: db_database, database: homeassistant, charset: utf8mb4, collation: utf8mb4_unicode_ci }
+    - { kind: db_user, user: homeassistant, password: "{{ .params.db_password }}", grant_on: homeassistant }
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van Home Assistant (http://VIP:8123) en van de database. Niet .1 tot .3 van het VLAN (gateways).
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: Galera wil een oneven aantal; met drie mag er één uitvallen.
+    default: 3
+    choices: [3, 5]
+  - name: ha_image
+    type: string
+    label: Image van Home Assistant
+    help: Met een dubbele punt voor de versie, zoals ghcr.io/home-assistant/home-assistant:2026.11. Een andere waarde start Home Assistant opnieuw op de VIP-node.
+    default: ghcr.io/home-assistant/home-assistant:stable
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
+  - name: sync_minutes
+    type: int
+    label: Sync elke zoveel minuten
+    help: Zo oud is /config hoogstens als de VIP-node wegvalt. De geschiedenis zit in de database en is altijd actueel.
+    default: 5
+    choices: [1, 2, 5, 10, 15, 30, 60]
+  - name: port
+    type: int
+    label: Poort
+    help: De webinterface van Home Assistant, op het VIP.
+    default: 8123
+    min: 1
+    max: 65535
+  - name: trusted_proxies
+    type: string
+    label: Reverse proxy's
+    help: Adressen of netwerken van je reverse proxy (zoals het VIP van Nginx Proxy Manager), gescheiden door spaties. Leeg zonder proxy.
+    default: ""
+    pattern: '([0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?( +[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?)*)?'
+  - name: keep_days
+    type: int
+    label: Geschiedenis bewaren (dagen)
+    help: purge_keep_days van de recorder.
+    default: 10
+    min: 1
+    max: 3650
+  - name: timezone
+    type: string
+    label: Tijdzone
+    default: Europe/Brussels
+    pattern: '[A-Za-z]+(/[A-Za-z0-9_+-]+)*'
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk (en niet de VHID van CARP daar). Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker homeassistant
+    help: Leeg laten maakt er een; je ziet het bij Verbinding.
+    length: 32
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    help: Voor Home Assistant en MariaDB samen.
+    default: 3G
+    min: 2G
+    max: 32G
+  - name: disk
+    type: size
+    label: Schijf per node
+    help: Voor Home Assistant, de database en de kopie van /config.
+    default: 32G
+    min: 16G
+    max: 1T
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # sqlite3 voor de kopie, rsync en sshd voor de sync van ClusterForge.
+      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl, iputils-arping, iputils-ping] }
+      - command:
+          title: Docker
+          run: DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose && systemctl enable --now docker
+          unless: command -v docker && docker compose version && systemctl is-active --quiet docker
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /opt/cf-homeassistant, mode: "0755" }
+      - directory: { path: /opt/cf-homeassistant/config, mode: "0755" }
+      # outgoing: de kopie van de VIP-node; incoming: wat de sync brengt.
+      - directory: { path: /var/lib/cf-homeassistant, mode: "0700" }
+      - directory: { path: /var/lib/cf-homeassistant/incoming, mode: "0700" }
+      # Per node: de recorder (met het wachtwoord) en http. Home Assistant
+      # draait als root in de container en leest ze als bestanden in /config.
+      - directory: { path: /etc/cf-homeassistant, mode: "0700" }
+      - file:
+          path: /etc/cf-homeassistant/recorder.yaml
+          template: recorder.yaml.tmpl
+          mode: "0600"
+      - file:
+          path: /etc/cf-homeassistant/http.yaml
+          template: http.yaml.tmpl
+          mode: "0644"
+      - file:
+          path: /etc/cf-homeassistant/db.cnf
+          template: db.cnf.tmpl
+          mode: "0600"
+      - file:
+          path: /opt/cf-homeassistant/compose.yaml
+          template: compose.yaml.tmpl
+      - file:
+          path: /usr/local/lib/clusterforge/ha-ctl.sh
+          template: ha-ctl.sh.tmpl
+          mode: "0755"
+      - command:
+          title: image van Home Assistant
+          run: /usr/local/lib/clusterforge/ha-ctl.sh pull
+          unless: /usr/local/lib/clusterforge/ha-ctl.sh pulled
+      # cf-homeassistant is niet enabled: keepalived start het op de node met
+      # het VIP.
+      - file:
+          path: /etc/systemd/system/cf-homeassistant.service
+          template: cf-homeassistant.service.tmpl
+      # Veranderde image, compose.yaml, recorder of http terwijl Home
+      # Assistant hier draait: opnieuw starten (alleen hier, nooit elders).
+      - command:
+          title: Home Assistant herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/ha-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/ha-ctl.sh unchanged
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# De kopie van /config gaat van de VIP-node naar de andere nodes. ClusterForge
+# zet deze sync na de uitrol zelf bij Cronjobs; een doel met het VIP weigert
+# altijd.
+syncs:
+  - name: Home Assistant-configuratie
+    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
+    before: /usr/local/lib/clusterforge/ha-ctl.sh snapshot
+    source: /var/lib/cf-homeassistant/outgoing/
+    target: /var/lib/cf-homeassistant/incoming/
+    delete: true
+    alert: true
+    timeout_seconds: 900
+
+# Home Assistant start pas als de database er is (na de uitrol); daarom
+# controleert de uitrol alleen het VIP.
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+
+services:
+  - { name: homeassistant, kind: app, unit: cf-homeassistant, port: "{{ .params.port }}", depends_on: [keepalived], strength: hard }
+  - { name: keepalived, kind: vip, unit: keepalived }

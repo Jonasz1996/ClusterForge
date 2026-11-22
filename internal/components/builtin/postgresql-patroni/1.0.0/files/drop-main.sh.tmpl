@@ -1,0 +1,20 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# Het Debian-pakket postgresql maakt bij de installatie een leeg cluster
+# main op poort 5432. Patroni heeft die poort nodig en start PostgreSQL
+# zelf, dus main gaat weg, maar alleen als er geen eigen databases in
+# staan.
+set -eu
+
+for v in $(pg_lsclusters -h | awk '$2 == "main" {print $1}'); do
+    port=$(pg_lsclusters -h | awk -v v="$v" '$1 == v && $2 == "main" {print $3}')
+    pg_ctlcluster "$v" main start 2>/dev/null || true
+    n=$(runuser -u postgres -- psql -p "$port" -XAtc "SELECT count(*) FROM pg_database WHERE datname NOT IN ('postgres', 'template0', 'template1')")
+    if [ "$n" != 0 ]; then
+        echo "PostgreSQL $v/main heeft $n eigen databases; ClusterForge haalt het niet weg" >&2
+        exit 1
+    fi
+    echo "het lege cluster $v/main weghalen"
+    pg_dropcluster --stop "$v" main
+done

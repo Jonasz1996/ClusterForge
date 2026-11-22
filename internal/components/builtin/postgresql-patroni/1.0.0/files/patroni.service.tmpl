@@ -1,0 +1,22 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}): Patroni start en
+# bewaakt PostgreSQL. Deze unit gaat voor die van het Debian-pakket.
+[Unit]
+Description=Patroni met PostgreSQL (ClusterForge, cluster {{ .cluster.slug }})
+After=network-online.target etcd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+# De wachtwoorden; systemd leest dit bestand als root.
+EnvironmentFile=/etc/patroni/clusterforge.env
+ExecStart=/usr/bin/patroni /etc/patroni/clusterforge.yml
+ExecReload=/bin/kill -HUP $MAINPID
+# Alleen Patroni stoppen; hij stopt PostgreSQL zelf, netjes.
+KillMode=process
+TimeoutSec=60
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

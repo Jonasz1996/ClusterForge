@@ -1,0 +1,12 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# keepalived vraagt dit elke twee seconden. Het VIP staat alleen op een node
+# met Nginx en, zodra Galera er is, waarvan MariaDB mag schrijven (Synced in
+# een Primary component). Zo schrijven de Zabbix server en de webinterface
+# altijd naar één node.
+/usr/bin/systemctl is-active --quiet nginx || exit 1
+# De database komt na de uitrol; tot dan telt alleen Nginx.
+[ -e /etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf ] || exit 0
+exec /usr/local/bin/cf-agent check db mariadb

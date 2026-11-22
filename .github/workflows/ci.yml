@@ -1,0 +1,260 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clusterforge
+          POSTGRES_PASSWORD: clusterforge
+          POSTGRES_DB: clusterforge_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U clusterforge"
+          --health-interval 5s
+          --health-retries 10
+      # Voor de databasecommando's van de agent; de tests praten met de
+      # mariadb in de container via docker exec.
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-retries 20
+      # De oude server bij een verhuizing: MariaDB 10.11 zoals in Debian 12,
+      # naar de 11.8 hierboven zoals in Debian 13.
+      mariadb10:
+        image: mariadb:10.11
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Gegenereerde code is actueel
+        run: |
+          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0 generate
+          go generate ./...
+          git diff --exit-code -- internal/
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.14.0
+      # De tests van de agent dumpen en lezen in met psql en pg_dump van de
+      # runner. Die moeten dezelfde hoofdversie hebben als de server (16,
+      # zoals in deploy/): pg_dump 17 en nieuwer schrijft
+      # "SET transaction_timeout", en dat kent PostgreSQL 16 niet.
+      - name: psql en pg_dump van PostgreSQL 16
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then
+            sudo apt-get update -q
+            if ! sudo apt-get install -y -q postgresql-client-16; then
+              sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+              sudo apt-get install -y -q postgresql-client-16
+            fi
+          fi
+          /usr/lib/postgresql/16/bin/pg_dump --version
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+      - name: Tests
+        env:
+          CF_TEST_DATABASE_URL: postgres://clusterforge:clusterforge@localhost:5432/clusterforge_test?sslmode=disable
+          CF_TEST_MARIADB: ${{ job.services.mariadb.id }}
+          CF_TEST_MARIADB_SOURCE: ${{ job.services.mariadb10.id }}
+        run: go test -p 1 -race -timeout 45m ./...
+
+  galera:
+    name: Echte Galera
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Drie MariaDB-containers in een Galera-cluster: welke node na een
+      # uitval de nieuwste data heeft, dat er niets verloren gaat, en dat
+      # een vierde node aansluit terwijl er geschreven wordt.
+      - name: Opnieuw beginnen na een uitval en een node toevoegen
+        env:
+          CF_TEST_GALERA_DOCKER: "1"
+        run: go test -count=1 -timeout 20m -v -run TestRealGalera ./internal/galera/
+
+  patroni:
+    name: Echte Patroni
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # PostgreSQL staat meestal al op de runner. Patroni komt uit PyPI, en
+      # etcd met hetzelfde script als op de nodes, dus met de vaste SHA-256.
+      - name: PostgreSQL, Patroni en etcd
+        run: |
+          ls /usr/lib/postgresql/*/bin/postgres || (sudo apt-get update -q && sudo apt-get install -y -q postgresql)
+          python3 -m venv "$RUNNER_TEMP/patroni"
+          "$RUNNER_TEMP/patroni/bin/pip" install -q "patroni[etcd3]==4.1.5" "psycopg2-binary==2.9.13"
+          sudo mkdir -p /usr/local/lib/clusterforge
+          sudo sh internal/components/builtin/postgresql-patroni/1.0.0/files/install-etcd.sh.tmpl
+      # Drie nodes op loopback met de configuratie van het onderdeel: failover
+      # zonder verlies, de oude primary terug als replica, en opkomen na een
+      # uitval van alle nodes.
+      - name: Failover, opkomen na een uitval en een node toevoegen
+        env:
+          CF_TEST_PATRONI: ${{ runner.temp }}/patroni/bin/patroni
+          CF_TEST_ETCD: /usr/local/bin/etcd
+        run: go test -count=1 -timeout 20m -v -run TestRealPatroni ./internal/components/
+
+  npm:
+    name: Echte NPM
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clusterforge
+          POSTGRES_PASSWORD: clusterforge
+          POSTGRES_DB: clusterforge_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U clusterforge"
+          --health-interval 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: sqlite3
+        run: command -v sqlite3 || (sudo apt-get update -q && sudo apt-get install -y -q sqlite3)
+      # Een echte Nginx Proxy Manager (SQLite): publiceren via de API, een
+      # kapotte host terugdraaien, Authentik aan en uit, drift herstellen,
+      # de kopie van database en config terugzetten, hernoemen en
+      # verwijderen. Als root, zoals de agent: NPM schrijft data/ als root.
+      - name: Publiceren, terugdraaien en kopie terugzetten
+        env:
+          CF_TEST_NPM_DOCKER: "1"
+          CF_TEST_DATABASE_URL: postgres://clusterforge:clusterforge@localhost:5432/clusterforge_test?sslmode=disable
+        run: |
+          go test -c -o "$RUNNER_TEMP/publish.test" ./internal/publish/
+          # sudo -E laat de variabelen op de runner niet altijd door.
+          sudo env CF_TEST_NPM_DOCKER=1 CF_TEST_DATABASE_URL="$CF_TEST_DATABASE_URL" PATH="$PATH" \
+            "$RUNNER_TEMP/publish.test" -test.count=1 -test.timeout=20m -test.v -test.run TestRealNPM
+
+  web:
+    name: Webinterface
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: API-types zijn actueel
+        run: pnpm generate:api && git diff --exit-code -- src/lib/api/schema.ts
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  docker:
+    name: Container-image
+    runs-on: ubuntu-latest
+    # Een image per commit, zodat een kleine LXC kan bijwerken zonder zelf te
+    # bouwen. Alleen voor branches in deze repo: een fork krijgt geen schrijfrechten.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Bij een PR is github.sha de merge-commit; het image hoort bij de kop
+      # van de branch, zoals `git describe --tags --always` op de LXC hem noemt.
+      - id: tags
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref_name }}
+        run: |
+          short=${SHA:0:7}
+          image=ghcr.io/jonasz1996/clusterforge-server
+          echo "version=$short" >> "$GITHUB_OUTPUT"
+          {
+            echo "list<<EOF"
+            echo "$image:$short"
+            if [ -n "$PR" ]; then echo "$image:pr-$PR"; else echo "$image:$REF"; fi
+            echo "EOF"
+            # De scannercontainer (fase 27) staat in hetzelfde pakket met
+            # -scanner achter de tag, zodat compose hem vindt als ${CF_IMAGE}-scanner.
+            echo "scanner<<EOF"
+            echo "$image:$short-scanner"
+            if [ -n "$PR" ]; then echo "$image:pr-$PR-scanner"; else echo "$image:$REF-scanner"; fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: ${{ env.PUSH == 'true' }}
+          load: true
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+          tags: ${{ steps.tags.outputs.list }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: scanner
+          push: ${{ env.PUSH == 'true' }}
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+          tags: ${{ steps.tags.outputs.scanner }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # De server biedt de agent voor Linux amd64 en arm64 en voor FreeBSD
+      # amd64 (OPNsense) aan; die moeten in elk image zitten.
+      - name: Agents in het image
+        env:
+          IMAGE: ghcr.io/jonasz1996/clusterforge-server:${{ steps.tags.outputs.version }}
+        run: |
+          id=$(docker create "$IMAGE")
+          docker cp "$id:/usr/share/clusterforge/agents" agents
+          docker rm "$id"
+          ls -l agents
+          for bin in cf-agent-linux-amd64 cf-agent-linux-arm64 cf-agent-freebsd-amd64; do
+            test -s agents/$bin
+            (cd agents && sha256sum -c $bin.sha256)
+          done

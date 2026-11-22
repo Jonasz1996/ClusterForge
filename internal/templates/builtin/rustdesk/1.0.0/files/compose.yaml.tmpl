@@ -1,0 +1,53 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Start alleen via cf-rustdesk (systemd), op de node met het VIP. Docker start
+# het nooit zelf (restart: "no"), ook niet na een herstart van de node.
+# network_mode host: hbbs ziet het echte adres van de clients (nodig voor
+# hole punching) en de API bereikt hbbs op 127.0.0.1.
+services:
+  hbbs:
+    image: {{ .params.server_image }}
+    container_name: cf-rustdesk-hbbs
+    restart: "no"
+    network_mode: host
+    working_dir: /root
+    command: ["hbbs", "-r", "{{ .params.public_host }}:21117"]
+    environment:
+      TZ: "{{ .params.timezone }}"
+      ALWAYS_USE_RELAY: "{{ if .params.always_relay }}Y{{ else }}N{{ end }}"
+    volumes:
+      - /opt/cf-rustdesk/data:/root
+    depends_on:
+      - hbbr
+  hbbr:
+    image: {{ .params.server_image }}
+    container_name: cf-rustdesk-hbbr
+    restart: "no"
+    network_mode: host
+    working_dir: /root
+    command: ["hbbr"]
+    environment:
+      TZ: "{{ .params.timezone }}"
+    volumes:
+      - /opt/cf-rustdesk/data:/root
+  api:
+    image: {{ .params.api_image }}
+    container_name: cf-rustdesk-api
+    restart: "no"
+    network_mode: host
+    env_file: /etc/cf-rustdesk/api.env
+    environment:
+      TZ: "{{ .params.timezone }}"
+      RUSTDESK_API_LANG: en
+      RUSTDESK_API_GIN_API_ADDR: "0.0.0.0:21114"
+      RUSTDESK_API_RUSTDESK_ID_SERVER: "{{ .params.public_host }}:21116"
+      RUSTDESK_API_RUSTDESK_RELAY_SERVER: "{{ .params.public_host }}:21117"
+      RUSTDESK_API_RUSTDESK_API_SERVER: "{{ with .params.api_url }}{{ . }}{{ else }}http://{{ .params.vip }}:21114{{ end }}"
+      RUSTDESK_API_RUSTDESK_KEY_FILE: /app/keys/id_ed25519.pub
+      RUSTDESK_API_GIN_TRUST_PROXY: "{{ with .params.trusted_proxies }}{{ . }}{{ end }}"
+    volumes:
+      - /opt/cf-rustdesk/api:/app/data
+      - /opt/cf-rustdesk/data:/app/keys:ro
+    depends_on:
+      - hbbs

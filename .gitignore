@@ -1,0 +1,8 @@
+/bin/
+/dist/
+*.test
+coverage.out
+.env
+# De gebouwde webinterface wordt bij het bouwen in de binary ingebed.
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep

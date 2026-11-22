@@ -1,0 +1,16 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+[Unit]
+Description=Database en schema van Zabbix klaarzetten (ClusterForge)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/clusterforge/zabbix-db.sh
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

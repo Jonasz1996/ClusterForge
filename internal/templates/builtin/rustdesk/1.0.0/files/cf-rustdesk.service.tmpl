@@ -1,0 +1,21 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# RustDesk (hbbs, hbbr en de API). Niet enabled: keepalived start het op de
+# node met het VIP (rustdesk-ctl.sh master of check). Vóór de start zet
+# rustdesk-ctl.sh up de nieuwste geldige kopie van de vorige VIP-node op zijn
+# plaats.
+[Unit]
+Description=RustDesk van {{ .cluster.slug }} (actief op de node met het VIP)
+Requires=docker.service
+# Stopt keepalived, dan stopt RustDesk ook: anders draait het verder zonder VIP.
+BindsTo=keepalived.service
+After=docker.service keepalived.service network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+ExecStart=/usr/local/lib/clusterforge/rustdesk-ctl.sh up
+ExecStop=/usr/local/lib/clusterforge/rustdesk-ctl.sh down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=90

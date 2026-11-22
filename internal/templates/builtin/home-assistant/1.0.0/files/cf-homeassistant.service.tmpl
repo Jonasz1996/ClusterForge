@@ -1,0 +1,21 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Home Assistant. Niet enabled: keepalived start het op de node met het VIP
+# (ha-ctl.sh master of check). Vóór de start zet ha-ctl.sh up de nieuwste
+# geldige kopie van /config van de vorige VIP-node op zijn plaats en wacht op
+# de database.
+[Unit]
+Description=Home Assistant van {{ .cluster.slug }} (actief op de node met het VIP)
+Requires=docker.service
+# Stopt keepalived, dan stopt Home Assistant ook: anders draait het verder
+# zonder VIP.
+BindsTo=keepalived.service
+After=docker.service keepalived.service network-online.target mariadb.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+ExecStart=/usr/local/lib/clusterforge/ha-ctl.sh up
+ExecStop=/usr/local/lib/clusterforge/ha-ctl.sh down
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
