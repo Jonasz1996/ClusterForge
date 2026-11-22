@@ -60,6 +60,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
+	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
 )
 
 type Server struct {
@@ -103,6 +104,7 @@ type Server struct {
 	agentConf    *agentconf.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
+	zabbixAgents *zabbixagent.Service
 	soc          *soc.Service
 	security     *security.Service
 	stacks       *stacks.Service
@@ -191,6 +193,8 @@ type Deps struct {
 	Commands *commands.Service
 	// CrowdSec beheert CrowdSec op de nodes (fase 14).
 	CrowdSec *crowdsec.Service
+	// ZabbixAgents zet zabbix-agent2 met een eigen PSK op de nodes.
+	ZabbixAgents *zabbixagent.Service
 	// SOC is het beveiligingsoverzicht (fase 25).
 	SOC *soc.Service
 	// Security is de kwetsbaarheids- en verhardingsmodule (fase 27).
@@ -212,43 +216,44 @@ func New(d Deps) *Server {
 	inv := inventory.NewService(d.Pool, ev)
 	inv.Disconnect = d.Bus.Disconnect
 	s := &Server{
-		cfg:       d.Config,
-		log:       d.Log,
-		pool:      d.Pool,
-		q:         store.New(d.Pool),
-		ev:        ev,
-		auth:      d.Auth,
-		audit:     audit.NewService(store.New(d.Pool)),
-		inv:       inv,
-		agents:    agents.NewService(d.Pool, ev, d.Bus),
-		bus:       d.Bus,
-		hub:       d.Hub,
-		metrics:   metrics.NewClient(d.Config.VictoriaMetricsURL),
-		pve:       d.Proxmox,
-		jobs:      d.Jobs,
-		life:      d.Lifecycle,
-		deploy:    d.Deploy,
-		backups:   d.Backups,
-		drift:     d.Drift,
-		failover:  d.Failover,
-		disaster:  d.Disaster,
-		deps:      d.Deps,
-		rollout:   d.Rollout,
-		git:       d.GitOps,
-		version:   d.Version,
-		upgrades:  d.Upgrades,
-		agentConf: d.AgentConf,
-		updates:   d.Updates,
-		commands:  d.Commands,
-		crowdsec:  d.CrowdSec,
-		soc:       d.SOC,
-		stacks:    d.Stacks,
-		logs:      d.Logs,
-		firewall:  d.Firewall,
-		security:  d.Security,
-		pvehosts:  d.PVEHosts,
-		docker:    d.Docker,
-		recipes:   recipes.NewService(d.Pool, ev),
+		cfg:          d.Config,
+		log:          d.Log,
+		pool:         d.Pool,
+		q:            store.New(d.Pool),
+		ev:           ev,
+		auth:         d.Auth,
+		audit:        audit.NewService(store.New(d.Pool)),
+		inv:          inv,
+		agents:       agents.NewService(d.Pool, ev, d.Bus),
+		bus:          d.Bus,
+		hub:          d.Hub,
+		metrics:      metrics.NewClient(d.Config.VictoriaMetricsURL),
+		pve:          d.Proxmox,
+		jobs:         d.Jobs,
+		life:         d.Lifecycle,
+		deploy:       d.Deploy,
+		backups:      d.Backups,
+		drift:        d.Drift,
+		failover:     d.Failover,
+		disaster:     d.Disaster,
+		deps:         d.Deps,
+		rollout:      d.Rollout,
+		git:          d.GitOps,
+		version:      d.Version,
+		upgrades:     d.Upgrades,
+		agentConf:    d.AgentConf,
+		updates:      d.Updates,
+		commands:     d.Commands,
+		crowdsec:     d.CrowdSec,
+		zabbixAgents: d.ZabbixAgents,
+		soc:          d.SOC,
+		stacks:       d.Stacks,
+		logs:         d.Logs,
+		firewall:     d.Firewall,
+		security:     d.Security,
+		pvehosts:     d.PVEHosts,
+		docker:       d.Docker,
+		recipes:      recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
 		loginTimeout:   20 * time.Second,

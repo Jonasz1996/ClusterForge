@@ -93,6 +93,9 @@ func TestSeaweedFacts(t *testing.T) {
 		"http://127.0.0.1:8080/status": `{"Version":"30GB 3.80","Volumes":[
 			{"Id":1,"Size":1000,"FileCount":10,"ReplicaPlacement":{},"Collection":""},
 			{"Id":2,"Size":500,"FileCount":5,"ReplicaPlacement":{"node":2},"Collection":"media","ReadOnly":true}]}`,
+		"http://127.0.0.1:9333/vol/status": `{"Version":"30GB 3.80","Volumes":{"DataCenters":{"dc1":{"rack1":{
+			"10.0.0.5:8080":[{"Id":1,"Size":1000,"ReplicaPlacement":{"node":1}},{"Id":2,"Size":500,"ReplicaPlacement":{"node":1}}],
+			"10.0.0.6:8080":[{"Id":1,"Size":1000,"ReplicaPlacement":{"node":1}},{"Id":3,"Size":200,"ReplicaPlacement":{}}]}}},"Free":4,"Max":16}}`,
 	}
 	c := &Collector{
 		Root:   root,
@@ -105,6 +108,10 @@ func TestSeaweedFacts(t *testing.T) {
 		},
 	}
 	f := c.seaweed(context.Background())
+	if m := f.Master; m == nil || m.VolumeCount != 3 || m.UnderReplicated != 1 || len(m.UnderReplicatedIDs) != 1 || m.UnderReplicatedIDs[0] != 2 ||
+		m.LogicalBytes != 1700 || m.Replications["001"] != 2 || m.Replications["000"] != 1 || m.NodeBytes["10.0.0.5:8080"] != 1500 {
+		t.Errorf("volumes van de leider: %+v", f.Master)
+	}
 	if f == nil || len(f.Processes) != 2 {
 		t.Fatalf("processen: %+v", f)
 	}

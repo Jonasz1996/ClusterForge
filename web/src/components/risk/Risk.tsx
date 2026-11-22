@@ -370,6 +370,50 @@ function CardPanel({
 }
 
 // ClusterRiskCard is de health score van een cluster met zijn kaarten.
+// RiskSummary is wat een gesloten venster van Gezondheid toont: per kaart
+// een balk en de drie bevindingen die het meest opleveren.
+function RiskSummary({ cards }: { cards: RiskCard[] }) {
+  const top = cards
+    .flatMap((c) => c.findings)
+    .filter((f) => !f.accepted)
+    .sort((a, b) => b.gain - a.gain)
+    .slice(0, 3);
+  return (
+    <div className="space-y-3 text-sm">
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        {cards.map((c) => (
+          <li key={c.id} className="min-w-0">
+            <div className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="truncate">{cardLabels[c.id]}</span>
+              <span className="text-slate-500 tabular-nums">{c.score ?? "?"}</span>
+            </div>
+            <div className="mt-0.5 h-1 overflow-hidden rounded bg-slate-100 dark:bg-slate-800" aria-hidden>
+              {c.score !== null && (
+                <div
+                  className={cx(
+                    "h-full rounded",
+                    c.score >= 80 ? "bg-emerald-500" : c.score >= 60 ? "bg-amber-500" : "bg-red-500",
+                  )}
+                  style={{ width: `${c.score}%` }}
+                />
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {top.length > 0 && (
+        <ul className="space-y-1 border-t border-slate-100 pt-2 text-xs dark:border-slate-800">
+          {top.map((f, i) => (
+            <li key={i} className="line-clamp-2">
+              <span className="font-medium tabular-nums text-slate-500">+{f.gain.toFixed(1).replace(".", ",")}</span> {f.text}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function ClusterRiskCard({ clusterId, isAdmin }: { clusterId: string; isAdmin: boolean }) {
   const q = useClusterRisk(clusterId);
   const hist = useRiskHistory(clusterId);
@@ -388,6 +432,7 @@ export function ClusterRiskCard({ clusterId, isAdmin }: { clusterId: string; isA
             <Sparkline points={hist.data?.points ?? []} className="h-7 w-32" />
           </span>
         }
+        summary={d && <RiskSummary cards={d.cards} />}
       >
         {q.isLoading && <p className="text-sm text-slate-500">Laden…</p>}
         {q.isError && <Alert>De health score kon niet geladen worden.</Alert>}

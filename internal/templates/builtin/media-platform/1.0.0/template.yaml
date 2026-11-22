@@ -64,8 +64,11 @@ params:
     pattern: 'https://[A-Za-z0-9.-]+(/[A-Za-z0-9._-]+)+'
   - name: platform_ref
     type: string
-    label: Branch of tag van het platform
-    help: Een versie met app.cli db-copy (voor de overstap). Een andere waarde rolt een nieuwe versie node voor node uit.
+    label: Versie
+    help: >-
+      Branch, tag of commit van het platform. Een andere waarde bouwt de nieuwe
+      versie node voor node, en herstart het platform op de node met het VIP,
+      na een back-up van de database. Nooit install.sh op een clusternode.
     default: main
     pattern: '[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*'
   - name: db_vip
@@ -94,6 +97,23 @@ params:
     label: Wachtwoord van de databasegebruiker
     help: Leeg laten maakt er een.
     length: 64
+  - name: analyse
+    type: bool
+    label: Gezichten en zoeken op beeld
+    help: >-
+      De container analyse van het platform (vanaf 0.8.1). Elke node haalt de
+      modellen zelf (±40 MB, met zoeken op beeld ±1,6 GB bij de eerste keer).
+    default: true
+  - name: beeld
+    type: bool
+    label: Zoeken op beeld
+    help: Het model SigLIP 2, alleen met gezichten en zoeken op beeld aan.
+    default: true
+  - name: places
+    type: bool
+    label: Plaatsnamen bij foto's
+    help: De bronnen (±15 MB) komen één keer op de gedeelde bestanden.
+    default: true
   - name: secure_cookies
     type: bool
     label: Cookies alleen over https
@@ -228,6 +248,15 @@ roles:
           template: platform-ctl.sh.tmpl
           mode: "0755"
       - file:
+          path: /etc/clusterforge/platform-analyse.yaml
+          template: platform-analyse.yaml.tmpl
+      # Gezichten en zoeken op beeld (0.8.1): de modellen op elke node zelf,
+      # zodat het platform na een failover meteen alles heeft.
+      - command:
+          title: modellen van gezichten en zoeken op beeld
+          run: /usr/local/lib/clusterforge/platform-ctl.sh modellen
+          unless: /usr/local/lib/clusterforge/platform-ctl.sh modellen --check
+      - file:
           path: /etc/systemd/system/cf-platform.service
           template: cf-platform.service.tmpl
       # Veranderde er iets aan code, image of instellingen terwijl het
@@ -236,6 +265,23 @@ roles:
           title: platform herstarten na een wijziging
           run: /usr/local/lib/clusterforge/platform-ctl.sh restart-if-changed
           unless: /usr/local/lib/clusterforge/platform-ctl.sh unchanged
+      # Een andere replicatie: de leider van de masters zet de bestaande
+      # volumes om en maakt de ontbrekende kopieën (kan uren duren).
+      - command:
+          title: replicatie van de bestaande volumes
+          run: /usr/local/lib/clusterforge/platform-ctl.sh replicatie
+          unless: /usr/local/lib/clusterforge/platform-ctl.sh replicatie --check
+      # De stand voor ClusterForge (Aandacht nodig, kaart Applicatie).
+      - file:
+          path: /etc/systemd/system/cf-platform-status.service
+          template: cf-platform-status.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-platform-status.timer
+          template: cf-platform-status.timer.tmpl
+      - command:
+          title: timer van de stand
+          run: systemctl daemon-reload && systemctl enable --now cf-platform-status.timer
+          unless: systemctl is-enabled --quiet cf-platform-status.timer && systemctl is-active --quiet cf-platform-status.timer
       # Het eigen VIP van PostgreSQL komt in conf.d (ClusterForge, na de uitrol).
       - directory: { path: /etc/keepalived/conf.d, mode: "0755" }
       - file:
@@ -244,6 +290,26 @@ roles:
           mode: "0640"
           notify: [service:keepalived:reload]
       - service: { name: keepalived, enabled: true, state: started }
+
+# De sleutels per eigenaar van gezichten (buiten de gedeelde data, zoals op
+# de single) van de VIP-node naar de andere nodes, en de back-ups van de
+# database.
+syncs:
+  - name: platform-sleutels
+    schedule: "* * * * *"
+    source: /var/lib/cf-platform/sleutels/
+    target: /var/lib/cf-platform/sleutels/
+    delete: false
+    alert: true
+    timeout_seconds: 300
+  - name: platform-backups
+    schedule: "40 4 * * *"
+    source: /var/backups/cf-platform/
+    target: /var/backups/cf-platform/
+    delete: false
+    exclude: ["*.deel"]
+    alert: true
+    timeout_seconds: 3600
 
 # Het VIP van het platform komt pas als de bestanden gemount zijn, en dat
 # wacht op de filer, dus op PostgreSQL, dat ClusterForge na de uitrol zet.

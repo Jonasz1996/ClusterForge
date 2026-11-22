@@ -82,3 +82,34 @@ func TestCount(t *testing.T) {
 		t.Fatalf("%v", names)
 	}
 }
+
+func TestListFindings(t *testing.T) {
+	var c ContainerSummary
+	if err := json.Unmarshal([]byte(`{"Id":"abc","Names":["/portainer"],"Image":"portainer/portainer-ce","State":"running",
+		"Ports":[{"IP":"0.0.0.0","PrivatePort":9000,"PublicPort":9000,"Type":"tcp"},{"IP":"::","PrivatePort":9000,"PublicPort":9000,"Type":"tcp"},{"IP":"127.0.0.1","PrivatePort":8000,"PublicPort":8000,"Type":"tcp"}],
+		"Mounts":[{"Type":"bind","Source":"/var/run/docker.sock"}],"HostConfig":{"NetworkMode":"bridge"}}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range listFindings(c) {
+		got[f.Kind] = f.Detail
+	}
+	want := map[string]string{FindSocket: "/var/run/docker.sock", FindPublic: "9000/tcp", FindLatest: "portainer/portainer-ce"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: got %q, want %q", k, got[k], v)
+		}
+	}
+	for _, img := range []string{"registry.lan:5000/app:1.2", "nginx@sha256:abcd", "mariadb:11.4"} {
+		c := ContainerSummary{ID: "x", Image: img, State: "running"}
+		if f := listFindings(c); len(f) != 0 {
+			t.Errorf("%s: geen bevinding verwacht, kreeg %v", img, f)
+		}
+	}
+	if f := listFindings(ContainerSummary{ID: "x", Image: "registry.lan:5000/app", State: "running"}); len(f) != 1 || f[0].Kind != FindLatest {
+		t.Errorf("registry met poort zonder tag: %v", f)
+	}
+}

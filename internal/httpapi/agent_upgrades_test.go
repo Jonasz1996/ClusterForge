@@ -203,10 +203,6 @@ func TestAgentUpgrades(t *testing.T) {
 		t.Fatalf("na bijwerken: %s", got)
 	}
 
-	// Prod vraagt tweestapsverificatie en de slug.
-	if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"cluster_id": prod.ID}, nil); s != http.StatusForbidden {
-		t.Fatalf("prod zonder TOTP: %d", s)
-	}
 	// Een node die al bij is, of meer dan één keuze, kan niet.
 	if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"node_ids": []string{web01.ID}}, nil); s != http.StatusConflict {
 		t.Fatalf("al bijgewerkt: %d", s)

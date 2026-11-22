@@ -153,6 +153,9 @@ type Summary struct {
 	// herstartlus, of gestopt met een fout terwijl ze altijd moeten draaien.
 	Problems []Problem `json:"problems,omitempty"`
 	Disk     *Disk     `json:"disk,omitempty"`
+	// Findings zijn risico's in hoe containers draaien (M6); ze worden
+	// samen met Disk om de diskEvery bijgewerkt.
+	Findings []Finding `json:"findings,omitempty"`
 	// Warnings zijn de waarschuwingen van docker info.
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -165,6 +168,33 @@ type Problem struct {
 	Status string `json:"status"`
 	Reason string `json:"reason"`
 }
+
+// Soorten bevindingen.
+const (
+	// FindPrivileged: de container draait privileged (root op de host).
+	FindPrivileged = "privileged"
+	// FindSocket: de Docker-socket zit in de container (root op de host).
+	FindSocket = "docker-socket"
+	// FindHostNet: de container deelt het netwerk van de host.
+	FindHostNet = "host-network"
+	// FindPublic: een poort luistert op alle adressen van de host.
+	FindPublic = "public-port"
+	// FindLatest: het image is latest of zonder tag; wat er draait, kan
+	// bij een volgende pull onverwacht veranderen.
+	FindLatest = "latest"
+)
+
+// Finding is een risico bij een draaiende container.
+type Finding struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// Serious zegt of een bevinding in Aandacht nodig hoort: alleen wat de
+// container root op de host geeft.
+func (f Finding) Serious() bool { return f.Kind == FindPrivileged || f.Kind == FindSocket }
 
 // Disk is het schijfgebruik van Docker (system df).
 type Disk struct {
@@ -442,6 +472,19 @@ type ContainerSummary struct {
 	State  string            `json:"State"`
 	Status string            `json:"Status"`
 	Labels map[string]string `json:"Labels"`
+	Ports  []struct {
+		IP          string `json:"IP"`
+		PrivatePort int    `json:"PrivatePort"`
+		PublicPort  int    `json:"PublicPort"`
+		Type        string `json:"Type"`
+	} `json:"Ports"`
+	Mounts []struct {
+		Type   string `json:"Type"`
+		Source string `json:"Source"`
+	} `json:"Mounts"`
+	HostConfig struct {
+		NetworkMode string `json:"NetworkMode"`
+	} `json:"HostConfig"`
 }
 
 // Name is de naam zonder /.
@@ -456,6 +499,7 @@ func (s *Service) summarize(ctx context.Context, h Host) (Summary, error) {
 	var sum Summary
 	if h.Summary != nil {
 		sum.Disk = h.Summary.Disk
+		sum.Findings = h.Summary.Findings
 	}
 	data, err := s.get(ctx, h.NodeID, "/info", nil)
 	if err != nil {
@@ -493,8 +537,86 @@ func (s *Service) summarize(ctx context.Context, h Host) (Summary, error) {
 			s.diskAt[h.NodeID] = time.Now()
 			s.mu.Unlock()
 		}
+		sum.Findings = s.findings(ctx, h.NodeID, list)
 	}
 	return sum, nil
+}
+
+// maxInspect is hoeveel draaiende containers findings per keer inspecteert.
+const maxInspect = 100
+
+// findings zoekt de risico's bij de draaiende containers. Privileged staat
+// alleen in inspect; de rest staat al in de lijst.
+func (s *Service) findings(ctx context.Context, nodeID uuid.UUID, list []ContainerSummary) []Finding {
+	var out []Finding
+	inspected := 0
+	for _, c := range list {
+		if c.State != "running" {
+			continue
+		}
+		add := func(kind, detail string) {
+			out = append(out, Finding{ID: c.ID, Name: c.Name(), Kind: kind, Detail: detail})
+		}
+		out = append(out, listFindings(c)...)
+		if inspected >= maxInspect {
+			continue
+		}
+		inspected++
+		raw, err := s.get(ctx, nodeID, "/containers/"+c.ID+"/json", nil)
+		if err != nil {
+			continue
+		}
+		var in struct {
+			HostConfig struct {
+				Privileged bool `json:"Privileged"`
+			} `json:"HostConfig"`
+		}
+		if json.Unmarshal(raw, &in) == nil && in.HostConfig.Privileged {
+			add(FindPrivileged, "")
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// listFindings zijn de bevindingen die al in /containers/json staan.
+func listFindings(c ContainerSummary) []Finding {
+	var out []Finding
+	add := func(kind, detail string) {
+		out = append(out, Finding{ID: c.ID, Name: c.Name(), Kind: kind, Detail: detail})
+	}
+	for _, m := range c.Mounts {
+		if m.Type == "bind" && (m.Source == "/var/run/docker.sock" || m.Source == "/run/docker.sock") {
+			add(FindSocket, m.Source)
+			break
+		}
+	}
+	if c.HostConfig.NetworkMode == "host" {
+		add(FindHostNet, "")
+	}
+	seen := map[string]bool{}
+	var public []string
+	for _, p := range c.Ports {
+		if p.PublicPort == 0 || (p.IP != "0.0.0.0" && p.IP != "::" && p.IP != "") {
+			continue
+		}
+		k := fmt.Sprintf("%d/%s", p.PublicPort, p.Type)
+		if !seen[k] {
+			seen[k] = true
+			public = append(public, k)
+		}
+	}
+	if len(public) > 0 {
+		sort.Strings(public)
+		add(FindPublic, strings.Join(public, ", "))
+	}
+	if img := c.Image; !strings.HasPrefix(img, "sha256:") && !strings.Contains(img, "@") {
+		name := img[strings.LastIndex(img, "/")+1:]
+		if !strings.Contains(name, ":") || strings.HasSuffix(name, ":latest") {
+			add(FindLatest, img)
+		}
+	}
+	return out
 }
 
 // count telt de containers en zoekt de problemen.

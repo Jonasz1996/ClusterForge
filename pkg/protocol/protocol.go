@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 47
+const Version = 48
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -207,6 +207,11 @@ type Facts struct {
 
 	// Seaweed beschrijft SeaweedFS op de node; nil zonder.
 	Seaweed *SeaweedFacts `json:"seaweed,omitempty"`
+
+	// Vanaf AppsSince.
+
+	// Apps is de stand van apps van templates op de node (fase 29).
+	Apps []AppStatus `json:"apps,omitempty"`
 
 	// Vanaf PVESince.
 
@@ -705,6 +710,7 @@ func (f Facts) Stable() Facts {
 	}
 	out.AptUpdatedAt = time.Time{}
 	out.Seaweed = f.Seaweed.Stable()
+	out.Apps = StableApps(f.Apps)
 	return out
 }
 

@@ -1950,3 +1950,39 @@ type Vip struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+type ZabbixAgentNode struct {
+	NodeID        uuid.UUID
+	Managed       bool
+	PskIdentity   string
+	PskEnc        []byte
+	PskKeyID      string
+	PskHash       string
+	PskCreatedAt  time.Time
+	AppliedHash   string
+	AppliedAt     *time.Time
+	ApplyJobID    *uuid.UUID
+	ApplyError    string
+	ApplyFailedAt *time.Time
+	ZabbixHostID  string
+	CreatedAt     time.Time
+}
+
+type ZabbixAgentSetting struct {
+	ID             bool
+	AutoApply      bool
+	AutoProd       bool
+	Server         string
+	ServerActive   string
+	Version        string
+	HostMetadata   string
+	ApiUrl         string
+	ApiTokenEnc    []byte
+	ApiTokenID     string
+	HostGroup      string
+	Templates      []string
+	DockerTemplate string
+	Proxy          string
+	UpdatedAt      time.Time
+	UpdatedBy      *uuid.UUID
+}

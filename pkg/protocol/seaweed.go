@@ -81,6 +81,17 @@ type SeaweedMaster struct {
 	FreeVolumes int               `json:"free_volumes"`
 	DataNodes   []SeaweedDataNode `json:"data_nodes,omitempty"`
 	Layouts     []SeaweedLayout   `json:"layouts,omitempty"`
+	// Vanaf AppsSince, alleen op de leider (/vol/status): het aantal
+	// volumes, hoeveel er minder kopieën hebben dan hun replicatie vraagt
+	// (met hoogstens 20 ids), de nettogrootte (elk volume één keer) en de
+	// replicaties met hun aantal volumes.
+	VolumeCount        int            `json:"volume_count,omitempty"`
+	UnderReplicated    int            `json:"under_replicated,omitempty"`
+	UnderReplicatedIDs []int          `json:"under_replicated_ids,omitempty"`
+	LogicalBytes       uint64         `json:"logical_bytes,omitempty"`
+	Replications       map[string]int `json:"replications,omitempty"`
+	// NodeBytes is de grootte van de volumes per volume server (url).
+	NodeBytes map[string]uint64 `json:"node_bytes,omitempty"`
 }
 
 type SeaweedDataNode struct {

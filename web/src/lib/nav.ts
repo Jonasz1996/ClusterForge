@@ -115,6 +115,7 @@ export const navGroups: NavGroup[] = [
           { href: "/docker/images", label: "Images", keywords: "docker image pull update registry digest" },
           { href: "/docker/volumes", label: "Volumes", keywords: "docker volume opslag" },
           { href: "/docker/networks", label: "Netwerken", keywords: "docker network subnet bridge macvlan" },
+          { href: "/docker/events", label: "Gebeurtenissen", keywords: "docker events crash oom die gestopt" },
           { href: "/docker/cleanup", label: "Opruimen", adminOnly: true, keywords: "docker prune opruimen schijf ruimte" },
         ],
       },
@@ -160,6 +161,7 @@ export const navGroups: NavGroup[] = [
     label: "Bewaking en herstel",
     items: [
       { href: "/monitoring", label: "Monitoring", keywords: "cpu ram grafiek metrics" },
+      { href: "/zabbix", label: "Zabbix-agents", keywords: "zabbix agent2 psk sleutel monitoring proxy" },
       { href: "/logs", label: "Logs", adminOnly: true, keywords: "journald syslog docker logs" },
       {
         href: "/incidenten",

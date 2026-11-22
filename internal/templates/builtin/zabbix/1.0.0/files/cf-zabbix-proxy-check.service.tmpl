@@ -1,0 +1,9 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+[Unit]
+Description=Bereikt de Zabbix-proxy een server? (ClusterForge)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/clusterforge/zabbix-proxy-check.sh

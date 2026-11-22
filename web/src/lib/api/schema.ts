@@ -2901,6 +2901,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29) */
+        get: operations["getClusterApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/risk": {
         parameters: {
             query?: never;
@@ -3975,6 +3994,86 @@ export interface paths {
         get: operations["getSoc"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Zabbix-agents op alle nodes
+         * @description Instellingen en elke node met een agent met de stand van zabbix-agent2 en zijn PSK. Ook voor viewers.
+         */
+        get: operations["getZabbixAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Zabbix-agent-instellingen bewaren (admin)
+         * @description token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
+         *     nooit teruggegeven. Agentonderhoud op prod vraagt geen TOTP-code.
+         */
+        put: operations["updateZabbixAgentSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De Zabbix API proberen met de bewaarde instellingen (admin) */
+        post: operations["testZabbixAgentAPI"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+         * @description action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
+         *     blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
+         *     rotate geeft de node een nieuwe sleutel en past toe. Ook op prod zonder TOTP-code (agentonderhoud).
+         */
+        post: operations["setZabbixAgentNodes"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5330,8 +5429,7 @@ export interface paths {
          * @description node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
          *     prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
          *     nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
-         *     Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
-         *     slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+         *     Op prod vraagt het geen code of bevestiging meer (totp_code en confirm worden genegeerd). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
          *     (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
          *     cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
          */
@@ -5374,8 +5472,8 @@ export interface paths {
         /**
          * Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
          * @description Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
-         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
-         *     tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aan- en uitzetten
+         *     vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
          */
         put: operations["setAgentUpgradeProdAuto"];
         post?: never;
@@ -11589,6 +11687,79 @@ export interface components {
             max: number;
             reason: string;
         };
+        ClusterApps: {
+            apps: components["schemas"]["ClusterApp"][];
+            storage?: components["schemas"]["AppStorage"];
+        };
+        AppIssue: {
+            /** @enum {string} */
+            tone: "red" | "amber";
+            title: string;
+            detail?: string;
+        };
+        ClusterApp: {
+            app: string;
+            title: string;
+            nodes: components["schemas"]["NodeAppStatus"][];
+            issues: components["schemas"]["AppIssue"][];
+        };
+        NodeAppStatus: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            online: boolean;
+            /** @description Ouder dan 10 minuten of de agent antwoordt niet */
+            stale: boolean;
+            app: string;
+            title?: string;
+            /** @description De gebouwde commit */
+            version?: string;
+            /** @description De gekozen versie (branch */
+            ref?: string;
+            /** @description actief, stand-by of voor-overstap */
+            role?: string;
+            /** Format: date-time */
+            updated_at: string;
+            checks: {
+                id: string;
+                label: string;
+                ok: boolean;
+                severity?: string;
+                detail?: string;
+            }[];
+            values: {
+                id: string;
+                label: string;
+                value: string;
+                /** Format: int64 */
+                bytes?: number;
+            }[];
+        };
+        AppStorage: {
+            leader?: string;
+            volume_count: number;
+            under_replicated: number;
+            under_replicated_ids?: number[];
+            /**
+             * Format: int64
+             * @description Elk volume één keer geteld
+             */
+            logical_bytes: number;
+            replications?: {
+                [key: string]: number;
+            };
+            nodes: {
+                hostname: string;
+                /** Format: int64 */
+                bytes: number;
+                /** Format: int64 */
+                disk_total: number;
+                /** Format: int64 */
+                disk_free: number;
+                volumes: number;
+            }[];
+            issues: components["schemas"]["AppIssue"][];
+        };
         ClusterRisk: {
             score: number | null;
             /** @description A tot F; leeg zonder score */
@@ -12855,9 +13026,9 @@ export interface components {
             all?: boolean;
             /** @description Met all: ook de agents op prod, één prodcluster na het andere */
             include_prod?: boolean;
-            /** @description Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik */
+            /** @description Wordt genegeerd: agents op prod bijwerken vraagt geen code meer */
             totp_code?: string;
-            /** @description De slug van het prodcluster */
+            /** @description Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer */
             confirm?: string;
         };
         AgentEndpointsOverview: {
@@ -13695,6 +13866,98 @@ export interface components {
             revision: number;
             /** @description null als er op geen node iets verandert */
             job: components["schemas"]["Job"] | null;
+        };
+        ZabbixAgentSettings: {
+            /** @description Elke node met een agent krijgt vanzelf zabbix-agent2 */
+            auto_apply: boolean;
+            /** @description Ook nodes van prod-clusters */
+            auto_prod: boolean;
+            /** @description Server= in zabbix_agent2.conf */
+            server: string;
+            /** @description ServerActive= in zabbix_agent2.conf */
+            server_active: string;
+            /** @description Versie van de Zabbix-repository */
+            version: string;
+            host_metadata: string;
+            /** @description Adres van api_jsonrpc.php */
+            api_url: string;
+            /** @description Groep voor hosts die ClusterForge aanmaakt */
+            host_group: string;
+            templates: string[];
+            /** @description Extra template voor nodes met Docker */
+            docker_template: string;
+            /** @description Proxy voor nieuwe hosts; leeg is de server */
+            proxy: string;
+            token_set: boolean;
+            /** @description De server heeft een masterkey om sleutels te bewaren */
+            available: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ZabbixAgentSettingsInput: {
+            auto_apply: boolean;
+            auto_prod: boolean;
+            server: string;
+            server_active: string;
+            version: string;
+            host_metadata: string;
+            api_url: string;
+            host_group: string;
+            templates: string[];
+            docker_template: string;
+            proxy: string;
+            /** @description Weglaten laat het token staan; leeg haalt het weg */
+            token?: string;
+        };
+        ZabbixAgentNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            ip: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_environment: string;
+            online: boolean;
+            supported: boolean;
+            docker: boolean;
+            /** @description Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is */
+            agent_service: string;
+            enabled: boolean;
+            managed: boolean;
+            psk_identity: string;
+            /** Format: date-time */
+            psk_created_at: string | null;
+            /** Format: date-time */
+            applied_at: string | null;
+            /** Format: uuid */
+            apply_job_id: string | null;
+            apply_running: boolean;
+            apply_error: string;
+            /** Format: date-time */
+            apply_failed_at: string | null;
+            zabbix_host_id: string;
+            pending: boolean;
+        };
+        ZabbixAgentsOverview: {
+            settings: components["schemas"]["ZabbixAgentSettings"];
+            nodes: components["schemas"]["ZabbixAgentNode"][];
+        };
+        ZabbixAgentTestResult: {
+            ok: boolean;
+            version: string;
+            message: string;
+        };
+        ZabbixAgentNodesInput: {
+            /** @enum {string} */
+            action: "manage" | "unmanage" | "apply" | "rotate";
+            node_ids?: string[];
+            /** @description Alle nodes die nog niet toegepast zijn (apply) of alle nodes */
+            all?: boolean;
+        };
+        ZabbixAgentNodesResult: {
+            jobs: string[];
+            skipped: string[];
         };
         CrowdSecSettings: {
             auto_apply: boolean;
@@ -19185,6 +19448,30 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getClusterApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterApps"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     getClusterRisk: {
         parameters: {
             query?: never;
@@ -20750,6 +21037,104 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getZabbixAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentsOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    updateZabbixAgentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAgentSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    testZabbixAgentAPI: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentTestResult"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setZabbixAgentNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAgentNodesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentNodesResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getCrowdSec: {
@@ -22987,6 +23372,7 @@ export interface operations {
             content: {
                 "application/json": {
                     enabled: boolean;
+                    /** @description Wordt genegeerd */
                     totp_code?: string;
                 };
             };

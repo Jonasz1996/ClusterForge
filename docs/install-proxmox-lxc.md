@@ -279,7 +279,7 @@ Stopt de build toch met `signal: killed`, stop dan eerst de draaiende containers
 
 ### De agents
 
-Agents vanaf protocol 23 werken zichzelf bij: na de update ziet de server dat ze ouder zijn en werkt hij ze binnen een paar minuten bij, één node tegelijk per cluster. Op prod alleen vanzelf als "Ook productie vanzelf bijwerken" aan staat (Instellingen → Agents bijwerken, met een code uit de app); anders vink je bij Nodes "Ook productie" aan en klik je op "Agents bijwerken": één code, de prodclusters één na het andere. Volgen kan bij Nodes (kaart "Agents bijwerken") en bij Taken. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken.
+Agents vanaf protocol 23 werken zichzelf bij: na de update ziet de server dat ze ouder zijn en werkt hij ze binnen een paar minuten bij, één node tegelijk per cluster. Op prod alleen vanzelf als "Ook productie vanzelf bijwerken" aan staat (schakelaar bij Nodes → Agents bijwerken of bij Instellingen, zonder code); anders vink je bij Nodes "Ook productie" aan en klik je op "Agents bijwerken": de prodclusters één na het andere. Volgen kan bij Nodes (kaart "Agents bijwerken") en bij Taken. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken.
 
 Een agent onder protocol 23 kent dat nog niet. Werk die één keer met de hand bij, op elke node, nadat de server "healthy" is:
 

@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
+	"github.com/Jonasz1996/clusterforge/internal/apps"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
@@ -164,6 +166,78 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 			names(sm.SSHWaiting)+". Kun je nog inloggen? Bevestig, anders zet de node de oude instellingen terug.", "/kwetsbaarheden/verharding", len(sm.SSHWaiting))
 	}
 
+	// Docker (fase 28): containers die niet gezond draaien en containers
+	// die root op de host geven.
+	if s.docker != nil {
+		if hosts, err := s.docker.Hosts(ctx); err == nil {
+			var bad, risky []string
+			nBad, nRisky := 0, 0
+			for _, h := range hosts {
+				if h.Summary == nil || !h.Online {
+					continue
+				}
+				for _, pr := range h.Summary.Problems {
+					nBad++
+					bad = append(bad, pr.Name+" op "+h.Hostname+" ("+pr.Reason+")")
+				}
+				seen := map[string]bool{}
+				for _, f := range h.Summary.Findings {
+					if f.Serious() && !seen[f.ID] {
+						seen[f.ID] = true
+						nRisky++
+						risky = append(risky, f.Name+" op "+h.Hostname)
+					}
+				}
+			}
+			add("docker-problems", red, plural(nBad, "container draait", "containers draaien")+" niet gezond", names(bad), "/docker/containers?filter=problem", nBad)
+			add("docker-root", amber, plural(nRisky, "container kan", "containers kunnen")+" root worden op de host (privileged of de Docker-socket)",
+				names(risky), "/docker", nRisky)
+		}
+	}
+
+	// Apps van templates (fase 29): wat hun ctl-scripts melden en de
+	// opslag van SeaweedFS. Eén regel per cluster en kleur.
+	if overviews, err := s.appOverviews(ctx, nil); err == nil {
+		byID := map[string]string{}
+		for _, c := range clusters {
+			byID[c.Cluster.ID.String()] = c.Cluster.Name
+		}
+		ids := make([]string, 0, len(overviews))
+		for id := range overviews {
+			ids = append(ids, id.String())
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			cid, _ := uuid.Parse(id)
+			o := overviews[cid]
+			var issues []apps.Issue
+			for _, a := range o.Apps {
+				issues = append(issues, a.Issues...)
+			}
+			if o.Storage != nil {
+				issues = append(issues, o.Storage.Issues...)
+			}
+			for _, tone := range []gen.AttentionItemTone{red, amber} {
+				var titles []string
+				for _, i := range issues {
+					if i.Tone == string(tone) {
+						titles = append(titles, i.Title)
+					}
+				}
+				if len(titles) == 0 {
+					continue
+				}
+				title := byID[id] + ": " + titles[0]
+				if len(titles) > 1 {
+					title = byID[id] + ": " + plural(len(titles), "probleem", "problemen") + " met de applicatie"
+				}
+				add("apps-"+string(tone)+"-"+id, tone, title, names(titles), "/clusters/detail?id="+id+"#applicatie", len(titles))
+			}
+		}
+	} else {
+		return gen.Attention{}, err
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}
@@ -185,6 +259,10 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		// Kwetsbaarheden is één menu-item met tabbladen.
 		if strings.HasPrefix(href, "/kwetsbaarheden/") {
 			href = "/kwetsbaarheden"
+		}
+		// Een clusterpagina telt bij Clusters.
+		if strings.HasPrefix(href, "/clusters/") {
+			href = "/clusters"
 		}
 		b := badges[href]
 		b.Count += it.Count

@@ -1,3 +1,6 @@
+"use client";
+
+import { TileButton, TileReset, useTile } from "@/components/Tiles";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -51,7 +54,37 @@ export function Label(props: LabelHTMLAttributes<HTMLLabelElement>) {
   return <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300" {...props} />;
 }
 
-export function Card({ title, children, className }: { title?: ReactNode; children: ReactNode; className?: string }) {
+export function Card({
+  title,
+  children,
+  className,
+  summary,
+}: {
+  title?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  // summary is wat een gesloten venster toont in plaats van het begin van de
+  // kaart (fase 30); open of buiten een venster telt alleen children.
+  summary?: ReactNode;
+}) {
+  const tile = useTile();
+  if (tile) {
+    // In een venster geeft het venster de rand; de kaart zet de openknop naast
+    // haar titel. Kaarten binnen deze kaart zijn gewone kaarten.
+    const short = summary !== undefined && !tile.open;
+    return (
+      <section className={className}>
+        <h2 className="mb-3 flex items-start gap-2 text-base font-semibold">
+          <span className="min-w-0 flex-1">{title}</span>
+          <TileButton />
+        </h2>
+        <TileReset>
+          {short && summary}
+          <div className={short ? "hidden" : undefined}>{children}</div>
+        </TileReset>
+      </section>
+    );
+  }
   return (
     <section
       className={cx(

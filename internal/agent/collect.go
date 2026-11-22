@@ -28,6 +28,9 @@ var WatchedServices = []string{
 	// De template zabbix: ClusterForge en een uitrol wachten tot deze
 	// active zijn.
 	"cf-zabbix-server", "cf-zabbix-db", "cf-zabbix-proxy",
+	// Faalt als de proxy geen server bereikt (een timer start hem elke
+	// minuut).
+	"cf-zabbix-proxy-check",
 	// Kubernetes: k3s op een server, k3s-agent op een worker.
 	"k3s", "k3s-agent",
 	// Databaseclusters: Patroni met etcd voor PostgreSQL, en garb, de
@@ -38,7 +41,7 @@ var WatchedServices = []string{
 	"crowdsec", "crowdsec-firewall-bouncer", "caddy", "traefik", "grafana-server", "plexmediaserver", "pvedaemon",
 	// Firewall (fase 16): ufw zelf en units waarvan de poorten open moeten
 	// staan, ook als ze even niet luisteren.
-	"ufw", "cf-npm", "cf-authentik", "cf-vaultx", "cf-cssthema-api", "cf-cssthema-worker", "cf-homepage-api", "cf-homepage-worker", "cf-homepage-syslog", "cf-homeassistant", "cf-seaweedfs", "zabbix-server", "zabbix-agent", "zabbix-agent2",
+	"ufw", "cf-npm", "cf-authentik", "cf-vaultx", "cf-cssthema-api", "cf-cssthema-worker", "cf-homepage-api", "cf-homepage-worker", "cf-homepage-syslog", "cf-homeassistant", "cf-seaweedfs", "cf-platform", "cf-platform-mount", "zabbix-server", "zabbix-agent", "zabbix-agent2",
 	"mosquitto", "smbd", "nfs-server",
 }
 
@@ -157,7 +160,7 @@ func (c *Collector) Heartbeat(ctx context.Context, version string) protocol.Hear
 	}
 	units := c.units(ctx)
 	for _, u := range units {
-		hb.Services[u.Name] = u.Active
+		hb.Services[u.Name] = heartbeatState(u)
 	}
 	if c.OnUnits != nil && units != nil {
 		c.OnUnits(units)
@@ -200,6 +203,7 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	f.Certificates = c.certificates()
 	f.Tools = c.tools()
 	f.Seaweed = c.seaweed(ctx)
+	f.Apps = c.apps()
 	f.Proxmox = c.proxmox(ctx)
 	return f
 }
@@ -559,4 +563,17 @@ func hostAddresses() []string {
 		out = append(out, ipn.IP.String())
 	}
 	return out
+}
+
+// heartbeatState is de toestand van een unit voor de heartbeat. Een unit
+// die na een fout wacht tot systemd hem opnieuw start (Restart=, de
+// toestand activating met een Result anders dan success), heet
+// auto-restart: systemctl is-active zegt dan activating, en zo zou een
+// dienst die steeds crasht nooit opvallen. Niet failed: een uitrol wacht
+// op zo'n dienst (hij kan nog op iets anders wachten), en stopt bij failed.
+func heartbeatState(u UnitInfo) string {
+	if u.Active == "activating" && u.Result != "" && u.Result != "success" {
+		return "auto-restart"
+	}
+	return u.Active
 }

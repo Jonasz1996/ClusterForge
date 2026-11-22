@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { Tile, TileGrid, ViewToggle, openTileOf } from "@/components/Tiles";
 import QRCode from "qrcode";
 import { useState, type FormEvent } from "react";
 import { AssistantSettingsCard } from "@/components/assistant/AssistantSettings";
@@ -33,43 +34,68 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Instellingen" description="Je eigen account bovenaan, daaronder de instellingen van ClusterForge zelf." />
-      <nav aria-label="Onderdelen" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+      <nav aria-label="Onderdelen" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         {sections.map((s) => (
-          <a key={s.id} href={`#${s.id}`} className="text-brand-700 hover:underline dark:text-sky-300">
+          <a key={s.id} href={`#${s.id}`} onClick={(e) => openTileOf(e, s.id)} className="text-brand-700 hover:underline dark:text-sky-300">
             {s.label}
           </a>
         ))}
+        <span className="ml-auto">
+          <ViewToggle />
+        </span>
       </nav>
-      <div id="tweestap" className="scroll-mt-20">
-        <TotpCard />
-      </div>
-      <div id="wachtwoord" className="scroll-mt-20">
-        <PasswordCard />
-      </div>
-      <div id="sessies" className="scroll-mt-20">
-        <SessionsCard />
-      </div>
-      <div id="weergave" className="scroll-mt-20">
-        <AppearanceCard />
-      </div>
-      <div id="assistent" className="scroll-mt-20">
-        <AssistantSettingsCard isAdmin={isAdmin} />
-      </div>
-      <div id="documentatie-github" className="scroll-mt-20">
-        <DocsTargetCard isAdmin={isAdmin} />
-      </div>
-      <div id="locatie" className="scroll-mt-20">
-        <SelfLocationCard isAdmin={isAdmin} />
-      </div>
-      <div id="agents-bijwerken" className="scroll-mt-20">
-        <AgentUpgradeSettingsCard isAdmin={isAdmin} />
-      </div>
-      <div id="adres-voor-agents" className="scroll-mt-20">
-        <AgentEndpointsCard isAdmin={isAdmin} />
-      </div>
-      <div id="dashboard-api" className="scroll-mt-20">
-        <ApiTokensCard isAdmin={isAdmin} />
-      </div>
+      <TileGrid>
+        <Tile>
+          <div id="tweestap" className="scroll-mt-20">
+            <TotpCard />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="wachtwoord" className="scroll-mt-20">
+            <PasswordCard />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="sessies" className="scroll-mt-20">
+            <SessionsCard />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="weergave" className="scroll-mt-20">
+            <AppearanceCard />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="assistent" className="scroll-mt-20">
+            <AssistantSettingsCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="documentatie-github" className="scroll-mt-20">
+            <DocsTargetCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="locatie" className="scroll-mt-20">
+            <SelfLocationCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="agents-bijwerken" className="scroll-mt-20">
+            <AgentUpgradeSettingsCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="adres-voor-agents" className="scroll-mt-20">
+            <AgentEndpointsCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+        <Tile>
+          <div id="dashboard-api" className="scroll-mt-20">
+            <ApiTokensCard isAdmin={isAdmin} />
+          </div>
+        </Tile>
+      </TileGrid>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ago, formatBytes } from "@/components/inventory/bits";
 import { Alert, Badge, Button, PageHeader } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
-import { envLabel, groupHosts, hostReady, useDockerHosts, useRefreshDocker, type DockerHost } from "@/lib/docker";
+import { envLabel, findingLabel, groupHosts, hostReady, useDockerHosts, useRefreshDocker, type DockerFinding, type DockerHost } from "@/lib/docker";
 
 function errText(e: unknown) {
   return e instanceof ApiError ? e.message : "Er ging iets mis.";
@@ -163,6 +163,7 @@ function HostCard({ h, need }: { h: DockerHost; need: number }) {
               ))}
             </ul>
           )}
+          {(s.findings?.length ?? 0) > 0 && <Findings h={h} list={s.findings!} />}
           {(s.warnings?.length ?? 0) > 0 && (
             <details className="text-xs text-amber-700 dark:text-amber-400">
               <summary className="cursor-pointer">{s.warnings!.length} waarschuwing(en) van Docker</summary>
@@ -183,5 +184,39 @@ function HostCard({ h, need }: { h: DockerHost; need: number }) {
         !why && <p className="text-sm text-slate-500">Nog niet gelezen; dat gebeurt elke minuut.</p>
       )}
     </div>
+  );
+}
+
+// Findings toont de risico's per container; wat root op de host geeft,
+// staat open.
+function Findings({ h, list }: { h: DockerHost; list: DockerFinding[] }) {
+  const serious = list.filter((f) => findingLabel[f.kind]?.serious);
+  const kinds = Object.keys(findingLabel) as DockerFinding["kind"][];
+  return (
+    <details open={serious.length > 0} className="text-xs">
+      <summary className="cursor-pointer text-slate-600 dark:text-slate-400">
+        Beveiliging: {list.length} {list.length === 1 ? "bevinding" : "bevindingen"}
+        {serious.length > 0 && <span className="text-amber-700 dark:text-amber-400"> ({serious.length} root op de host)</span>}
+      </summary>
+      <ul className="mt-1 space-y-1">
+        {kinds
+          .map((k) => [k, list.filter((f) => f.kind === k)] as const)
+          .filter(([, fs]) => fs.length > 0)
+          .map(([k, fs]) => (
+            <li key={k} title={findingLabel[k].hint}>
+              <Badge tone={findingLabel[k].serious ? "amber" : "slate"}>{findingLabel[k].label}</Badge>{" "}
+              {fs.map((f, i) => (
+                <span key={f.id + i}>
+                  {i > 0 && ", "}
+                  <Link className="hover:underline" href={`/docker/container?node=${h.node_id}&id=${f.id}`}>
+                    {f.name}
+                  </Link>
+                  {f.detail && k === "public-port" && <span className="text-slate-500"> ({f.detail})</span>}
+                </span>
+              ))}
+            </li>
+          ))}
+      </ul>
+    </details>
   );
 }

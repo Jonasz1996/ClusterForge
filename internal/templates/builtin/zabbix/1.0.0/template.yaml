@@ -95,6 +95,22 @@ params:
     label: VRRP-wachtwoord
     help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
     length: 8
+  - name: proxy_encryption
+    type: string
+    label: Versleuteling tussen proxy en servers
+    help: >-
+      none of psk. Met psk versleutelt de proxy zijn verkeer met een sleutel die
+      ClusterForge maakt; ClusterForge zet dezelfde sleutel en identiteit ook in
+      Zabbix bij de proxy (Administration → Proxies, met de hostname van de
+      proxy als naam), dus je hoeft hem nergens in te typen.
+    default: none
+    pattern: 'none|psk'
+  - name: proxy_psk_identity
+    type: string
+    label: PSK-identiteit van de proxy
+    help: Alleen met psk. Letters, cijfers, punt, streep en underscore.
+    default: clusterforge-proxy
+    pattern: '[A-Za-z0-9._-]{1,128}'
   - name: db_password
     type: secret
     label: Wachtwoord van de databasegebruiker zabbix
@@ -279,11 +295,35 @@ roles:
           template: zabbix_proxy.conf.tmpl
           mode: "0644"
           notify: [service:cf-zabbix-proxy:restart]
+      # De PSK: alleen voor root; systemd geeft hem de proxy als credential.
+      # Hij komt uit het databasewachtwoord, zodat de server-nodes dezelfde
+      # sleutel in Zabbix kunnen zetten.
+      - file:
+          path: /etc/zabbix/cf-zabbix_proxy.psk
+          content: "{{ sha256 (print .params.db_password \"/zabbix-proxy-psk\") }}\n"
+          mode: "0600"
+          notify: [service:cf-zabbix-proxy:restart]
       - file:
           path: /etc/systemd/system/cf-zabbix-proxy.service
           template: cf-zabbix-proxy.service.tmpl
           notify: [service:cf-zabbix-proxy:restart]
       - service: { name: cf-zabbix-proxy, enabled: true, state: started }
+      # Elke minuut: bereikt de proxy een server? Zo niet, dan faalt
+      # cf-zabbix-proxy-check en meldt ClusterForge het (Aandacht nodig).
+      - file:
+          path: /usr/local/lib/clusterforge/zabbix-proxy-check.sh
+          template: zabbix-proxy-check.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /etc/systemd/system/cf-zabbix-proxy-check.service
+          template: cf-zabbix-proxy-check.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-zabbix-proxy-check.timer
+          template: cf-zabbix-proxy-check.timer.tmpl
+      - command:
+          title: controle van de proxy aanzetten
+          run: systemctl daemon-reload && systemctl enable --now cf-zabbix-proxy-check.timer
+          unless: systemctl is-enabled --quiet cf-zabbix-proxy-check.timer && systemctl is-active --quiet cf-zabbix-proxy-check.timer
       # Na elke pakketupdate (ook buiten ClusterForge om) herstart apt de
       # Zabbix-dienst die nog het oude programma draait; deze stap doet
       # hetzelfde als dat nu al nodig is.

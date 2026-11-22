@@ -350,6 +350,58 @@ func (q *Queries) ListActiveEnrollmentTokens(ctx context.Context) ([]ListActiveE
 	return items, nil
 }
 
+const listAppFacts = `-- name: ListAppFacts :many
+SELECT n.id, n.cluster_id, n.hostname, n.primary_ip, n.lifecycle,
+       a.last_seen_at AS agent_last_seen_at, f.facts
+FROM nodes n
+JOIN node_facts f ON f.node_id = n.id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+WHERE n.cluster_id IS NOT NULL
+  AND ($1::uuid IS NULL OR n.cluster_id = $1::uuid)
+  AND (f.facts ? 'apps' OR f.facts ? 'seaweed')
+ORDER BY lower(n.hostname)
+`
+
+type ListAppFactsRow struct {
+	ID              uuid.UUID
+	ClusterID       *uuid.UUID
+	Hostname        string
+	PrimaryIp       *netip.Addr
+	Lifecycle       NodeLifecycle
+	AgentLastSeenAt *time.Time
+	Facts           []byte
+}
+
+// Nodes met de stand van een app of SeaweedFS in hun facts (fase 29),
+// voor de kaart Applicatie en Aandacht nodig. Zonder cluster_id: alle.
+func (q *Queries) ListAppFacts(ctx context.Context, clusterID *uuid.UUID) ([]ListAppFactsRow, error) {
+	rows, err := q.db.Query(ctx, listAppFacts, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAppFactsRow{}
+	for rows.Next() {
+		var i ListAppFactsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Hostname,
+			&i.PrimaryIp,
+			&i.Lifecycle,
+			&i.AgentLastSeenAt,
+			&i.Facts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockClaimToken = `-- name: LockClaimToken :one
 SELECT id, token_hash, description, node_id, cluster_id, max_uses, uses, expires_at, created_by, created_at, claim_ip FROM enrollment_tokens
 WHERE node_id = $1 AND claim_ip IS NOT NULL AND expires_at > now() AND uses < max_uses

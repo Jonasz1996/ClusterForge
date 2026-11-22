@@ -10,6 +10,17 @@ import type { Job } from "./proxmox";
 
 export type DockerProblem = { id: string; name: string; state: string; status: string; reason: string };
 
+// Een risico bij een draaiende container (M6); zie internal/dockerhost.
+export type DockerFinding = { id: string; name: string; kind: "privileged" | "docker-socket" | "host-network" | "public-port" | "latest"; detail?: string };
+
+export const findingLabel: Record<DockerFinding["kind"], { label: string; hint: string; serious: boolean }> = {
+  privileged: { label: "privileged", hint: "De container is root op de host.", serious: true },
+  "docker-socket": { label: "Docker-socket", hint: "Wie de socket heeft, is root op de host.", serious: true },
+  "host-network": { label: "hostnetwerk", hint: "Deelt het netwerk van de host; poorten gaan buiten Docker om open.", serious: false },
+  "public-port": { label: "open poort", hint: "Luistert op alle adressen van de host; Docker zet die poort buiten ufw om open.", serious: false },
+  latest: { label: "latest", hint: "Zonder vaste tag kan een volgende pull onverwacht een andere versie geven.", serious: false },
+};
+
 export type DockerDisk = { images: number; containers: number; volumes: number; build_cache: number; reclaimable: number; at: string };
 
 export type DockerSummary = {
@@ -30,6 +41,7 @@ export type DockerSummary = {
   images: number;
   problems?: DockerProblem[];
   disk?: DockerDisk;
+  findings?: DockerFinding[];
   warnings?: string[];
 };
 

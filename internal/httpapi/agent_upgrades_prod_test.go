@@ -5,10 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/pquerna/otp/totp"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -37,19 +35,12 @@ func (v prodView) queue() string {
 	return strings.Join(s, " ")
 }
 
-// TestAgentUpgradesProd: één klik "ook productie" met één code werkt de
+// TestAgentUpgradesProd: één klik "ook productie" (zonder code) werkt de
 // labclusters meteen bij en de prodclusters één voor één; een fout stopt
-// de rij. Prod vanzelf bijwerken vraagt een code en staat stil na een fout.
+// de rij. Prod vanzelf bijwerken staat stil na een fout.
 func TestAgentUpgradesProd(t *testing.T) {
 	e, c := adminClient(t)
 	offerAgent(t, e, "nieuwe agent")
-	errOf := func(c *client, method, path string, body any) (int, string) {
-		t.Helper()
-		var er apiErr
-		s := c.do(method, path, body, &er)
-		return s, er.Code
-	}
-
 	var lab, db, mail cluster
 	c.do("POST", "/api/v1/clusters", map[string]any{"slug": "web", "name": "Web", "type": "keepalived", "environment": "lab"}, &lab)
 	c.do("POST", "/api/v1/clusters", map[string]any{"slug": "db", "name": "DB", "type": "keepalived", "environment": "prod"}, &db)
@@ -72,34 +63,13 @@ func TestAgentUpgradesProd(t *testing.T) {
 	// Labcluster uit zodat vanzelf bijwerken niet tussenkomt.
 	c.do("PUT", "/api/v1/clusters/"+lab.ID+"/agent-upgrade-auto", map[string]any{"enabled": false}, nil)
 
-	all := map[string]any{"all": true, "include_prod": true}
-	if s, code := errOf(c, "POST", "/api/v1/agent-upgrades", all); s != http.StatusForbidden || code != "totp_required" {
-		t.Fatalf("ook prod zonder tweestapsverificatie: %d %s", s, code)
-	}
-	var setup struct {
-		Secret string `json:"secret"`
-	}
-	c.do("POST", "/api/v1/auth/totp/setup", nil, &setup)
-	now := time.Now()
-	code, _ := totp.GenerateCode(setup.Secret, now.Add(-30*time.Second))
-	if s := c.do("POST", "/api/v1/auth/totp/enable", map[string]string{"code": code}, nil); s != http.StatusNoContent {
-		t.Fatalf("totp aan: %d", s)
-	}
-	if s, code := errOf(c, "POST", "/api/v1/agent-upgrades", all); s != http.StatusConflict || code != "needs_confirmation" {
-		t.Fatalf("ook prod zonder code: %d %s", s, code)
-	}
-	if s, code := errOf(c, "POST", "/api/v1/agent-upgrades", map[string]any{"all": true, "include_prod": true, "totp_code": "000000"}); s != http.StatusBadRequest || code != "invalid_totp" {
-		t.Fatalf("ook prod met foute code: %d %s", s, code)
-	}
-
-	// Eén code voor alles: Web meteen, DB en Mail in de rij.
-	code, _ = totp.GenerateCode(setup.Secret, now)
+	// Geen code meer nodig (fase 30), ook zonder tweestapsverificatie.
 	var started struct {
 		Jobs       []job    `json:"jobs"`
 		Skipped    []string `json:"skipped"`
 		QueuedProd []string `json:"queued_prod"`
 	}
-	if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"all": true, "include_prod": true, "totp_code": code}, &started); s != http.StatusAccepted ||
+	if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"all": true, "include_prod": true}, &started); s != http.StatusAccepted ||
 		len(started.Jobs) != 1 || strings.Join(started.QueuedProd, ",") != "DB,Mail" {
 		t.Fatalf("ook prod: %d %+v", s, started)
 	}
@@ -175,12 +145,8 @@ func TestAgentUpgradesProd(t *testing.T) {
 		t.Fatalf("mail na een fout in db: %+v", jobs.Items[0])
 	}
 
-	// Prod vanzelf: aanzetten vraagt een code; na de fout staat het stil.
-	if s, code := errOf(c, "PUT", "/api/v1/agent-upgrades/prod-auto", map[string]any{"enabled": true}); s != http.StatusConflict || code != "needs_confirmation" {
-		t.Fatalf("prod vanzelf zonder code: %d %s", s, code)
-	}
-	code, _ = totp.GenerateCode(setup.Secret, now.Add(30*time.Second))
-	if s := c.do("PUT", "/api/v1/agent-upgrades/prod-auto", map[string]any{"enabled": true, "totp_code": code}, &v); s != http.StatusOK || !v.ProdAuto {
+	// Prod vanzelf: aanzetten zonder code; na de fout staat het stil.
+	if s := c.do("PUT", "/api/v1/agent-upgrades/prod-auto", map[string]any{"enabled": true}, &v); s != http.StatusOK || !v.ProdAuto {
 		t.Fatalf("prod vanzelf aan: %d %+v", s, v)
 	}
 	if got := v.states(); got != "db01=failed db02=outdated mail01=outdated web01=outdated" {
@@ -200,12 +166,8 @@ func TestAgentUpgradesProd(t *testing.T) {
 	nDB1.rollback = false
 	nDB1.mu.Unlock()
 	c.do("PUT", "/api/v1/clusters/"+lab.ID+"/agent-upgrade-auto", map[string]any{"enabled": true}, nil)
-	code, _ = totp.GenerateCode(setup.Secret, now.Add(60*time.Second))
-	if s, ec := errOf(c, "POST", "/api/v1/agent-upgrades", map[string]any{"cluster_id": db.ID, "totp_code": code}); s != http.StatusAccepted {
-		// Te ver in de toekomst voor de klok: dan met de slug.
-		if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"cluster_id": db.ID, "confirm": "db"}, &started); s != http.StatusAccepted {
-			t.Fatalf("db opnieuw: %d %s", s, ec)
-		}
+	if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"cluster_id": db.ID}, &started); s != http.StatusAccepted {
+		t.Fatalf("db opnieuw: %d", s)
 	}
 	c.do("GET", "/api/v1/jobs?limit=20", nil, &jobs)
 	if j := waitJob(t, c, jobs.Items[0].ID); j.Status != "succeeded" {

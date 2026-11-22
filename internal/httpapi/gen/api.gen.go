@@ -135,6 +135,24 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AppIssueTone.
+const (
+	AppIssueToneAmber AppIssueTone = "amber"
+	AppIssueToneRed   AppIssueTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AppIssueTone enum.
+func (e AppIssueTone) Valid() bool {
+	switch e {
+	case AppIssueToneAmber:
+		return true
+	case AppIssueToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssistantConversationKind.
 const (
 	Analysis AssistantConversationKind = "analysis"
@@ -4137,6 +4155,30 @@ func (e VmAction) Valid() bool {
 	}
 }
 
+// Defines values for ZabbixAgentNodesInputAction.
+const (
+	ZabbixAgentNodesInputActionApply    ZabbixAgentNodesInputAction = "apply"
+	ZabbixAgentNodesInputActionManage   ZabbixAgentNodesInputAction = "manage"
+	ZabbixAgentNodesInputActionRotate   ZabbixAgentNodesInputAction = "rotate"
+	ZabbixAgentNodesInputActionUnmanage ZabbixAgentNodesInputAction = "unmanage"
+)
+
+// Valid indicates whether the value is a known member of the ZabbixAgentNodesInputAction enum.
+func (e ZabbixAgentNodesInputAction) Valid() bool {
+	switch e {
+	case ZabbixAgentNodesInputActionApply:
+		return true
+	case ZabbixAgentNodesInputActionManage:
+		return true
+	case ZabbixAgentNodesInputActionRotate:
+		return true
+	case ZabbixAgentNodesInputActionUnmanage:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditActorType.
 const (
 	AuditActorTypeAgent  AuditActorType = "agent"
@@ -4403,14 +4445,14 @@ type AgentUpgradeInput struct {
 	All       *bool               `json:"all,omitempty"`
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
 
-	// Confirm De slug van het prodcluster
+	// Confirm Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer
 	Confirm *string `json:"confirm,omitempty"`
 
 	// IncludeProd Met all: ook de agents op prod, één prodcluster na het andere
 	IncludeProd *bool                 `json:"include_prod,omitempty"`
 	NodeIds     *[]openapi_types.UUID `json:"node_ids,omitempty"`
 
-	// TotpCode Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik
+	// TotpCode Wordt genegeerd: agents op prod bijwerken vraagt geen code meer
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
@@ -4488,6 +4530,36 @@ type ApiTokenInput struct {
 
 	// TtlDays 0 of weg = verloopt nooit
 	TtlDays *int `json:"ttl_days,omitempty"`
+}
+
+// AppIssue defines model for AppIssue.
+type AppIssue struct {
+	Detail *string      `json:"detail,omitempty"`
+	Title  string       `json:"title"`
+	Tone   AppIssueTone `json:"tone"`
+}
+
+// AppIssueTone defines model for AppIssue.Tone.
+type AppIssueTone string
+
+// AppStorage defines model for AppStorage.
+type AppStorage struct {
+	Issues []AppIssue `json:"issues"`
+	Leader *string    `json:"leader,omitempty"`
+
+	// LogicalBytes Elk volume één keer geteld
+	LogicalBytes int64 `json:"logical_bytes"`
+	Nodes        []struct {
+		Bytes     int64  `json:"bytes"`
+		DiskFree  int64  `json:"disk_free"`
+		DiskTotal int64  `json:"disk_total"`
+		Hostname  string `json:"hostname"`
+		Volumes   int    `json:"volumes"`
+	} `json:"nodes"`
+	Replications       *map[string]int `json:"replications,omitempty"`
+	UnderReplicated    int             `json:"under_replicated"`
+	UnderReplicatedIds *[]int          `json:"under_replicated_ids,omitempty"`
+	VolumeCount        int             `json:"volume_count"`
 }
 
 // AssistantConversation defines model for AssistantConversation.
@@ -5136,6 +5208,20 @@ type Cluster struct {
 	TemplateVersion nullable.Nullable[string] `json:"template_version"`
 	Type            ClusterType               `json:"type"`
 	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// ClusterApp defines model for ClusterApp.
+type ClusterApp struct {
+	App    string          `json:"app"`
+	Issues []AppIssue      `json:"issues"`
+	Nodes  []NodeAppStatus `json:"nodes"`
+	Title  string          `json:"title"`
+}
+
+// ClusterApps defines model for ClusterApps.
+type ClusterApps struct {
+	Apps    []ClusterApp `json:"apps"`
+	Storage *AppStorage  `json:"storage,omitempty"`
 }
 
 // ClusterComponent defines model for ClusterComponent.
@@ -11540,6 +11626,41 @@ type NodeActionInput struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
+// NodeAppStatus defines model for NodeAppStatus.
+type NodeAppStatus struct {
+	App    string `json:"app"`
+	Checks []struct {
+		Detail   *string `json:"detail,omitempty"`
+		Id       string  `json:"id"`
+		Label    string  `json:"label"`
+		Ok       bool    `json:"ok"`
+		Severity *string `json:"severity,omitempty"`
+	} `json:"checks"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Online   bool               `json:"online"`
+
+	// Ref De gekozen versie (branch
+	Ref *string `json:"ref,omitempty"`
+
+	// Role actief, stand-by of voor-overstap
+	Role *string `json:"role,omitempty"`
+
+	// Stale Ouder dan 10 minuten of de agent antwoordt niet
+	Stale     bool      `json:"stale"`
+	Title     *string   `json:"title,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Values    []struct {
+		Bytes *int64 `json:"bytes,omitempty"`
+		Id    string `json:"id"`
+		Label string `json:"label"`
+		Value string `json:"value"`
+	} `json:"values"`
+
+	// Version De gebouwde commit
+	Version *string `json:"version,omitempty"`
+}
+
 // NodeBackups defines model for NodeBackups.
 type NodeBackups struct {
 	Backups []BackupVolume                `json:"backups"`
@@ -13790,6 +13911,118 @@ type VmActionInput struct {
 	Vmstate *bool `json:"vmstate,omitempty"`
 }
 
+// ZabbixAgentNode defines model for ZabbixAgentNode.
+type ZabbixAgentNode struct {
+	// AgentService Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is
+	AgentService       string                                `json:"agent_service"`
+	AppliedAt          nullable.Nullable[time.Time]          `json:"applied_at"`
+	ApplyError         string                                `json:"apply_error"`
+	ApplyFailedAt      nullable.Nullable[time.Time]          `json:"apply_failed_at"`
+	ApplyJobId         nullable.Nullable[openapi_types.UUID] `json:"apply_job_id"`
+	ApplyRunning       bool                                  `json:"apply_running"`
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	Docker             bool                                  `json:"docker"`
+	Enabled            bool                                  `json:"enabled"`
+	Hostname           string                                `json:"hostname"`
+	Ip                 string                                `json:"ip"`
+	Managed            bool                                  `json:"managed"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Pending            bool                                  `json:"pending"`
+	PskCreatedAt       nullable.Nullable[time.Time]          `json:"psk_created_at"`
+	PskIdentity        string                                `json:"psk_identity"`
+	Supported          bool                                  `json:"supported"`
+	ZabbixHostId       string                                `json:"zabbix_host_id"`
+}
+
+// ZabbixAgentNodesInput defines model for ZabbixAgentNodesInput.
+type ZabbixAgentNodesInput struct {
+	Action ZabbixAgentNodesInputAction `json:"action"`
+
+	// All Alle nodes die nog niet toegepast zijn (apply) of alle nodes
+	All     *bool                 `json:"all,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
+// ZabbixAgentNodesInputAction defines model for ZabbixAgentNodesInput.Action.
+type ZabbixAgentNodesInputAction string
+
+// ZabbixAgentNodesResult defines model for ZabbixAgentNodesResult.
+type ZabbixAgentNodesResult struct {
+	Jobs    []openapi_types.UUID `json:"jobs"`
+	Skipped []string             `json:"skipped"`
+}
+
+// ZabbixAgentSettings defines model for ZabbixAgentSettings.
+type ZabbixAgentSettings struct {
+	// ApiUrl Adres van api_jsonrpc.php
+	ApiUrl string `json:"api_url"`
+
+	// AutoApply Elke node met een agent krijgt vanzelf zabbix-agent2
+	AutoApply bool `json:"auto_apply"`
+
+	// AutoProd Ook nodes van prod-clusters
+	AutoProd bool `json:"auto_prod"`
+
+	// Available De server heeft een masterkey om sleutels te bewaren
+	Available bool `json:"available"`
+
+	// DockerTemplate Extra template voor nodes met Docker
+	DockerTemplate string `json:"docker_template"`
+
+	// HostGroup Groep voor hosts die ClusterForge aanmaakt
+	HostGroup    string `json:"host_group"`
+	HostMetadata string `json:"host_metadata"`
+
+	// Proxy Proxy voor nieuwe hosts; leeg is de server
+	Proxy string `json:"proxy"`
+
+	// Server Server= in zabbix_agent2.conf
+	Server string `json:"server"`
+
+	// ServerActive ServerActive= in zabbix_agent2.conf
+	ServerActive string    `json:"server_active"`
+	Templates    []string  `json:"templates"`
+	TokenSet     bool      `json:"token_set"`
+	UpdatedAt    time.Time `json:"updated_at"`
+
+	// Version Versie van de Zabbix-repository
+	Version string `json:"version"`
+}
+
+// ZabbixAgentSettingsInput defines model for ZabbixAgentSettingsInput.
+type ZabbixAgentSettingsInput struct {
+	ApiUrl         string   `json:"api_url"`
+	AutoApply      bool     `json:"auto_apply"`
+	AutoProd       bool     `json:"auto_prod"`
+	DockerTemplate string   `json:"docker_template"`
+	HostGroup      string   `json:"host_group"`
+	HostMetadata   string   `json:"host_metadata"`
+	Proxy          string   `json:"proxy"`
+	Server         string   `json:"server"`
+	ServerActive   string   `json:"server_active"`
+	Templates      []string `json:"templates"`
+
+	// Token Weglaten laat het token staan; leeg haalt het weg
+	Token   *string `json:"token,omitempty"`
+	Version string  `json:"version"`
+}
+
+// ZabbixAgentTestResult defines model for ZabbixAgentTestResult.
+type ZabbixAgentTestResult struct {
+	Message string `json:"message"`
+	Ok      bool   `json:"ok"`
+	Version string `json:"version"`
+}
+
+// ZabbixAgentsOverview defines model for ZabbixAgentsOverview.
+type ZabbixAgentsOverview struct {
+	Nodes    []ZabbixAgentNode   `json:"nodes"`
+	Settings ZabbixAgentSettings `json:"settings"`
+}
+
 // AuditActorType defines model for AuditActorType.
 type AuditActorType string
 
@@ -13898,7 +14131,9 @@ type SetAgentUpgradeAutoJSONBody struct {
 
 // SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
 type SetAgentUpgradeProdAutoJSONBody struct {
-	Enabled  bool    `json:"enabled"`
+	Enabled bool `json:"enabled"`
+
+	// TotpCode Wordt genegeerd
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
@@ -14950,6 +15185,12 @@ type SetEnvUpdatePolicyJSONRequestBody = UpdatePolicyInput
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
 
+// SetZabbixAgentNodesJSONRequestBody defines body for SetZabbixAgentNodes for application/json ContentType.
+type SetZabbixAgentNodesJSONRequestBody = ZabbixAgentNodesInput
+
+// UpdateZabbixAgentSettingsJSONRequestBody defines body for UpdateZabbixAgentSettings for application/json ContentType.
+type UpdateZabbixAgentSettingsJSONRequestBody = ZabbixAgentSettingsInput
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
@@ -15105,6 +15346,9 @@ type ServerInterface interface {
 	// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
 	// (PUT /clusters/{clusterId}/agent-upgrade-auto)
 	SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterApps De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+	// (GET /clusters/{clusterId}/apps)
+	GetClusterApps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
 	// (GET /clusters/{clusterId}/backup-policy)
 	GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -16077,6 +16321,18 @@ type ServerInterface interface {
 	// UpdateVip VIP wijzigen (admin)
 	// (PATCH /vips/{vipId})
 	UpdateVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID)
+	// GetZabbixAgents Zabbix-agents op alle nodes
+	// (GET /zabbix-agents)
+	GetZabbixAgents(w http.ResponseWriter, r *http.Request)
+	// SetZabbixAgentNodes Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+	// (POST /zabbix-agents/nodes)
+	SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request)
+	// UpdateZabbixAgentSettings Zabbix-agent-instellingen bewaren (admin)
+	// (PUT /zabbix-agents/settings)
+	UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request)
+	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
+	// (POST /zabbix-agents/test)
+	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -16386,6 +16642,12 @@ func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clu
 // SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
 // (PUT /clusters/{clusterId}/agent-upgrade-auto)
 func (_ Unimplemented) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterApps De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+// (GET /clusters/{clusterId}/apps)
+func (_ Unimplemented) GetClusterApps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18333,6 +18595,30 @@ func (_ Unimplemented) UpdateVip(w http.ResponseWriter, r *http.Request, vipId o
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetZabbixAgents Zabbix-agents op alle nodes
+// (GET /zabbix-agents)
+func (_ Unimplemented) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetZabbixAgentNodes Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+// (POST /zabbix-agents/nodes)
+func (_ Unimplemented) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateZabbixAgentSettings Zabbix-agent-instellingen bewaren (admin)
+// (PUT /zabbix-agents/settings)
+func (_ Unimplemented) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
+// (POST /zabbix-agents/test)
+func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -19470,6 +19756,32 @@ func (siw *ServerInterfaceWrapper) SetClusterAgentUpgradeAuto(w http.ResponseWri
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetClusterAgentUpgradeAuto(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterApps operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterApps(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterApps(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -28913,6 +29225,62 @@ func (siw *ServerInterfaceWrapper) UpdateVip(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixAgents operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixAgents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZabbixAgentNodes operation middleware
+func (siw *ServerInterfaceWrapper) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZabbixAgentNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateZabbixAgentSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateZabbixAgentSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestZabbixAgentAPI operation middleware
+func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestZabbixAgentAPI(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -29552,6 +29920,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/node-links/{linkId}/ignore", wrapper.IgnoreNodeLink)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/apps", wrapper.GetClusterApps)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)
 	})
 	r.Group(func(r chi.Router) {
@@ -29718,6 +30089,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/soc", wrapper.GetSoc)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix-agents", wrapper.GetZabbixAgents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix-agents/settings", wrapper.UpdateZabbixAgentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix-agents/test", wrapper.TestZabbixAgentAPI)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix-agents/nodes", wrapper.SetZabbixAgentNodes)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)
