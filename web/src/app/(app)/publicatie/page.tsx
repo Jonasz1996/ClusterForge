@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ActionModal } from "@/components/publish/ActionModal";
+import { HostEditor } from "@/components/publish/HostEditor";
+import { ThemeEditor } from "@/components/publish/ThemeEditor";
 import { AKBadge, Empty, StatusBar, ago } from "@/components/publish/bits";
-import { Alert, Badge, Card, Field, Input, PageHeader, Select } from "@/components/ui";
+import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { useMe } from "@/lib/auth";
-import { fullName, usePublishOverview, type PublishService } from "@/lib/publish";
+import { fullName, usePublishOverview, type PublishHost, type PublishService } from "@/lib/publish";
 
 export default function PublishServicesPage() {
   const me = useMe();
@@ -17,6 +19,8 @@ export default function PublishServicesPage() {
   const [all, setAll] = useState(false);
   const [internal, setInternal] = useState(false);
   const [open, setOpen] = useState<PublishService | null>(null);
+  const [edit, setEdit] = useState<PublishHost | null>(null);
+  const [theme, setTheme] = useState(false);
 
   const rows = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -37,6 +41,14 @@ export default function PublishServicesPage() {
       <PageHeader
         title="Diensten publiceren"
         description="Wat de agents op elke node zien draaien (containers en services met hun poort), met het VIP als de dienst op alle nodes van een cluster draait. Eén klik maakt een proxy host in Nginx Proxy Manager onder je hoofddomein, met SSL en zo nodig achter Authentik."
+        actions={
+          admin &&
+          ov?.npm.linked && (
+            <Button variant="secondary" onClick={() => setTheme(true)}>
+              Sjabloon (Advanced en css)
+            </Button>
+          )
+        }
       />
       {q.isError && <Alert>{(q.error as Error).message}</Alert>}
       {ov && (
@@ -117,6 +129,15 @@ export default function PublishServicesPage() {
                                     {p.domain}
                                   </a>
                                   <AKBadge state={p.authentik} />
+                                  {admin && ov.npm.linked && ov.hosts.some((h) => h.id === p.host_id) && (
+                                    <button
+                                      type="button"
+                                      className="text-xs text-brand-700 underline dark:text-sky-300"
+                                      onClick={() => setEdit(ov.hosts.find((h) => h.id === p.host_id) ?? null)}
+                                    >
+                                      bewerken
+                                    </button>
+                                  )}
                                 </li>
                               ))}
                             </ul>
@@ -164,6 +185,8 @@ export default function PublishServicesPage() {
         </>
       )}
       {open && ov && <PublishModal s={open} domain={ov.settings.domain} hasAK={ov.authentik.linked} onClose={() => setOpen(null)} />}
+      {edit && ov && <HostEditor host={edit} ov={ov} onClose={() => setEdit(null)} />}
+      {theme && ov && <ThemeEditor ov={ov} onClose={() => setTheme(false)} />}
     </div>
   );
 }
