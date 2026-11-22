@@ -66,6 +66,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
+	"github.com/Jonasz1996/clusterforge/internal/upkeep"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
@@ -114,6 +115,7 @@ type Server struct {
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	disk         *diskwatch.Service
+	upkeep       *upkeep.Service
 	zabbixAgents *zabbixagent.Service
 	zabbixMon    *zabbixmon.Service
 	soc          *soc.Service
@@ -216,6 +218,8 @@ type Deps struct {
 	CrowdSec *crowdsec.Service
 	// Disk bewaakt de schijfruimte en ruimt veilig op (fase 41).
 	Disk *diskwatch.Service
+	// Upkeep: automatisch onderhoud door de agents (fase 46).
+	Upkeep *upkeep.Service
 	// ZabbixAgents zet zabbix-agent2 met een eigen PSK op de nodes.
 	ZabbixAgents *zabbixagent.Service
 	// ZabbixMon leest de Zabbix-API voor de dashboards (fase 33).
@@ -282,6 +286,7 @@ func New(d Deps) *Server {
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
 		disk:         d.Disk,
+		upkeep:       d.Upkeep,
 		zabbixAgents: d.ZabbixAgents,
 		zabbixMon:    d.ZabbixMon,
 		soc:          d.SOC,
@@ -354,6 +359,11 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Post("/self/check-image", s.selfCheckImage)
 		api.With(s.requireSession).Post("/self/update", s.selfUpdate)
 		api.With(s.requireSession).Post("/self/move", s.selfMove)
+		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
+		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
+		api.With(s.requireSession).Put("/upkeep/scopes/{scope}", s.upkeepSetPolicy)
+		api.With(s.requireSession).Post("/upkeep/scopes/{scope}/start", s.upkeepStart)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},
