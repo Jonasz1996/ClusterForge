@@ -451,6 +451,11 @@ export const navGroups: NavGroup[] = [
         keywords: "apt upgrade versies pakketten",
       },
       {
+        href: "/onderhoud",
+        label: "Onderhoud",
+        keywords: "opruimen schijf logs journal docker prune database optimize vacuum analyze index automatisch",
+      },
+      {
         href: "/commandos",
         label: "Commando's",
         keywords: "shell uitvoeren script",

@@ -138,6 +138,10 @@ export const pageHelp: Record<string, PageHelp> = {
     waarom: "Updates dichten beveiligingslekken. In een cluster doet ClusterForge één server tegelijk, zodat de dienst blijft draaien.",
     termen: ["update"],
   },
+  "/onderhoud": {
+    wat: "Automatisch onderhoud: de agents ruimen logs en caches op en onderhouden de databases, in een venster dat jij kiest.",
+    waarom: "Een volle schijf of trage database legt een dienst stil. In een cluster doet ClusterForge één server tegelijk, de VIP-houder als laatste.",
+  },
   "/commandos": { wat: "Eigen commando's uitvoeren op één of meer servers, met de uitvoer hier. Alleen voor wie weet wat het commando doet." },
   "/gitops": { wat: "GitOps: de instellingen van je clusters staan ook in Git. Een wijziging daar komt hier eerst ter goedkeuring.", termen: ["gitops"] },
   "/soc": {
