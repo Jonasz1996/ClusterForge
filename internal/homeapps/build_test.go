@@ -150,3 +150,34 @@ func TestBuildSkipsInternal(t *testing.T) {
 		t.Errorf("homepage: %+v", hp)
 	}
 }
+
+// Proxy hosts zonder dienst die ClusterForge kent (bv. een NAS of een
+// apparaat zonder agent) worden ook een tegel; bekende namen krijgen het
+// icoon uit de catalogus.
+func TestBuildProxyHosts(t *testing.T) {
+	in := Input{Now: time.Now(), Hosts: []publish.HostView{
+		{ID: 7, Domains: []string{"jellyfin.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.20.5", ForwardPort: 8096, Authentik: publish.AKProtected},
+		{ID: 8, Domains: []string{"nas.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.20.6", ForwardPort: 5000,
+			Problems: []publish.Problem{{Level: "crit", Text: "doel niet bereikbaar"}}},
+		{ID: 9, Domains: []string{"oud.jbogaert.be"}, Enabled: false},
+	}}
+	res := Build(in)
+	by := map[string]App{}
+	for _, a := range res.Apps {
+		by[a.Key] = a
+	}
+	if j := by["jellyfin@npm"]; j.Catalog != "jellyfin" || j.URL != "https://jellyfin.jbogaert.be" || j.Status != StatusOK ||
+		j.InternalURL != "http://192.168.20.5:8096" || j.Authentik != publish.AKProtected {
+		t.Errorf("jellyfin: %+v", j)
+	}
+	if n := by["nas@npm"]; n.Status != StatusWarn || n.Name != "Nas" || n.Group != GroupOther {
+		t.Errorf("nas: %+v", n)
+	}
+	if len(res.Apps) != 2 || len(res.Seen) != 2 {
+		t.Errorf("apps %d, seen %d", len(res.Apps), len(res.Seen))
+	}
+	in.Decisions = map[string]Decision{"npm:8": {Choice: "ignore"}}
+	if res = Build(in); len(res.Apps) != 1 {
+		t.Errorf("genegeerd: %d apps", len(res.Apps))
+	}
+}

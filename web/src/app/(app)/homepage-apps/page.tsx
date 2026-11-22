@@ -33,6 +33,7 @@ const foundBy: Record<string, string> = {
   catalogus: "herkend",
   template: "template",
   npm: "via NPM",
+  "npm-host": "proxy host",
   gekozen: "gekozen",
   weg: "weg?",
 };

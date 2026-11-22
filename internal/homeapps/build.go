@@ -257,13 +257,39 @@ func Build(in Input) Result {
 		g.rows = append(g.rows, r)
 	}
 
+	// Proxy hosts in NPM die naar iets zonder (herkende) agent wijzen: ook
+	// een tegel, genoemd naar het subdomein (plex.example.be → Plex).
+	extra := map[string]App{}
+	for _, h := range in.Hosts {
+		if h.ServiceKey != "" || !h.Enabled || len(h.Domains) == 0 {
+			continue
+		}
+		if in.Decisions["npm:"+strconv.Itoa(h.ID)].Choice == "ignore" {
+			continue
+		}
+		a := hostApp(h)
+		if _, dup := groups[a.Key]; dup {
+			continue
+		}
+		if _, dup := extra[a.Key]; dup {
+			a.Key += "-" + strconv.Itoa(h.ID)
+		}
+		extra[a.Key] = a
+		groups[a.Key] = nil
+		order = append(order, a.Key)
+	}
+
 	known := map[string]Known{}
 	for _, k := range in.Known {
 		known[k.Key] = k
 	}
 	for _, key := range order {
-		g := groups[key]
-		a := buildApp(key, g, nodes, hostsBySvc)
+		var a App
+		if g := groups[key]; g != nil {
+			a = buildApp(key, g, nodes, hostsBySvc)
+		} else {
+			a = extra[key]
+		}
 		if k, ok := known[key]; ok {
 			fs, ls := k.FirstSeen, in.Now
 			a.FirstSeen, a.LastSeen = &fs, &ls
@@ -430,6 +456,48 @@ func buildApp(key string, g *group, nodes map[uuid.UUID]Node, hostsBySvc map[str
 		}
 	}
 	a.Status, a.Reason = appStatus(a.Instances, a.Problems)
+	return a
+}
+
+// hostApp maakt een app van een proxy host zonder dienst erachter die
+// ClusterForge kent: naam en icoon uit de catalogus als het subdomein een
+// bekende app is, anders "Overig".
+func hostApp(h publish.HostView) App {
+	label, _, _ := strings.Cut(h.Domains[0], ".")
+	e, ok := Lookup(strings.ToLower(label))
+	auto := "npm-host"
+	if !ok {
+		slug := publish.SuggestLabel(label)
+		if slug == "" {
+			slug = "host-" + strconv.Itoa(h.ID)
+		}
+		e = Entry{Slug: slug, Name: prettyName(label), Group: GroupOther, Icon: "mdi-web"}
+	}
+	a := App{
+		Key: e.Slug + "@npm", Slug: e.Slug, Name: e.Name, Group: e.Group, Icon: e.Icon, Auto: auto, Stats: "",
+		Domains: append([]string{}, h.Domains...), Ports: []int{}, Instances: []Instance{}, Problems: []string{},
+		Authentik: h.Authentik, URL: "https://" + h.Domains[0],
+	}
+	if ok {
+		a.Catalog = e.Slug
+	}
+	if h.ForwardHost != "" {
+		scheme := h.ForwardScheme
+		if scheme == "" {
+			scheme = "http"
+		}
+		a.InternalURL = scheme + "://" + h.ForwardHost + ":" + strconv.Itoa(h.ForwardPort)
+		a.Ports = []int{h.ForwardPort}
+	}
+	for _, p := range h.Problems {
+		if p.Level == "crit" {
+			a.Problems = append(a.Problems, "NPM: "+p.Text)
+		}
+	}
+	a.Status, a.Reason = StatusOK, "via NPM naar "+h.ForwardHost+" (geen ClusterForge-agent op dat adres)"
+	if len(a.Problems) > 0 {
+		a.Status, a.Reason = StatusWarn, a.Problems[0]
+	}
 	return a
 }
 
