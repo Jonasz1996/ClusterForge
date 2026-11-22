@@ -98,4 +98,4 @@ automatisch blokkeren) en → **Meldingen**. Alles in het logboek
 (`crowdsec.list_*`, `crowdsec.auto_*`, `crowdsec.notify_changed`,
 `crowdsec.console_*`).
 
-Migratie 00129.
+Migratie 00141 (00129 is fase 46).
