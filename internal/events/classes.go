@@ -40,6 +40,7 @@ var classes = map[string]Class{
 	"crowdsec.settings_changed": ClassChange, "crowdsec.node_managed": ClassChange, "crowdsec.node_unmanaged": ClassChange,
 	"crowdsec.node_configured": ClassChange, "crowdsec.applied": ClassChange, "crowdsec.apply_failed": ClassSymptom,
 	"crowdsec.removed": ClassChange, "crowdsec.ban_added": ClassInfo, "crowdsec.ban_removed": ClassInfo, "crowdsec.ban_shared": ClassInfo,
+	"crowdsec.console_key_changed": ClassChange, "crowdsec.console_enrolled": ClassChange, "crowdsec.console_enroll_failed": ClassSymptom,
 	"node.software_updated": ClassChange, "node.software_update_failed": ClassInfo, "node.command_ran": ClassChange,
 	"settings.update_policy": ClassChange, "cluster.update_policy": ClassChange, "cluster.auto_update_skipped": ClassInfo,
 	"cluster.secret_revealed":      ClassInfo,
