@@ -120,6 +120,8 @@ type Overview struct {
 	// Outpost is het adres van de Authentik-outpost voor sjablonen (fase 42b).
 	Outpost  string `json:"outpost,omitempty"`
 	Protocol int    `json:"protocol"`
+	// rawHosts zijn de hosts zoals NPM ze gaf (met de volledige Advanced).
+	rawHosts []NPMHost
 }
 
 // ClusterRef is een cluster om in de instellingen te kiezen.
@@ -285,6 +287,7 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 		ov.Outpost, _ = s.outpostFor(ctx, st)
 	}
 	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now(), ov.Outpost)
+	ov.rawHosts = npm.Hosts
 	ov.Apps = buildApps(npm, ak)
 	if th, err := s.Theme(ctx); err == nil {
 		for i, h := range ov.Hosts {

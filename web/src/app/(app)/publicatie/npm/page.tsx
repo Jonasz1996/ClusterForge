@@ -37,6 +37,7 @@ export default function PublishNPMPage() {
   }, [ov, filter, only]);
   const unmanaged = hosts.filter((h) => !h.managed).map((h) => h.id);
   // Samen toepassen: alleen zekere voorstellen en oude adressen in Advanced; een gok gaat per host.
+  const akHalf = (ov?.hosts ?? []).filter((h) => h.authentik === "half");
   const suggested = (ov?.hosts ?? []).filter((h) => h.suggest?.sure || (h.advanced_fix?.length ?? 0) > 0);
   const typos = (ov?.hosts ?? []).filter((h) => h.typo_domains);
 
@@ -72,6 +73,14 @@ export default function PublishNPMPage() {
                   onClick={() => setOpen({ title: `Nieuw doel voor ${suggested.length} proxy hosts`, action: { action: "retarget_many" } })}
                 >
                   Alle voorstellen toepassen ({suggested.length})
+                </Button>
+              )}
+              {akHalf.length > 0 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setOpen({ title: `Authentik aanvullen voor ${akHalf.length} proxy hosts`, action: { action: "ak_repair" } })}
+                >
+                  Authentik aanvullen ({akHalf.length})
                 </Button>
               )}
               {typos.length > 0 && (

@@ -608,6 +608,34 @@ func TestRealNPM(t *testing.T) {
 	if c := conf(old[0]); !strings.Contains(c, "eigen.css") || strings.Contains(c, "goauthentik") {
 		t.Fatalf("weghalen met sjabloon:\n%s", c)
 	}
+
+	// 12. Authentik aanvullen: forward auth staat in NPM, maar provider,
+	// applicatie en outpost zijn weg. Na een lezing maakt ClusterForge ze
+	// vanzelf opnieuw.
+	alive()
+	run(Action{Action: ActProtect, HostID: old[0]}, store.JobStatusSucceeded)
+	fake.mu.Lock()
+	fake.apps, fake.providers = nil, nil
+	fake.outpost["providers"] = []any{}
+	fake.mu.Unlock()
+	alive()
+	s.Refresh(ctx)
+	deadline = time.Now().Add(90 * time.Second)
+	for {
+		if apps, provs, inOut := fake.counts(); apps == 1 && provs == 1 && inOut == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			apps, provs, inOut := fake.counts()
+			t.Fatalf("niet aangevuld: %d apps, %d providers, %d in outpost", apps, provs, inOut)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	// Tweede lezing binnen akRetry start geen nieuwe taak.
+	s.Refresh(ctx)
+	if apps, provs, _ := fake.counts(); apps != 1 || provs != 1 {
+		t.Fatalf("dubbel aangevuld: %d apps, %d providers", apps, provs)
+	}
 }
 
 func loginNPM(t *testing.T, port, identity, secret string) string {
