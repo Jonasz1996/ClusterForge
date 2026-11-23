@@ -257,7 +257,9 @@ func (n *mpNode) log() string {
 func on(s string) *string { return &s }
 
 // TestMediaPlatformSleutelsKlaar: de controle vóór de sync met wissen laat
-// alleen door als alles klopt; anders kopieert en wist de sync niets.
+// alleen door als alles klopt; anders kopieert en wist de sync niets. Een
+// node die niet stuurt (geen VIP van het platform, of het platform draait er
+// niet) stopt met 3, een fout van de sleutels met 1.
 func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 	tpl, c := mpContext(t, nil)
 	files, _ := npmFiles(t, tpl, c)
@@ -271,23 +273,26 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 		state map[string]*string
 		setup func(t *testing.T)
 		want  string
+		code  int
 		exec  bool // sleutels-check in de container gedraaid
 	}{
-		{"zonder VIP", map[string]*string{"vip": nil}, nil, "heeft het VIP 192.168.10.150 niet", false},
-		{"platform draait niet", map[string]*string{"active-cf-platform": nil}, nil, "het platform draait hier niet", false},
-		{"andere eigenaar", map[string]*string{"uid": on("0\n")}, nil, "niet van uid 10001", false},
-		{"map ontbreekt", nil, func(t *testing.T) { must(t, os.Remove(keys)) }, "is geen gewone map", false},
+		{"zonder VIP", map[string]*string{"vip": nil}, nil,
+			"Niets gekopieerd of gewist: deze node heeft het VIP van het platform (192.168.10.150) niet", 3, false},
+		{"platform draait niet", map[string]*string{"active-cf-platform": nil}, nil,
+			"Niets gekopieerd of gewist: het platform draait hier niet", 3, false},
+		{"andere eigenaar", map[string]*string{"uid": on("0\n")}, nil, "niet van uid 10001", 1, false},
+		{"map ontbreekt", nil, func(t *testing.T) { must(t, os.Remove(keys)) }, "is geen gewone map", 1, false},
 		{"map is een symlink", nil, func(t *testing.T) {
 			must(t, os.Rename(keys, keys+".echt"))
 			must(t, os.Symlink(keys+".echt", keys))
-		}, "is geen gewone map", false},
+		}, "is geen gewone map", 1, false},
 		{"bovenliggende map is een symlink", nil, func(t *testing.T) {
 			parent := filepath.Dir(keys)
 			must(t, os.Rename(parent, parent+".echt"))
 			must(t, os.Symlink(parent+".echt", parent))
-		}, "is geen gewone map", false},
-		{"versie zonder sleutels-check", map[string]*string{"cli-sleutels-check": nil}, nil, "niets gekopieerd of gewist", true},
-		{"sleutel ontbreekt", map[string]*string{"cli-sleutels-check.rc": on("1")}, nil, "niets gekopieerd of gewist", true},
+		}, "is geen gewone map", 1, false},
+		{"versie zonder sleutels-check", map[string]*string{"cli-sleutels-check": nil}, nil, "niets gekopieerd of gewist", 1, true},
+		{"sleutel ontbreekt", map[string]*string{"cli-sleutels-check.rc": on("1")}, nil, "niets gekopieerd of gewist", 1, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			must(t, os.RemoveAll(filepath.Join(n.dir, "cfp")))
@@ -298,8 +303,9 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 				tc.setup(t)
 			}
 			out, err := n.run("sleutels-klaar")
-			if err == nil || !strings.Contains(out, tc.want) {
-				t.Errorf("sleutels-klaar gaf %v:\n%s", err, out)
+			var ee *exec.ExitError
+			if !errors.As(err, &ee) || ee.ExitCode() != tc.code || !strings.Contains(out, tc.want) {
+				t.Errorf("sleutels-klaar gaf %v (code %d verwacht):\n%s", err, tc.code, out)
 			}
 			if got := strings.Contains(n.log(), "app.cli sleutels-check"); got != tc.exec {
 				t.Errorf("sleutels-check gedraaid: %v:\n%s", got, n.log())

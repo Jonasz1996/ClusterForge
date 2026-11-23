@@ -376,9 +376,16 @@ beeld() {
 # (app.cli sleutels-check, vanaf 0.8.2). Zo wist een lege of halve map na een
 # snelle failover nooit de sleutels elders. Een versie zonder sleutels-check
 # faalt hier: dan gebeurt er niets.
+#
+# ClusterForge draait de sync op elke node met een VIP van het cluster, ook op
+# de node met alleen het VIP van de database (de primary van PostgreSQL), en
+# kort na een failover of tijdens een stop draait het platform er niet. Daar
+# stuurt deze node niet: code 3, niet 1. ClusterForge toont ook die run nu
+# nog als mislukt (exitcode 3); 1 is een echte fout van de sleutels.
+stuurt_niet() { echo "Niets gekopieerd of gewist: $*" >&2; exit 3; }
 sleutels_klaar() {
-  has_vip || fail "deze node heeft het VIP $VIP niet; alleen de node met het VIP stuurt de sleutels"
-  systemctl is-active --quiet cf-platform || fail "het platform draait hier niet (cf-platform); de sleutels blijven zoals ze zijn"
+  has_vip || stuurt_niet "deze node heeft het VIP van het platform ($VIP) niet; alleen die node stuurt de sleutels (verwacht op de node met het VIP van de database)"
+  systemctl is-active --quiet cf-platform || stuurt_niet "het platform draait hier niet (cf-platform); de sleutels blijven zoals ze zijn (verwacht tijdens een start, stop of failover)"
   for d in "${SLEUTELS%/*}" "$SLEUTELS"; do
     [ ! -L "$d" ] && [ -d "$d" ] || fail "$d is geen gewone map; de sleutels blijven zoals ze zijn"
   done

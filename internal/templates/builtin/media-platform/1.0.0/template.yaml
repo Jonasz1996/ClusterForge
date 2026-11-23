@@ -342,7 +342,10 @@ roles:
 # (gezichten uit), gaat ook elders weg. Daarom eerst sleutels-klaar: faalt
 # die (geen VIP, platform draait niet, map niet in orde, of sleutels-check
 # van het platform niet in orde of onbekend), dan kopieert en wist de sync
-# niets.
+# niets. ClusterForge draait de sync op elke node met een VIP van het
+# cluster, ook op die met alleen het VIP van de database: daar stopt
+# sleutels-klaar met 3 (deze node stuurt niet) en staat de run voorlopig op
+# mislukt, net als kort na een failover.
 syncs:
   - name: platform-sleutels
     schedule: "* * * * *"
