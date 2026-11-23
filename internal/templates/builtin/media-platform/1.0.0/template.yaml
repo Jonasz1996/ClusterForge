@@ -135,8 +135,9 @@ params:
       Downloaden met qBittorrent en torrentsites via Prowlarr (fase 11, alleen
       een versie met compose.arr.yaml). Ze draaien alleen op de node met het
       VIP. De downloads staan op die node zelf (/var/lib/cf-platform/torrents):
-      na een failover begint een lopende download opnieuw. Poorten 6881 (tcp en
-      udp, torrent) en 9696 (Prowlarr, alleen in het eigen netwerk).
+      na een failover mist qBittorrent de bestanden van een lopende download;
+      de app ziet die als mislukt en zoekt de titel opnieuw. Poorten 6881 (tcp
+      en udp, torrent) en 9696 (Prowlarr, alleen in het eigen netwerk).
     default: false
   - name: secure_cookies
     type: bool

@@ -420,8 +420,9 @@ sleutels_klaar() {
 # staat in DATA_ROOT/arr, op SeaweedFS; de downloads in $ARR_TORRENTS op
 # deze node: torrents schrijven veel kleine stukken door elkaar, en dat is
 # op de FUSE-mount traag. De app ziet die map als /data/import/torrents. Na
-# een failover begint een lopende download opnieuw; wat al geïmporteerd is,
-# staat op SeaweedFS.
+# een failover mist qBittorrent op de nieuwe node de bestanden van een
+# lopende download (fout); de app haalt die dan weg en zoekt de titel
+# opnieuw. Wat al geïmporteerd is, staat op SeaweedFS.
 arr_dirs() {
   [ -L "$ARR_TORRENTS" ] && fail "$ARR_TORRENTS is een symlink"
   mkdir -p "$ARR_TORRENTS" && chown 10001:10001 "$ARR_TORRENTS" && chmod 0750 "$ARR_TORRENTS" || return 1

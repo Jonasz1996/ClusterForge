@@ -520,6 +520,9 @@ func TestMediaPlatformHelp(t *testing.T) {
 	for name, want := range map[string][]string{
 		"platform_ref": {"Versie wijzigen bouwt niet; gebruik het commando Platform bijwerken.", "Nooit install.sh op een clusternode."},
 		"analyse":      {"±4 GB vrij op de schijf", "12 tot 16 GB RAM per node"},
+		// De downloads staan op de oude node: qBittorrent begint niet opnieuw.
+		"arr": {"na een failover mist qBittorrent de bestanden van een lopende download;", "de app ziet die als mislukt en zoekt de titel opnieuw."},
+		"cpu": {"media 3 vCPU", "start media zonder grenzen"},
 	} {
 		for _, w := range want {
 			if !strings.Contains(help[name], w) {
@@ -529,6 +532,9 @@ func TestMediaPlatformHelp(t *testing.T) {
 	}
 	if strings.Contains(help["platform_ref"], "bouwt de nieuwe versie") {
 		t.Errorf("hulptekst van platform_ref: %s", help["platform_ref"])
+	}
+	if strings.Contains(help["arr"], "begint een lopende download opnieuw") {
+		t.Errorf("hulptekst van arr: %s", help["arr"])
 	}
 }
 
