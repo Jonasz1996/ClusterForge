@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -109,7 +111,7 @@ func (s *Service) reloadOutposts(ctx context.Context, step *jobs.Step, st Settin
 	step.Logf("Outposts herladen: Authentik-server herstarten op %d node(s), één voor één, de VIP-node als laatste", len(todo))
 	for _, n := range todo {
 		step.Logf("· %s", n.Hostname)
-		res, err := s.Run.DoWith(ctx, step, &memState{}, n.ID, protocol.RunSpec{Kind: protocol.RunScript, Script: akReloadScript, TimeoutSeconds: 240})
+		res, err := s.Run.DoWith(ctx, step, &memState{}, n.ID, protocol.RunSpec{ID: "cf-akreload-" + uuid.NewString(), Kind: protocol.RunScript, Script: akReloadScript, TimeoutSeconds: 240})
 		if err != nil {
 			return fmt.Errorf("%s: %w", n.Hostname, err)
 		}

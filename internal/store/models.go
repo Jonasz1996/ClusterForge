@@ -1973,6 +1973,12 @@ type Replacement struct {
 	UpdatedAt   time.Time
 }
 
+type ResourcesSetting struct {
+	ID         bool
+	Thresholds []byte
+	UpdatedAt  time.Time
+}
+
 type RiskAcceptance struct {
 	ID          uuid.UUID
 	Check       string

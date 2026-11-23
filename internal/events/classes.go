@@ -55,7 +55,7 @@ var classes = map[string]Class{
 	"crowdsec.console_disconnected": ClassChange, "crowdsec.console_off_changed": ClassChange,
 	"crowdsec.console_key_changed": ClassChange, "crowdsec.console_enrolled": ClassChange, "crowdsec.console_enroll_failed": ClassSymptom,
 	"node.software_updated": ClassChange, "node.software_update_failed": ClassInfo, "node.command_ran": ClassChange,
-	"disk.settings_updated": ClassChange, "disk.cleaned": ClassChange,
+	"disk.settings_updated": ClassChange, "resources.settings_updated": ClassChange, "resources.fix_started": ClassChange, "disk.cleaned": ClassChange,
 	"settings.upkeep_policy": ClassChange, "node.upkeep_done": ClassChange, "node.upkeep_failed": ClassInfo,
 	"settings.update_policy": ClassChange, "cluster.update_policy": ClassChange, "cluster.auto_update_skipped": ClassInfo,
 	"cluster.secret_revealed":      ClassInfo,

@@ -144,6 +144,8 @@ var Known = map[string]Spec{
 	"node.lifecycle_changed":      {CategoryLifecycle, "Lifecycle van node gewijzigd"},
 	"node.software_updated":       {CategoryLifecycle, "Pakketten of Docker op node bijgewerkt"},
 	"disk.settings_updated":       {CategoryLifecycle, "Instellingen van schijfbewaking gewijzigd"},
+	"resources.settings_updated":  {CategoryLifecycle, "Drempels voor resources gewijzigd"},
+	"resources.fix_started":       {CategoryLifecycle, "Voorstel voor resources uitgevoerd"},
 	"disk.cleaned":                {CategoryLifecycle, "Schijf opgeruimd"},
 	"node.software_update_failed": {CategoryLifecycle, "Bijwerken van pakketten of Docker mislukt"},
 	"settings.update_policy":      {CategoryLifecycle, "Beleid voor automatisch bijwerken van omgeving gewijzigd"},

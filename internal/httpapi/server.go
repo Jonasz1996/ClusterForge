@@ -57,6 +57,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/replace"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
+	"github.com/Jonasz1996/clusterforge/internal/resources"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/security"
@@ -126,6 +127,7 @@ type Server struct {
 	logs         *logs.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
+	resources    *resources.Service
 	pbs          *pbs.Service
 	truenas      *truenas.Service
 	aiverslag    *aiverslag.Service
@@ -325,6 +327,14 @@ func New(d Deps) *Server {
 		components:     d.Components,
 		kubeNodes:      d.KubeNodes,
 	}
+	s.resources = resources.NewService(d.Pool, ev)
+	s.resources.Metrics = s.metrics
+	if d.PVEHosts != nil {
+		s.resources.PVE = d.PVEHosts
+	}
+	if d.Docker != nil {
+		s.resources.Docker = d.Docker
+	}
 	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools(), s.healTools())
 	s.lessons = kubelessons.New(s.kube, s.q)
 	return s
@@ -379,6 +389,10 @@ func (s *Server) Handler() http.Handler {
 		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
 		api.With(s.requireSession).Get("/auto-changes", s.autoChanges)
+		api.With(s.requireSession).Get("/resources", s.resourcesList)
+		api.With(s.requireSession).Post("/resources/apply", s.resourcesApply)
+		api.With(s.requireSession).Get("/resources/settings", s.resourcesSettingsGet)
+		api.With(s.requireSession).Put("/resources/settings", s.resourcesSettingsPut)
 		api.With(s.requireSession).Get("/nodes/{nodeId}/pentest", s.pentestGet)
 		api.With(s.requireSession).Put("/nodes/{nodeId}/pentest", s.pentestSet)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
