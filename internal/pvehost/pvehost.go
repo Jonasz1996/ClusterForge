@@ -584,3 +584,33 @@ func int32p(n int) *int32 {
 	v := int32(n)
 	return &v
 }
+
+// FindGuest zoekt de host met een agent waarop een gast van een
+// Proxmox-koppeling staat (fase 48: de oude installatie opruimen).
+func (s *Service) FindGuest(ctx context.Context, connID uuid.UUID, vmid int) (uuid.UUID, string, protocol.PVEGuest, error) {
+	hosts, err := s.ForConnection(ctx, connID)
+	if err != nil {
+		return uuid.Nil, "", protocol.PVEGuest{}, err
+	}
+	var why []string
+	for name, h := range hosts {
+		if r := h.Ready(); r != "" {
+			why = append(why, r)
+			continue
+		}
+		inv, err := s.Inventory(ctx, h.NodeID)
+		if err != nil {
+			why = append(why, h.Hostname+": "+err.Error())
+			continue
+		}
+		for _, g := range inv.Guests {
+			if g.VMID == vmid {
+				return h.NodeID, name, g, nil
+			}
+		}
+	}
+	if len(why) > 0 {
+		return uuid.Nil, "", protocol.PVEGuest{}, fmt.Errorf("gast %d niet gevonden (%s)", vmid, strings.Join(why, "; "))
+	}
+	return uuid.Nil, "", protocol.PVEGuest{}, fmt.Errorf("gast %d staat op geen host met een agent", vmid)
+}

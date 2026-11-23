@@ -59,6 +59,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/security"
+	"github.com/Jonasz1996/clusterforge/internal/replace"
 	"github.com/Jonasz1996/clusterforge/internal/selfhost"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
@@ -112,6 +113,7 @@ type Server struct {
 	upgrades     *agentupgrade.Service
 	agentConf    *agentconf.Service
 	selfHost     *selfhost.Service
+	replace      *replace.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	disk         *diskwatch.Service
@@ -210,6 +212,8 @@ type Deps struct {
 	AgentConf *agentconf.Service
 	// SelfHost: ClusterForge zelf bijwerken en verhuizen (fase 45).
 	SelfHost *selfhost.Service
+	// Replace: losse installatie vervangen en later opruimen (fase 48).
+	Replace *replace.Service
 	// Updates en Commands werken de nodes bij en draaien eigen commando's
 	// (fase 10).
 	Updates  *updates.Service
@@ -282,6 +286,7 @@ func New(d Deps) *Server {
 		upgrades:     d.Upgrades,
 		agentConf:    d.AgentConf,
 		selfHost:     d.SelfHost,
+		replace:      d.Replace,
 		updates:      d.Updates,
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
@@ -359,6 +364,13 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Post("/self/check-image", s.selfCheckImage)
 		api.With(s.requireSession).Post("/self/update", s.selfUpdate)
 		api.With(s.requireSession).Post("/self/move", s.selfMove)
+		// Vervangen en opruimen, voorstellen naar het VIP (fase 48), buiten de OpenAPI.
+		api.With(s.requireSession).Get("/replacements", s.listReplacements)
+		api.With(s.requireSession).Post("/replacements", s.createReplacement)
+		api.With(s.requireSession).Put("/replacements/{id}", s.keepReplacement)
+		api.With(s.requireSession).Post("/replacements/{id}/hosts", s.moveReplacementHosts)
+		api.With(s.requireSession).Post("/replacements/{id}/cleanup", s.cleanupReplacement)
+		api.With(s.requireSession).Get("/vip-advice", s.vipAdvice)
 		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)

@@ -77,6 +77,8 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/security"
+	"github.com/Jonasz1996/clusterforge/internal/noderun"
+	"github.com/Jonasz1996/clusterforge/internal/replace"
 	"github.com/Jonasz1996/clusterforge/internal/selfhost"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
@@ -299,6 +301,10 @@ func serve() error {
 	aivSvc.Version = version
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
+	// Fase 48: een losse installatie vervangen door een cluster en de oude
+	// later opruimen.
+	rpl := replace.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
+	rpl.Pub, rpl.PVE = pub, pvh
 	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
@@ -516,7 +522,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Replace: rpl, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

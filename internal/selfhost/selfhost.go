@@ -1038,6 +1038,17 @@ func (s *Service) doMove(ctx context.Context, j *jobs.Job, p moveParams) error {
 	if rs.VIP.Hostname == "" && !j.Done("Controle: nodes van het cluster en agents", &rs) {
 		return errors.New("stand van de nodes onbekend")
 	}
+	// Fase 48: de oude server is vervangen door het cluster. Vóór de dump,
+	// zodat het record meeverhuist: daaruit volgen de voorstellen voor de
+	// firewall (4222 en 8080 naar het VIP) en NPM, en na 14 dagen de vraag om
+	// de oude server op te ruimen.
+	if _, err := s.pool.Exec(ctx, `INSERT INTO replacements (cluster_id, old_node_id, old_hostname, old_address, vip, reason, job_id)
+		SELECT $1, n.id, n.hostname, n.primary_ip,
+		(SELECT v.address FROM vips v WHERE v.cluster_id = $1 ORDER BY v.created_at LIMIT 1), 'clusterforge', $3
+		FROM nodes n WHERE n.id = $2 AND n.primary_ip IS NOT NULL
+		ON CONFLICT (cluster_id, old_address) WHERE state IN ('actief', 'opruimen') DO NOTHING`, p.Cluster, p.Host, j.ID); err != nil {
+		s.log.Warn("vervanging vastleggen", "err", err)
+	}
 	var ex exportState
 	if err := j.Step(ctx, "Dump van de database op de host", func(ctx context.Context, st *jobs.Step) error {
 		if err := s.runOn(ctx, st, p.Host, "cf-export-"+j.ID.String(), "dump", ExportScript(j.ID), time.Hour); err != nil {
@@ -1094,6 +1105,7 @@ func (s *Service) doMove(ctx context.Context, j *jobs.Job, p moveParams) error {
 	if err := j.Step(ctx, "Oude server stoppen", func(ctx context.Context, st *jobs.Step) error {
 		s.event(ctx, actorOf(j), "clusterforge.moved", map[string]any{"cluster_id": p.Cluster, "vip": vip, "job_id": j.ID})
 		st.Logf("ClusterForge draait nu op %s. Log daar opnieuw in.", server)
+		st.Logf("Nog te doen, als voorstel bij het cluster (Vervangen en het VIP): de firewallregel voor 4222 en 8080 naar %s, en de NPM-host van ClusterForge naar %s:8080.", vip, vip)
 		return s.runOn(ctx, st, p.Host, "cf-stop-"+j.ID.String(), "oude server stoppen", StopScript(), 5*time.Minute)
 	}); err != nil {
 		return err

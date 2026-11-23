@@ -582,6 +582,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 		if err := s.planThemeMany(ctx, st, npm, managed, a, &p); err != nil {
 			return Plan{}, err
 		}
+	case ActMoveAddress:
+		if err := s.planMoveAddress(ctx, st, npm, managed, a, &p); err != nil {
+			return Plan{}, err
+		}
 	case ActRename:
 		if err := s.planRename(ctx, st, npm, managed, taken, a, &p); err != nil {
 			return Plan{}, err
@@ -972,7 +976,7 @@ func (s *Service) runApply(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
-	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair) && len(p.Plan.Hosts) > 1 {
+	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair || p.Action.Action == ActMoveAddress) && len(p.Plan.Hosts) > 1 {
 		return s.runMany(ctx, j, st, node, snapshot, p)
 	}
 	for i := range p.Plan.Hosts {

@@ -321,6 +321,18 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Vervangen installaties (fase 48): na de termijn zonder problemen
+	// voorstellen om de oude op te ruimen.
+	if s.replace != nil {
+		if ns, err := s.replace.Notices(ctx); err == nil {
+			for _, n := range ns {
+				add(n.ID, amber, n.Title, n.Detail, n.Href, n.Count)
+			}
+		} else {
+			s.log.Warn("Vervangen-aandacht", "err", err)
+		}
+	}
+
 	// Schijfbewaking (fase 41): nodes boven de drempels.
 	if s.disk != nil {
 		if full, err := s.disk.Full(ctx); err == nil {
