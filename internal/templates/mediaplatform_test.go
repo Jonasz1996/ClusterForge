@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // mpContext is media-platform op drie nodes, gerenderd voor de tweede, met
@@ -362,7 +364,8 @@ func on(s string) *string { return &s }
 // TestMediaPlatformSleutelsKlaar: de controle vóór de sync met wissen laat
 // alleen door als alles klopt; anders kopieert en wist de sync niets. Een
 // node die niet stuurt (geen VIP van het platform, of het platform draait er
-// niet) stopt met 3, een fout van de sleutels met 1.
+// niet) stopt met protocol.SyncBeforeSkip (3: de agent telt de run als
+// overgeslagen), een fout van de sleutels met 1.
 func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 	tpl, c := mpContext(t, nil)
 	files, _ := npmFiles(t, tpl, c)
@@ -380,9 +383,9 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 		exec  bool // sleutels-check in de container gedraaid
 	}{
 		{"zonder VIP", map[string]*string{"vip": nil}, nil,
-			"Niets gekopieerd of gewist: deze node heeft het VIP van het platform (192.168.10.150) niet", 3, false},
+			"Niets gekopieerd of gewist: deze node heeft het VIP van het platform (192.168.10.150) niet", protocol.SyncBeforeSkip, false},
 		{"platform draait niet", map[string]*string{"active-cf-platform": nil}, nil,
-			"Niets gekopieerd of gewist: het platform draait hier niet", 3, false},
+			"Niets gekopieerd of gewist: het platform draait hier niet", protocol.SyncBeforeSkip, false},
 		{"andere eigenaar", map[string]*string{"uid": on("0\n")}, nil, "niet van uid 10001", 1, false},
 		{"map ontbreekt", nil, func(t *testing.T) { must(t, os.Remove(keys)) }, "is geen gewone map", 1, false},
 		{"map is een symlink", nil, func(t *testing.T) {

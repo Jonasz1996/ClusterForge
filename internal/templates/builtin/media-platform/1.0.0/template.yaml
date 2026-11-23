@@ -348,8 +348,9 @@ roles:
 # van het platform niet in orde of onbekend), dan kopieert en wist de sync
 # niets. ClusterForge draait de sync op elke node met een VIP van het
 # cluster, ook op die met alleen het VIP van de database: daar stopt
-# sleutels-klaar met 3 (deze node stuurt niet) en staat de run voorlopig op
-# mislukt, net als kort na een failover.
+# sleutels-klaar met 3 (deze node stuurt niet, SyncBeforeSkip) en telt
+# ClusterForge de run als overgeslagen, niet als mislukt; net zo kort na een
+# failover.
 syncs:
   - name: platform-sleutels
     schedule: "* * * * *"

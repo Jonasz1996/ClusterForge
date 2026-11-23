@@ -404,8 +404,9 @@ beeld() {
 # ClusterForge draait de sync op elke node met een VIP van het cluster, ook op
 # de node met alleen het VIP van de database (de primary van PostgreSQL), en
 # kort na een failover of tijdens een stop draait het platform er niet. Daar
-# stuurt deze node niet: code 3, niet 1. ClusterForge toont ook die run nu
-# nog als mislukt (exitcode 3); 1 is een echte fout van de sleutels.
+# stuurt deze node niet: code 3 (SyncBeforeSkip van ClusterForge), niet 1.
+# ClusterForge telt die run als overgeslagen: niets gekopieerd of gewist, en
+# geen fout. 1 is een echte fout van de sleutels.
 stuurt_niet() { echo "Niets gekopieerd of gewist: $*" >&2; exit 3; }
 sleutels_klaar() {
   has_vip || stuurt_niet "deze node heeft het VIP van het platform ($VIP) niet; alleen die node stuurt de sleutels (verwacht op de node met het VIP van de database)"
