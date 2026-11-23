@@ -3,6 +3,7 @@ package templates
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,7 +73,8 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"REPLICATIE='001'", "db_backup\n    systemctl restart cf-platform", "\"app\":\"media-platform\"", "--format '{{.Names}} {{.Status}}'",
 			"sleutels-klaar) sleutels_klaar ;;", "python -m app.cli sleutels-check </dev/null",
 			"docker info --format '{{.MemoryLimit}} {{.CPUCfsQuota}}'"},
-		"/etc/systemd/system/cf-platform.service":       {"ConditionPathExists=/srv/platform-data/.cf-platform-active"},
+		"/etc/systemd/system/cf-platform.service": {"ConditionPathExists=/srv/platform-data/.cf-platform-active", "\nBindsTo=keepalived.service\n",
+			"\nAfter=docker.service cf-platform-mount.service keepalived.service\n", "\nSuccessExitStatus=3\n"},
 		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-replication=001"},
 		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
 	} {
@@ -427,6 +429,44 @@ func TestMediaPlatformCompose(t *testing.T) {
 	}
 	if got, want := n.composeFiles(), base+" compose.office-limits.yaml compose.media-limits.yaml platform-cluster.yaml"; got != want {
 		t.Errorf("analyse uit:\n got %s\nwant %s", got, want)
+	}
+}
+
+// TestMediaPlatformUp: up start het platform alleen op de node met het VIP;
+// zonder stopt het met 3, wat cf-platform.service als gewoon gestopt ziet.
+func TestMediaPlatformUp(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	hash := filepath.Join(n.dir, "hash")
+
+	n.set(map[string]*string{"mounted": on("")})
+	out, err := n.run("up")
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 3 || !strings.Contains(out, "heeft het VIP 192.168.10.150 niet") {
+		t.Fatalf("up zonder VIP: %v\n%s", err, out)
+	}
+	if strings.Contains(n.log(), "docker") {
+		t.Errorf("up zonder VIP raakte docker: %s", n.log())
+	}
+	if _, err := os.Stat(hash); err == nil {
+		t.Error("up zonder VIP schreef de vingerafdruk")
+	}
+
+	n.set(map[string]*string{"vip": on(""), "mounted": nil})
+	if out, err := n.run("up"); !errors.As(err, &ee) || ee.ExitCode() != 1 || !strings.Contains(out, "is niet gemount") {
+		t.Fatalf("up zonder mount: %v\n%s", err, out)
+	}
+
+	n.set(map[string]*string{"mounted": on("")})
+	if out, err := n.run("up"); err != nil {
+		t.Fatalf("up: %v\n%s", err, out)
+	}
+	if l := n.log(); !strings.Contains(l, " up --no-build --remove-orphans\n") {
+		t.Errorf("docker: %s", l)
+	}
+	if _, err := os.Stat(hash); err != nil {
+		t.Errorf("geen vingerafdruk: %v", err)
 	}
 }
 

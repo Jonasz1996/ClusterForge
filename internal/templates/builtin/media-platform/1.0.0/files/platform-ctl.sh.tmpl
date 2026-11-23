@@ -1,7 +1,8 @@
 #!/bin/sh
 # Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
 #
-#   platform-ctl.sh up | down        het platform starten of stoppen (cf-platform)
+#   platform-ctl.sh up | down        het platform starten (alleen met het VIP) of
+#                                    stoppen (cf-platform)
 #   platform-ctl.sh check            mag deze node het VIP hebben? (keepalived)
 #   platform-ctl.sh master|backup    keepalived: deze node kreeg of verloor het VIP
 #   platform-ctl.sh unchanged        draait het hier met de huidige code en instellingen?
@@ -496,6 +497,11 @@ status() {
 
 case "${1:-}" in
   up)
+    # Alleen de node met het VIP draait het platform. Ook als systemd het
+    # elders start (een herstart van Docker of keepalived): dan niet starten.
+    # Code 3 telt in cf-platform.service als gewoon gestopt (SuccessExitStatus),
+    # zodat de unit niet op failed komt en deze node het VIP later nog kan nemen.
+    has_vip || { echo "Deze node heeft het VIP $VIP niet: het platform start hier niet." >&2; exit 3; }
     mountpoint -q "$DATA" || { echo "$DATA is niet gemount" >&2; exit 1; }
     if analyse_on; then analyse_dirs || exit 1; fi
     # Plaatsnamen: niet fataal; zonder bronnen werkt de rest gewoon.
