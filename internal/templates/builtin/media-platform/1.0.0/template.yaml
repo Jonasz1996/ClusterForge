@@ -310,13 +310,18 @@ roles:
 
 # De sleutels per eigenaar van gezichten (buiten de gedeelde data, zoals op
 # de single) van de VIP-node naar de andere nodes, en de back-ups van de
-# database.
+# database. De sleutels met wissen: een sleutel die op de VIP-node weg is
+# (gezichten uit), gaat ook elders weg. Daarom eerst sleutels-klaar: faalt
+# die (geen VIP, platform draait niet, map niet in orde, of sleutels-check
+# van het platform niet in orde of onbekend), dan kopieert en wist de sync
+# niets.
 syncs:
   - name: platform-sleutels
     schedule: "* * * * *"
+    before: /usr/local/lib/clusterforge/platform-ctl.sh sleutels-klaar
     source: /var/lib/cf-platform/sleutels/
     target: /var/lib/cf-platform/sleutels/
-    delete: false
+    delete: true
     alert: true
     timeout_seconds: 300
   - name: platform-backups

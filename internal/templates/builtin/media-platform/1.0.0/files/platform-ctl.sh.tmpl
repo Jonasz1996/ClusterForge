@@ -15,6 +15,8 @@
 #   platform-ctl.sh geo [--check]    de bronnen van de plaatsnamen (gedeelde data)
 #   platform-ctl.sh replicatie [--check]
 #                                    bestaande volumes naar de replicatie van ClusterForge
+#   platform-ctl.sh sleutels-klaar   mag de sync de sleutels van gezichten van hier
+#                                    kopiëren en elders wissen? (voor de sync)
 #   platform-ctl.sh compose …        docker compose met de bestanden van het cluster
 #   platform-ctl.sh overstap proef|echt [datamap]
 #                                    van de single-node op deze machine naar het cluster
@@ -316,6 +318,27 @@ beeld() {
   fi
 }
 
+# --- sleutels van gezichten -------------------------------------------------
+# De sync platform-sleutels van ClusterForge zet de sleutels elke minuut van
+# de node met het VIP op de andere nodes, en wist daar wat hier niet (meer)
+# staat. Eerst deze controle (before van de sync); faalt ze, dan kopieert en
+# wist de sync niets. Alleen de node met het VIP, waar het platform draait,
+# met een echte sleutelmap (geen symlink) van uid 10001, en pas als het
+# platform zelf zegt dat elke sleutel die nodig is er staat en klopt
+# (app.cli sleutels-check, vanaf 0.8.2). Zo wist een lege of halve map na een
+# snelle failover nooit de sleutels elders. Een versie zonder sleutels-check
+# faalt hier: dan gebeurt er niets.
+sleutels_klaar() {
+  has_vip || fail "deze node heeft het VIP $VIP niet; alleen de node met het VIP stuurt de sleutels"
+  systemctl is-active --quiet cf-platform || fail "het platform draait hier niet (cf-platform); de sleutels blijven zoals ze zijn"
+  for d in "${SLEUTELS%/*}" "$SLEUTELS"; do
+    [ ! -L "$d" ] && [ -d "$d" ] || fail "$d is geen gewone map; de sleutels blijven zoals ze zijn"
+  done
+  [ "$(stat -c %u -- "$SLEUTELS")" = 10001 ] || fail "$SLEUTELS is niet van uid 10001; de sleutels blijven zoals ze zijn"
+  compose exec -T platform python -m app.cli sleutels-check </dev/null ||
+    fail "sleutels-check van het platform is niet in orde (of deze versie kent het niet); niets gekopieerd of gewist"
+}
+
 # --- replicatie van SeaweedFS -----------------------------------------------
 # Verandert de replicatie in ClusterForge (Wijzigen, Replicatie), dan zet de
 # leider van de masters de bestaande volumes om en maakt hij de ontbrekende
@@ -487,13 +510,14 @@ case "${1:-}" in
   geo) shift; geo "$@" ;;
   beeld) beeld ;;
   replicatie) shift; replicatie "$@" ;;
+  sleutels-klaar) sleutels_klaar ;;
   compose) shift; compose "$@" ;;
   overstap)
     shift
     overstap "$@"
     ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|compose|overstap" >&2
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|sleutels-klaar|compose|overstap" >&2
     exit 2
     ;;
 esac
