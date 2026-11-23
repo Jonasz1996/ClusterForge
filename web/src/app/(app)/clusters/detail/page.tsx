@@ -24,6 +24,7 @@ import { ClusterDriftCard } from "@/components/drift/Drift";
 import { FailoverBanner, FailoverCard } from "@/components/failover/Failover";
 import { GitCard } from "@/components/gitops/GitCard";
 import { JobList } from "@/components/jobs/JobList";
+import { MailRelayCard } from "@/components/mailrelay/MailRelayCard";
 import {
   AgentBadge,
   Empty,
@@ -205,6 +206,11 @@ function ClusterDetailInner() {
             <Tile>
               <ClusterDatabaseCard c={cluster.data} isAdmin={isAdmin} />
             </Tile>
+            {cluster.data.template_name === "postfix-relay" && (
+              <Tile wide>
+                <MailRelayCard clusterId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
             {cluster.data.template_name?.startsWith("eigen-") && (
               <Tile>
                 <ConnectionCard clusterId={id} isAdmin={isAdmin} />

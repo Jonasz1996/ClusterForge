@@ -146,6 +146,7 @@ var Templates = map[string][]portSpec{
 	"keepalived-nginx":    lbl("web", tcp(ClassAny, "80", "443")),
 	"nginx-proxy-manager": slices.Concat(lbl("web", tcp(ClassAny, "80", "443")), lbl("NPM-beheer", tcp(ClassAdmin, "81"))),
 	"home-assistant":      lbl("Home Assistant", tcp(ClassLAN, "8123")),
+	"postfix-relay":       lbl("SMTP (relay)", tcp(ClassLAN, "25")),
 	"rustdesk": slices.Concat(lbl("RustDesk", tcp(ClassAny, "21115", "21116", "21117")), lbl("RustDesk", udp(ClassAny, "21116")),
 		lbl("websocket (webclient)", tcp(ClassLAN, "21118", "21119")), lbl("RustDesk-API", tcp(ClassLAN, "21114")), lbl("SSH (syncs)", tcp(ClassCluster, "22"))),
 	"vaultx": slices.Concat(lbl("etcd", tcp(ClassCluster, "2379", "2380")), lbl("Patroni", tcp(ClassCluster, "8008")),

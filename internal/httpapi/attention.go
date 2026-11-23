@@ -411,6 +411,22 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		add("resources-warn", amber, plural(len(warn), "voorstel voor resources", "voorstellen voor resources")+" (swap, geheugen, load, containers)", names(warn), "/onderhoud/resources", len(warn))
 	}
 
+	if s.mailrelay != nil {
+		var crit, warn []string
+		critHref, warnHref := "/clusters", "/clusters"
+		for _, n := range s.mailrelay.Notices() {
+			if n.Level == "crit" {
+				crit = append(crit, n.Text)
+				critHref = n.Href
+			} else {
+				warn = append(warn, n.Text)
+				warnHref = n.Href
+			}
+		}
+		add("mailrelay-crit", red, plural(len(crit), "probleem met de Postfix-relay", "problemen met de Postfix-relay"), names(crit), critHref, len(crit))
+		add("mailrelay-queue", amber, plural(len(warn), "melding over de Postfix-wachtrij", "meldingen over de Postfix-wachtrij"), names(warn), warnHref, len(warn))
+	}
+
 	if s.needs2FA(ctx, p) {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}
