@@ -323,6 +323,12 @@ func otherApp(before *protocol.WebCheckResult, after protocol.WebCheckResult, pr
 	if before.Status < 400 && after.Status >= 400 && !(protected && (after.Status == 401 || after.Status == 403)) {
 		return fmt.Sprintf("vooraf HTTP %d, nu HTTP %d", before.Status, after.Status)
 	}
+	// Een doorverwijzing (naar een aanmelding zoals de Authentik-outpost)
+	// of een foutpagina heeft een eigen titel; alleen twee echte pagina's
+	// vergelijken.
+	if after.Status < 200 || after.Status >= 300 || before.Status < 200 || before.Status >= 300 {
+		return ""
+	}
 	bt, at := normTitle(before.Title), normTitle(after.Title)
 	if bt == "" || at == "" || bt == at || strings.Contains(bt, at) || strings.Contains(at, bt) {
 		return ""

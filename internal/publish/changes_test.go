@@ -24,6 +24,7 @@ func TestOtherApp(t *testing.T) {
 		{"vooraf geen antwoord", &protocol.WebCheckResult{Error: "refused"}, protocol.WebCheckResult{Status: 200, Title: "x"}, false, false},
 		{"nu 404", ok(200, "Grafana"), protocol.WebCheckResult{Status: 404}, false, true},
 		{"achter Authentik", ok(200, "Grafana"), protocol.WebCheckResult{Status: 302}, true, false},
+		{"doorverwijzing met titel", ok(200, "Homepage"), protocol.WebCheckResult{Status: 302, Title: "302 Found"}, true, false},
 		{"401 beschermd", ok(200, "Grafana"), protocol.WebCheckResult{Status: 401}, true, false},
 		{"titel deels gelijk", ok(200, "Grafana"), protocol.WebCheckResult{Status: 200, Title: "Login - Grafana"}, false, false},
 		{"oude agent zonder titel", ok(200, ""), protocol.WebCheckResult{Status: 200, Title: "Web Check"}, false, false},
