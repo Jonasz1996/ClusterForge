@@ -13391,7 +13391,7 @@ components:
       type: object
       required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present, app]
       properties:
-        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job] }
+        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job, unit] }
         id: { type: string, format: uuid }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }

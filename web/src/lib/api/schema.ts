@@ -12800,7 +12800,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job";
+            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job" | "unit";
             /** Format: uuid */
             id: string;
             name: string;

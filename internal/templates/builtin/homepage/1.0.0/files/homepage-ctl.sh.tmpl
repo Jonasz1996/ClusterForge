@@ -418,6 +418,67 @@ timescaledb() {
   return 0
 }
 
+# wacht (ExecCondition, testlijst 2, 2.8): vóór de overname start de api
+# niet. Zo draait systemd geen herstartlus van tienduizenden pogingen: de unit
+# wordt overgeslagen (geen fout, geen herstart) en $WACHT zegt waarom. check
+# start hem vanzelf zodra de overname gebeurd is. Database onbereikbaar is
+# geen wachten op een overname: dan probeert voorstart het gewoon opnieuw.
+WACHT=$STATE/wacht-op-overname
+waiting() {
+  if has_oud && oud_enabled; then
+    echo "de oude homepage draait nog op deze node"
+    return 0
+  fi
+  meta=$(db_meta 2>/dev/null) || return 1
+  if [ -z "$(metafield "$meta" ready)" ]; then
+    echo "de homepage is nog niet overgenomen (homepage-ctl.sh overnemen)"
+    return 0
+  fi
+  return 1
+}
+wacht() {
+  if why=$(waiting); then
+    mkdir -p "$STATE" 2>/dev/null
+    if [ ! -f "$WACHT" ]; then
+      logger -t cf-homepage "wacht op overname: $why; $API start daarna vanzelf" 2>/dev/null
+    fi
+    echo "$why" > "$WACHT"
+    echo "wacht op overname: $why" >&2
+    exit 1
+  fi
+  rm -f "$WACHT"
+  exit 0
+}
+# na_overname: een overgeslagen api starten zodra er niets meer te wachten is.
+na_overname() {
+  [ -f "$WACHT" ] || return 0
+  # Niet bij elke check de database vragen: hoogstens elke 30 s.
+  [ -n "$(find "$WACHT" -mmin -0.5 2>/dev/null)" ] && return 0
+  if waiting >/dev/null; then
+    touch "$WACHT"
+    return 0
+  fi
+  rm -f "$WACHT"
+  sysctl_ start --no-block "$API"
+}
+
+# rechten (testlijst 2, 2.9): na een overname stond $ETC op root:root en kon
+# de worker (gebruiker homepage) secret.key niet lezen. De map en de
+# bestanden die de api en de worker lezen, horen bij de groep homepage; en
+# dat wordt echt nagekeken als die gebruiker.
+rechten() {
+  id homepage > /dev/null 2>&1 || return 0
+  chgrp homepage "$ETC" && chmod 0750 "$ETC" || fail "rechten van $ETC"
+  for f in secret.key setup-token homepage.env nginx versie; do
+    [ -e "$ETC/$f" ] && { chgrp homepage "$ETC/$f" && chmod g+r "$ETC/$f" || fail "rechten van $ETC/$f"; }
+  done
+  if [ -e "$ETC/secret.key" ] && command -v runuser > /dev/null 2>&1; then
+    runuser -u homepage -- test -r "$ETC/secret.key" ||
+      fail "de gebruiker homepage kan $ETC/secret.key niet lezen ($(stat -c '%U:%G %a' "$ETC" "$ETC/secret.key" 2>/dev/null | tr '\n' ' '))"
+  fi
+  return 0
+}
+
 voorstart() {
   [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
   [ -x "$VENV/bin/python" ] || fail "de homepage is nog niet gebouwd ($VENV)"
@@ -446,6 +507,7 @@ voorstart() {
   if nginx_sync; then
     nginx -t > /dev/null 2>&1 && sysctl_ reload nginx > /dev/null 2>&1
   fi
+  rechten
   fingerprint > "$HASH"
   # De syslog-ontvanger start na de overname mee (ExecCondition: syslog-mag).
   sysctl_ is-active --quiet "$SYSLOG" || sysctl_ start --no-block "$SYSLOG" > /dev/null 2>&1
@@ -960,6 +1022,7 @@ status() {
   echo "node:        $ME (index $INDEX)"
   if has_ip "$VIP"; then echo "VIP:         $VIP staat hier"; else echo "VIP:         $VIP staat elders"; fi
   if has_ip "$DB_VIP"; then echo "db-VIP:      $DB_VIP staat hier (primary)"; else echo "db-VIP:      $DB_VIP staat elders"; fi
+  [ -f "$WACHT" ] && echo "wacht:       op overname: $(cat "$WACHT")"
   echo "api:         $(sysctl_ is-active "$API" 2>/dev/null)"
   echo "syslog:      $(sysctl_ is-active "$SYSLOG" 2>/dev/null)"
   echo "worker:      $(sysctl_ is-active "$WORKER" 2>/dev/null)"
@@ -986,7 +1049,9 @@ case "${1:-}" in
   voorstart) voorstart ;;
   migreren) migreren ;;
   worker) worker ;;
+  wacht) wacht ;;
   check)
+    na_overname
     sysctl_ is-active --quiet nginx || exit 1
     api_up
     ;;

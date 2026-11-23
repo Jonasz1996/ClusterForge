@@ -32,6 +32,8 @@ const (
 	SubjectCron = "cron"
 	// SubjectCronJob is een beheerde cronjob die mislukt.
 	SubjectCronJob = "cron_job"
+	// SubjectUnit is een systemd-unit in een herstartlus (testlijst 2, 2.8).
+	SubjectUnit = "unit"
 )
 
 // Rules zijn de tijden van de detector.

@@ -13,6 +13,9 @@ StartLimitIntervalSec=0
 User=homepage
 Group=homepage
 WorkingDirectory=/opt/homepage/backend
+# Vóór de overname wordt de api overgeslagen in plaats van elke 15 s te
+# falen (geen herstartlus); de check van keepalived start hem daarna.
+ExecCondition=+/usr/local/lib/clusterforge/homepage-ctl.sh wacht
 # Als root: markering en sleutel nakijken, de configuratie en nginx schrijven.
 ExecStartPre=+/usr/local/lib/clusterforge/homepage-ctl.sh voorstart
 EnvironmentFile=-/etc/cf-homepage/homepage.env

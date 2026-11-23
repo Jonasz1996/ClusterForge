@@ -2334,6 +2334,7 @@ const (
 	IncidentSubjectTypeNode    IncidentSubjectType = "node"
 	IncidentSubjectTypeService IncidentSubjectType = "service"
 	IncidentSubjectTypeTestRun IncidentSubjectType = "test_run"
+	IncidentSubjectTypeUnit    IncidentSubjectType = "unit"
 )
 
 // Valid indicates whether the value is a known member of the IncidentSubjectType enum.
@@ -2352,6 +2353,8 @@ func (e IncidentSubjectType) Valid() bool {
 	case IncidentSubjectTypeService:
 		return true
 	case IncidentSubjectTypeTestRun:
+		return true
+	case IncidentSubjectTypeUnit:
 		return true
 	default:
 		return false
