@@ -361,6 +361,7 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Post("/aiverslag/{node}/install", s.aivInstall)
 		// ClusterForge zelf (fase 45), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/self", s.selfInfo)
+		api.With(s.requireSession).Get("/self/metrics-import", s.selfMetricsImport)
 		api.With(s.requireSession).Post("/self/check-image", s.selfCheckImage)
 		api.With(s.requireSession).Post("/self/update", s.selfUpdate)
 		api.With(s.requireSession).Post("/self/move", s.selfMove)

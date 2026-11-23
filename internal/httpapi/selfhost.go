@@ -148,3 +148,18 @@ func (s *Server) selfExport(w http.ResponseWriter, r *http.Request) {
 	}
 	s.selfHost.ServeExport(w, r, chi.URLParam(r, "token"), chi.URLParam(r, "what"))
 }
+
+// selfMetricsImport zegt per node hoe het inladen van de metrics van de
+// oude server staat, na een verhuizing (fase 48, 4.5).
+func (s *Server) selfMetricsImport(w http.ResponseWriter, r *http.Request) {
+	if s.selfHost == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"nodes": []any{}})
+		return
+	}
+	nodes, err := s.selfHost.MetricsImport(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+}
