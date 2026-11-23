@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // mpContext is media-platform op drie nodes, gerenderd voor de tweede, met
@@ -149,9 +152,14 @@ func TestMediaPlatformSyncs(t *testing.T) {
 // active-<unit> (systemctl is-active), cli-<commando> (wat app.cli
 // <commando> in de container afdrukt; zonder bestand kent de versie het
 // commando niet) met cli-<commando>.rc, uid (stat -c %u van elke map),
-// docker-info, nproc, services (compose config --services), healthy (/health),
-// vol-status en leader (de master van SeaweedFS), arr-running. Elk
-// nep-commando schrijft zijn argumenten in log.
+// docker-info, nproc, services (compose config --services), healthy (/health,
+// pas als compose up --no-build van de app liep: app-up), vol-status en leader
+// (de master van SeaweedFS), arr-running. Een paar laten een stap wachten of
+// iets doen: app-blocks (compose up van de app loopt tot app-stop), app-crash
+// (compose up van de app stopt meteen met 1), koppel-blocks (arr-koppel
+// wacht op koppel-go), arrup-blocks (up -d van qBittorrent en Prowlarr wacht
+// op arrup-go), health-drops-vip en koppel-drops-vip (die stap neemt het VIP
+// weg). Elk nep-commando schrijft zijn argumenten in log.
 type mpNode struct {
 	t           *testing.T
 	dir, script string
@@ -166,6 +174,7 @@ func newMPNode(t *testing.T, files map[string]string) *mpNode {
 		"/opt/cf-platform/src", dir+"/src",
 		"/opt/cf-platform/modellen", dir+"/modellen",
 		"/run/cf-platform.hash", dir+"/hash",
+		"/run/cf-platform-arr.", dir+"/run-arr.",
 		"/var/backups/cf-platform", dir+"/backups",
 		"/var/lib/clusterforge", dir+"/varlib",
 		"/var/lib/cf-platform", dir+"/cfp",
@@ -185,6 +194,10 @@ func newMPNode(t *testing.T, files map[string]string) *mpNode {
 	if err != nil {
 		t.Skip("stat staat niet op deze machine")
 	}
+	realSleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep staat niet op deze machine")
+	}
 	stubs := map[string]string{
 		"ip":         `[ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.168.10.150/24 scope global secondary eth0"; exit 0`,
 		"mountpoint": `[ -f "$CF_TEST_DIR/mounted" ]`,
@@ -193,12 +206,14 @@ echo "systemctl $*" >> "$CF_TEST_DIR/log"`,
 		"systemd-run": `echo "systemd-run $*" >> "$CF_TEST_DIR/log"`,
 		"stat": `if [ "$1 $2" = "-c %u" ] && [ -f "$CF_TEST_DIR/uid" ]; then cat "$CF_TEST_DIR/uid"; exit 0; fi
 exec ` + realStat + ` "$@"`,
-		"chown":   `echo "chown $*" >> "$CF_TEST_DIR/log"`,
-		"setpriv": `while case "$1" in --*) true;; *) false;; esac; do shift; done; exec "$@"`,
-		"sleep":   `exit 0`,
-		"nproc":   `cat "$CF_TEST_DIR/nproc" 2>/dev/null || echo 8`,
+		"chown": `echo "chown $*" >> "$CF_TEST_DIR/log"`,
+		"setpriv": `echo "setpriv $*" >> "$CF_TEST_DIR/log"
+while case "$1" in --*) true;; *) false;; esac; do shift; done; exec "$@"`,
+		"sleep": `exit 0`,
+		"nproc": `cat "$CF_TEST_DIR/nproc" 2>/dev/null || echo 8`,
 		"curl": `case "$*" in
-*/health*) [ -f "$CF_TEST_DIR/healthy" ];;
+*/health*) [ -f "$CF_TEST_DIR/healthy" ] && [ -f "$CF_TEST_DIR/app-up" ] || exit 1
+  [ -f "$CF_TEST_DIR/health-drops-vip" ] && rm -f "$CF_TEST_DIR/vip"; exit 0;;
 */vol/status*) cat "$CF_TEST_DIR/vol-status";;
 */cluster/status*) [ -f "$CF_TEST_DIR/leader" ] && echo '{"IsLeader":true}';;
 *) exit 1;;
@@ -207,6 +222,7 @@ esac`,
 		"pg_dump": `echo "pg_dump $* PGPASSWORD=$PGPASSWORD" >> "$CF_TEST_DIR/log"
 while [ $# -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done`,
 		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
+w() { i=0; while [ ! -f "$CF_TEST_DIR/$1" ] && [ $i -lt 400 ]; do ` + realSleep + ` 0.025; i=$((i + 1)); done; }
 case "$1" in
 info) cat "$CF_TEST_DIR/docker-info" 2>/dev/null;;
 ps) [ -f "$CF_TEST_DIR/arr-running" ] || exit 0
@@ -215,8 +231,17 @@ compose) case "$*" in
   *" config --services"*) cat "$CF_TEST_DIR/services";;
   *" exec -T platform python -m app.cli "*)
     sub=${*##*app.cli }; sub=${sub%% *}
+    if [ "$sub" = arr-koppel ]; then
+      [ -f "$CF_TEST_DIR/koppel-drops-vip" ] && rm -f "$CF_TEST_DIR/vip"
+      [ -f "$CF_TEST_DIR/koppel-blocks" ] && w koppel-go
+    fi
     [ -f "$CF_TEST_DIR/cli-$sub" ] || { echo "app.cli: invalid choice: '$sub'" >&2; exit 2; }
     cat "$CF_TEST_DIR/cli-$sub"; exit "$(cat "$CF_TEST_DIR/cli-$sub.rc" 2>/dev/null || echo 0)";;
+  *" up --no-build "*)
+    [ -f "$CF_TEST_DIR/app-crash" ] && exit 1
+    : > "$CF_TEST_DIR/app-up"
+    [ -f "$CF_TEST_DIR/app-blocks" ] && w app-stop;;
+  *" up -d --no-deps "*) [ -f "$CF_TEST_DIR/arrup-blocks" ] && w arrup-go;;
   esac;;
 esac
 exit 0`,
@@ -241,13 +266,90 @@ func (n *mpNode) set(states map[string]*string) {
 	}
 }
 
+// cmd is platform-ctl.sh met de nep-commando's; de log blijft staan.
+func (n *mpNode) cmd(args ...string) *exec.Cmd {
+	cmd := exec.Command("/bin/sh", append([]string{n.script}, args...)...)
+	cmd.Env = append(os.Environ(), "PATH="+filepath.Join(n.dir, "bin")+":"+os.Getenv("PATH"), "CF_TEST_DIR="+n.dir)
+	return cmd
+}
+
+// run draait platform-ctl.sh met een lege log, tot ook wat het op de
+// achtergrond startte (arr_start) klaar is.
 func (n *mpNode) run(args ...string) (string, error) {
 	n.t.Helper()
 	_ = os.Remove(filepath.Join(n.dir, "log"))
-	cmd := exec.Command("/bin/sh", append([]string{n.script}, args...)...)
-	cmd.Env = append(os.Environ(), "PATH="+filepath.Join(n.dir, "bin")+":"+os.Getenv("PATH"), "CF_TEST_DIR="+n.dir)
-	out, err := cmd.CombinedOutput()
+	out, err := n.cmd(args...).CombinedOutput()
 	return string(out), err
+}
+
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// started is platform-ctl.sh op de achtergrond. done sluit pas als ook wat
+// het zelf op de achtergrond startte klaar is (de uitvoer is een pipe).
+type started struct {
+	out  syncBuf
+	done chan struct{}
+	err  error
+}
+
+func (n *mpNode) start(args ...string) *started {
+	n.t.Helper()
+	s := &started{done: make(chan struct{})}
+	cmd := n.cmd(args...)
+	cmd.Stdout, cmd.Stderr = &s.out, &s.out
+	must(n.t, cmd.Start())
+	go func() { s.err = cmd.Wait(); close(s.done) }()
+	return s
+}
+
+func (s *started) wait(t *testing.T) error {
+	t.Helper()
+	select {
+	case <-s.done:
+		return s.err
+	case <-time.After(30 * time.Second):
+		t.Fatalf("platform-ctl.sh stopte niet:\n%s", s.out.String())
+		return nil
+	}
+}
+
+// waitFor wacht tot ok, hoogstens tien seconden.
+func (n *mpNode) waitFor(what string, ok func() bool) {
+	n.t.Helper()
+	for end := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			n.t.Fatalf("wachten op %s:\n%s", what, n.log())
+		}
+	}
+}
+
+// upArr is up met mediabeheer: de app (compose up op de voorgrond) loopt tot
+// arr_start zijn laatste regel "Mediabeheer: …" schreef.
+func (n *mpNode) upArr() (string, error) {
+	n.t.Helper()
+	_ = os.Remove(filepath.Join(n.dir, "log"))
+	n.set(map[string]*string{"app-blocks": on(""), "app-stop": nil, "app-up": nil})
+	s := n.start("up")
+	n.waitFor("Mediabeheer:", func() bool { return strings.Contains(s.out.String(), "Mediabeheer:") })
+	n.set(map[string]*string{"app-stop": on("")})
+	err := s.wait(n.t)
+	n.set(map[string]*string{"app-blocks": nil})
+	return s.out.String(), err
 }
 
 func (n *mpNode) log() string {
@@ -539,10 +641,12 @@ func TestMediaPlatformHelp(t *testing.T) {
 }
 
 // TestMediaPlatformArr: qBittorrent en Prowlarr alleen met ARR=aan en een
-// versie met compose.arr.yaml, na arr-koppel, met de downloads op de node.
+// versie met compose.arr.yaml, na de app en arr-koppel, met de downloads op
+// de node; nooit meer na down of zonder het VIP.
 func TestMediaPlatformArr(t *testing.T) {
 	up := map[string]*string{"vip": on(""), "mounted": on(""), "healthy": on(""),
 		"services": on("platform\noffice\nmedia\nqbittorrent\nprowlarr\n"), "cli-arr-koppel": on("qBittorrent: gekoppeld als gebruiker platform\n")}
+	arrUp := " up -d --no-deps qbittorrent prowlarr\n"
 
 	// Standaard uit, ook met compose.arr.yaml: up zoals altijd.
 	tpl, c := mpContext(t, nil)
@@ -559,6 +663,11 @@ func TestMediaPlatformArr(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(off.dir, "cfp/torrents")); err == nil {
 		t.Error("ARR uit maakte de map van de downloads")
+	}
+	// platform-arr.yaml telt dan niet mee in de vingerafdruk: geen herstart.
+	off.set(map[string]*string{"active-cf-platform": on(""), "etc/platform-arr.yaml": on("services: {}\n")})
+	if out, err := off.run("unchanged"); err != nil {
+		t.Errorf("ARR uit, platform-arr.yaml gewijzigd: %v %s", err, out)
 	}
 
 	tpl, c = mpContext(t, map[string]any{"arr": true})
@@ -577,17 +686,18 @@ func TestMediaPlatformArr(t *testing.T) {
 		t.Errorf("zonder compose.arr.yaml: %s", l)
 	}
 
-	// Aan, met compose.arr.yaml: eerst de app, dan arr-koppel, dan de twee.
+	// Aan, met compose.arr.yaml: eerst de app, dan arr-koppel (pas als de app
+	// antwoordt), dan de twee.
 	n.set(map[string]*string{"src/infra/single/compose.arr.yaml": on("")})
-	out, err := n.run("up")
+	out, err := n.upArr()
 	if err != nil {
 		t.Fatalf("up: %v\n%s", err, out)
 	}
 	l := n.log()
 	app := strings.Index(l, " up --no-build --remove-orphans platform office media\n")
 	koppel := strings.Index(l, " exec -T platform python -m app.cli arr-koppel\n")
-	arr := strings.Index(l, " up -d --no-deps qbittorrent prowlarr\n")
-	if app < 0 || koppel < 0 || arr < koppel || !strings.Contains(out, "Prowlarr op http://192.168.10.150:9696") {
+	arr := strings.Index(l, arrUp)
+	if app < 0 || koppel < app || arr < koppel || !strings.Contains(out, "Prowlarr op http://192.168.10.150:9696") {
 		t.Errorf("volgorde: app %d, koppel %d, arr %d\n%s\n%s", app, koppel, arr, l, out)
 	}
 	if got, want := n.composeFiles(), "compose.yaml compose.office.yaml compose.media.yaml platform-cluster.yaml compose.arr.yaml platform-arr.yaml"; got != want {
@@ -597,22 +707,104 @@ func TestMediaPlatformArr(t *testing.T) {
 	if fi, err := os.Stat(torrents); err != nil || fi.Mode().Perm() != 0o750 || !strings.Contains(l, "chown 10001:10001 "+torrents+"\n") {
 		t.Errorf("map van de downloads: %v %v\n%s", fi, err, l)
 	}
-	if _, err := os.Stat(filepath.Join(n.dir, "data/import/torrents")); err != nil {
-		t.Errorf("mountpunt in de importmap: %v", err)
+	// Het mountpunt in de importmap maakt het platform zelf (uid 10001).
+	if _, err := os.Stat(filepath.Join(n.dir, "data/import/torrents")); err != nil ||
+		!strings.Contains(l, "setpriv --reuid=10001 --regid=10001 --clear-groups mkdir -p "+n.dir+"/data/import/torrents\n") {
+		t.Errorf("mountpunt in de importmap: %v\n%s", err, l)
 	}
+	// Met ARR=aan telt platform-arr.yaml mee in de vingerafdruk.
+	n.set(map[string]*string{"active-cf-platform": on("")})
+	if out, err := n.run("unchanged"); err != nil {
+		t.Errorf("unchanged na up: %v %s", err, out)
+	}
+	arrYAML := filepath.Join(n.dir, "etc/platform-arr.yaml")
+	orig, err := os.ReadFile(arrYAML)
+	must(t, err)
+	must(t, os.WriteFile(arrYAML, append(append([]byte{}, orig...), "# anders\n"...), 0o644))
+	if _, err := n.run("unchanged"); err == nil {
+		t.Error("unchanged zag de wijziging in platform-arr.yaml niet")
+	}
+	must(t, os.WriteFile(arrYAML, orig, 0o644))
+	n.set(map[string]*string{"active-cf-platform": nil})
 
-	// Koppelen lukt niet (of de app antwoordt niet): de twee starten niet.
-	for name, state := range map[string]map[string]*string{
-		"koppelen lukt niet": {"cli-arr-koppel": nil},
-		"app antwoordt niet": {"healthy": nil},
+	// Wat niet lukt of niet meer mag: de twee starten niet.
+	for _, tc := range []struct {
+		name   string
+		state  map[string]*string
+		koppel bool // arr-koppel gedraaid
+		want   string
+	}{
+		{"koppelen lukt niet", map[string]*string{"cli-arr-koppel": nil}, true, "koppelen lukte niet"},
+		{"app antwoordt niet", map[string]*string{"healthy": nil}, false, "de app antwoordt niet"},
+		{"VIP weg terwijl de app start", map[string]*string{"health-drops-vip": on("")}, false, "deze node heeft het VIP niet meer"},
+		{"VIP weg tijdens arr-koppel", map[string]*string{"koppel-drops-vip": on("")}, true, "deze node heeft het VIP niet meer"},
 	} {
 		n.set(up)
-		n.set(state)
-		out, err := n.run("up")
-		if err != nil || strings.Contains(n.log(), "qbittorrent prowlarr") || !strings.Contains(out, "qBittorrent en Prowlarr starten niet") {
-			t.Errorf("%s: %v\n%s\n%s", name, err, out, n.log())
+		n.set(tc.state)
+		out, err := n.upArr()
+		l := n.log()
+		if err != nil || strings.Contains(l, arrUp) || strings.Contains(l, "app.cli arr-koppel") != tc.koppel ||
+			!strings.Contains(out, tc.want) || !strings.Contains(out, "qBittorrent en Prowlarr starten niet") {
+			t.Errorf("%s: %v\n%s\n%s", tc.name, err, out, l)
 		}
+		n.set(map[string]*string{"health-drops-vip": nil, "koppel-drops-vip": nil})
 	}
+
+	// De app stopt (of start niet) vóór ze antwoordt: arr_start houdt op
+	// zodra up weg is, niet pas na een kwartier.
+	n.set(up)
+	n.set(map[string]*string{"app-crash": on(""), "app-up": nil})
+	out, err = n.run("up")
+	if err == nil || strings.Contains(n.log(), "arr-koppel") || !strings.Contains(out, "het platform stopt hier") ||
+		strings.Contains(out, "antwoordt niet") {
+		t.Errorf("app stopt meteen: %v\n%s\n%s", err, out, n.log())
+	}
+	n.set(map[string]*string{"app-crash": nil})
+
+	// down terwijl arr-koppel loopt: daarna start er niets meer, ook al loopt
+	// up nog en heeft de node het VIP nog.
+	n.set(up)
+	_ = os.Remove(filepath.Join(n.dir, "log"))
+	n.set(map[string]*string{"app-blocks": on(""), "app-stop": nil, "app-up": nil, "koppel-blocks": on(""), "koppel-go": nil})
+	s := n.start("up")
+	n.waitFor("arr-koppel", func() bool { return strings.Contains(n.log(), "app.cli arr-koppel") })
+	if out, err := n.cmd("down").CombinedOutput(); err != nil {
+		t.Fatalf("down: %v\n%s", err, out)
+	}
+	n.set(map[string]*string{"koppel-go": on("")})
+	n.waitFor("Mediabeheer:", func() bool { return strings.Contains(s.out.String(), "Mediabeheer:") })
+	n.set(map[string]*string{"app-stop": on("")})
+	if err := s.wait(t); err != nil || strings.Contains(n.log(), arrUp) || !strings.Contains(s.out.String(), "starten niet") {
+		t.Errorf("down tijdens arr-koppel: %v\n%s\n%s", err, s.out.String(), n.log())
+	}
+	n.set(map[string]*string{"koppel-blocks": nil, "app-blocks": nil})
+
+	// down terwijl qBittorrent en Prowlarr starten: down wacht tot dat klaar
+	// is en stopt ze dan; arr_start ziet zelf ook dat down begon.
+	n.set(up)
+	_ = os.Remove(filepath.Join(n.dir, "log"))
+	n.set(map[string]*string{"app-blocks": on(""), "app-stop": nil, "app-up": nil, "arrup-blocks": on(""), "arrup-go": nil, "arr-running": nil})
+	s = n.start("up")
+	n.waitFor("up -d", func() bool { return strings.Contains(n.log(), arrUp) })
+	d := n.start("down")
+	select {
+	case <-d.done:
+		t.Errorf("down wachtte niet tot qBittorrent en Prowlarr gestart waren: %v\n%s", d.err, d.out.String())
+	case <-time.After(300 * time.Millisecond):
+	}
+	n.set(map[string]*string{"arr-running": on(""), "arrup-go": on("")})
+	if err := d.wait(t); err != nil {
+		t.Errorf("down: %v\n%s", err, d.out.String())
+	}
+	n.waitFor("Mediabeheer:", func() bool { return strings.Contains(s.out.String(), "Mediabeheer:") })
+	n.set(map[string]*string{"app-stop": on("")})
+	err = s.wait(t)
+	l = n.log()
+	if stop := strings.LastIndex(l, "docker stop qbit1\n"); err != nil || stop < strings.Index(l, arrUp) ||
+		!strings.Contains(l, "docker stop prowl1\n") || !strings.Contains(s.out.String(), "qBittorrent en Prowlarr weer gestopt") {
+		t.Errorf("down tijdens het starten: %v\n%s\n%s", err, s.out.String(), l)
+	}
+	n.set(map[string]*string{"arrup-blocks": nil, "app-blocks": nil, "arr-running": nil})
 
 	// Een symlink als map van de downloads: niet starten.
 	n.set(up)

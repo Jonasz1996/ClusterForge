@@ -55,6 +55,10 @@ analyse_on() { [ "$(env_get ANALYSE)" = aan ] && [ -f "$SRC/compose.analyse.yaml
 # Mediabeheer (fase 11): qBittorrent en Prowlarr, met ARR=aan en een versie
 # die compose.arr.yaml heeft. De downloads staan op deze node zelf.
 ARR_TORRENTS=/var/lib/cf-platform/torrents
+# arr_start mag starten zolang ARR_MAG er is (up zet het, down haalt het weg);
+# het starten zelf en het stoppen in down wachten op elkaar via ARR_LOCK.
+ARR_MAG=/run/cf-platform-arr.mag
+ARR_LOCK=/run/cf-platform-arr.lock
 arr_on() { [ "$(env_get ARR)" = aan ] && [ -f "$SRC/compose.arr.yaml" ]; }
 # Kan Docker hier geheugen- en cpu-grenzen zetten? Zonder die cgroups (een
 # LXC) start een container met grenzen niet; dan zonder (regel van install.sh).
@@ -431,25 +435,36 @@ arr_dirs() {
 }
 # Zodra de app antwoordt: arr-koppel zet de gebruiker van qBittorrent en de
 # sleutel van Prowlarr in hun config en in de app (vóór hun eerste start),
-# dan pas de twee containers. Op de achtergrond van up; stopt up of heeft
-# deze node het VIP niet meer, dan start er niets.
+# dan pas de twee containers. Op de achtergrond van up; elke stap kijkt of
+# het nog mag (arr_mag): up loopt nog, down is niet begonnen ($ARR_MAG) en
+# deze node heeft het VIP. Het starten houdt $ARR_LOCK vast; down wacht daarop
+# en stopt daarna wat er toch nog startte. Elke afloop meldt één regel
+# "Mediabeheer: …".
+arr_mag() { [ -f "$ARR_MAG" ] && kill -0 "$$" 2>/dev/null && has_vip; }
+ARR_STOPT="Mediabeheer: het platform stopt hier of deze node heeft het VIP niet meer"
 arr_start() {
   i=0
   until curl -fsS -o /dev/null --max-time 5 http://127.0.0.1:80/health; do
     i=$((i + 1))
-    if [ "$i" -gt 180 ] || ! kill -0 "$$" 2>/dev/null; then
+    arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; return 1; }
+    if [ "$i" -gt 180 ]; then
       echo "Mediabeheer: de app antwoordt niet; qBittorrent en Prowlarr starten niet" >&2
       return 1
     fi
     sleep 5
   done
-  has_vip || { echo "Mediabeheer: deze node heeft het VIP niet meer" >&2; return 1; }
+  arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; return 1; }
   compose exec -T platform python -m app.cli arr-koppel </dev/null ||
     { echo "Mediabeheer: koppelen lukte niet (app.cli arr-koppel); qBittorrent en Prowlarr starten niet" >&2; return 1; }
-  has_vip || { echo "Mediabeheer: deze node heeft het VIP niet meer" >&2; return 1; }
-  compose up -d --no-deps qbittorrent prowlarr </dev/null ||
-    { echo "Mediabeheer: qBittorrent of Prowlarr kon niet starten" >&2; return 1; }
-  echo "Mediabeheer: qBittorrent en Prowlarr draaien (Prowlarr op http://$VIP:9696)"
+  (
+    flock 9 || { echo "Mediabeheer: geen slot op $ARR_LOCK; qBittorrent en Prowlarr starten niet" >&2; exit 1; }
+    arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; exit 1; }
+    compose up -d --no-deps qbittorrent prowlarr </dev/null ||
+      { echo "Mediabeheer: qBittorrent of Prowlarr kon niet starten" >&2; exit 1; }
+    # Begon down of verdween het VIP terwijl ze startten: meteen weer weg.
+    arr_mag || { arr_stop; echo "$ARR_STOPT; qBittorrent en Prowlarr weer gestopt" >&2; exit 1; }
+    echo "Mediabeheer: qBittorrent en Prowlarr draaien (Prowlarr op http://$VIP:9696)"
+  ) 9>"$ARR_LOCK"
 }
 # qBittorrent en Prowlarr van dit cluster stoppen, ook als ARR intussen uit staat.
 arr_stop() {
@@ -616,6 +631,7 @@ case "${1:-}" in
       # en Prowlarr pas na arr-koppel.
       svcs=$(compose config --services | grep -vx -e qbittorrent -e prowlarr)
       [ -n "$svcs" ] || { echo "compose config gaf geen diensten" >&2; exit 1; }
+      : > "$ARR_MAG"
       arr_start &
       # shellcheck disable=SC2086
       compose up --no-build --remove-orphans $svcs
@@ -624,8 +640,12 @@ case "${1:-}" in
     fi
     ;;
   down)
+    # Eerst arr_start van up laten ophouden; startte het qBittorrent en
+    # Prowlarr net, dan wacht down daarop (het slot) en stopt ze daarna.
+    rm -f "$ARR_MAG"
     compose stop
-    arr_stop
+    ( flock -w 60 9 || echo "Mediabeheer: het slot bleef bezet; toch stoppen" >&2
+      arr_stop ) 9>"$ARR_LOCK"
     rm -f "$HASH"
     ;;
   check)
