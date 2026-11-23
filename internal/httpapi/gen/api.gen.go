@@ -202,6 +202,7 @@ func (e AssistantConversationInputSubjectType) Valid() bool {
 const (
 	Link           AttentionActionKind = "link"
 	RestartService AttentionActionKind = "restart_service"
+	RunCommand     AttentionActionKind = "run_command"
 )
 
 // Valid indicates whether the value is a known member of the AttentionActionKind enum.
@@ -210,6 +211,8 @@ func (e AttentionActionKind) Valid() bool {
 	case Link:
 		return true
 	case RestartService:
+		return true
+	case RunCommand:
 		return true
 	default:
 		return false
@@ -5086,14 +5089,20 @@ type Attention struct {
 type AttentionAction struct {
 	Href *string `json:"href,omitempty"`
 
-	// Kind link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+	// Kind link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
 	Kind    AttentionActionKind   `json:"kind"`
 	Label   string                `json:"label"`
 	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
-	Unit    *string               `json:"unit,omitempty"`
+
+	// Script Het script bij run_command
+	Script *string `json:"script,omitempty"`
+
+	// Title Naam van het eenmalige commando bij run_command
+	Title *string `json:"title,omitempty"`
+	Unit  *string `json:"unit,omitempty"`
 }
 
-// AttentionActionKind link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+// AttentionActionKind link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
 type AttentionActionKind string
 
 // AttentionBadge defines model for AttentionBadge.

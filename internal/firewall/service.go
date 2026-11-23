@@ -687,6 +687,16 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	now := s.Now()
 	for _, n := range nodes {
+		if !n.Enabled() && n.Supported && n.Online && n.hasKeepalived() {
+			// Testlijst 2, 1.4: ook zonder beheer kijken of ufw VRRP van de
+			// andere nodes binnenlaat; alleen lezen.
+			if n.StatusAt == nil || now.Sub(*n.StatusAt) >= s.StatusEvery {
+				if _, err := s.status(ctx, n); err != nil {
+					s.log.Debug("firewallstand ophalen mislukt", "node", n.Hostname, "err", err)
+				}
+			}
+			continue
+		}
 		if !n.Enabled() || !n.Supported || !n.Online {
 			continue
 		}

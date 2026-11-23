@@ -11857,11 +11857,13 @@ components:
       properties:
         kind:
           type: string
-          enum: [link, restart_service]
-          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando"
+          enum: [link, restart_service, run_command]
+          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids"
         label: { type: string }
         href: { type: string }
         unit: { type: string }
+        title: { type: string, description: Naam van het eenmalige commando bij run_command }
+        script: { type: string, description: Het script bij run_command }
         node_ids: { type: array, items: { type: string, format: uuid } }
     NavUsage:
       type: object

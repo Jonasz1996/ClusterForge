@@ -11237,13 +11237,17 @@ export interface components {
         };
         AttentionAction: {
             /**
-             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
              * @enum {string}
              */
-            kind: "link" | "restart_service";
+            kind: "link" | "restart_service" | "run_command";
             label: string;
             href?: string;
             unit?: string;
+            /** @description Naam van het eenmalige commando bij run_command */
+            title?: string;
+            /** @description Het script bij run_command */
+            script?: string;
             node_ids?: string[];
         };
         NavUsage: {

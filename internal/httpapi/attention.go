@@ -17,6 +17,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/apps"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
+	"github.com/Jonasz1996/clusterforge/internal/firewall"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 )
@@ -280,6 +281,26 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 				detail = names(n.Names)
 			}
 			add(n.ID, tone, n.Title, detail, n.Href, n.Count)
+		}
+	}
+
+	// Testlijst 2, 1.4: ufw laat VRRP van de andere keepalived-nodes niet
+	// binnen. Per node een regel met de oplossing als eenmalig commando.
+	if s.firewall != nil {
+		if fws, err := s.firewall.Nodes(ctx); err == nil {
+			for _, n := range fws {
+				if n.Plan == nil || len(n.Plan.VRRPMissing) == 0 {
+					continue
+				}
+				it := gen.AttentionItem{Id: "firewall-vrrp-" + n.NodeID.String(), Tone: red, Count: 1, Href: "/firewall?tab=nodes",
+					Title:  "ufw blokkeert VRRP op " + n.Hostname + ": split-brain-gevaar",
+					Detail: "geen VRRP (protocol 112) van " + strings.Join(n.Plan.VRRPMissing, ", "),
+					Help: ptr("keepalived op " + n.Hostname + " hoort de andere node niet en neemt het VIP er ook bij: twee nodes met hetzelfde IP. " +
+						"VRRP toelaten zet per andere node een ufw-regel (ufw allow proto vrrp from <ip>) en verandert verder niets."),
+					Actions: &[]gen.AttentionAction{{Kind: gen.RunCommand, Label: "VRRP toelaten", Title: ptr("VRRP toelaten op " + n.Hostname),
+						Script: ptr(firewall.VRRPScript(n.Plan.VRRPMissing)), NodeIds: &[]uuid.UUID{n.NodeID}}}}
+				items = append(items, it)
+			}
 		}
 	}
 

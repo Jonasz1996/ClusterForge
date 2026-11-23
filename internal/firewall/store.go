@@ -84,6 +84,14 @@ func (n Node) Pending() bool { return n.PlanHash != "" && n.PlanHash != n.Applie
 // Enabled: ClusterForge kijkt naar de firewall van deze node.
 func (n Node) Enabled() bool { return n.Mode == "preview" || n.Mode == "managed" }
 
+// hasKeepalived: keepalived staat op de node (facts of units).
+func (n Node) hasKeepalived() bool {
+	if n.facts != nil && n.facts.Keepalived != nil {
+		return true
+	}
+	return slices.Contains(n.units(), "keepalived")
+}
+
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	var st Settings
 	err := s.pool.QueryRow(ctx, `SELECT auto_apply, lan, admin, ssh_from, unknown_ports, strict, confirm_seconds, grace_hours, monitor,
