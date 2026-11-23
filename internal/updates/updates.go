@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -77,6 +79,16 @@ type Service struct {
 	ReadyTimeout  time.Duration
 	RebootTimeout time.Duration
 	Now           func() time.Time
+	// HTTPGet haalt een pagina op voor de webtest na de VIP-wissel; nil
+	// gebruikt HTTP.
+	HTTPGet func(ctx context.Context, url string) (int, string, error)
+	// Containers geeft de stand van de containers op een node (zie
+	// dockerhost.Running). Na de update van een node wacht de taak tot de
+	// containers die ervoor draaiden weer draaien en gezond zijn, voor ze
+	// aan de volgende node begint (testlijst 1.8). Mag nil zijn.
+	Containers func(ctx context.Context, nodeID uuid.UUID) (map[string]string, error)
+	// ContainerPoll is hoe vaak dat gevraagd wordt; nul is vijf seconden.
+	ContainerPoll time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus Commander) *Service {
@@ -87,6 +99,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus 
 	}
 	if runner != nil {
 		runner.Register(Kind, s.run)
+		runner.Register(QueueKind, s.runQueue)
 	}
 	return s
 }
@@ -112,12 +125,16 @@ type Node struct {
 	HasDatabase    bool
 	VIPHolder      bool
 	FactsAt        *time.Time
+	// PVEHost: de node is een Proxmox-host; die werk je bij via
+	// Proxmox → Host-updates, niet met "Alles bijwerken" (fase 47).
+	PVEHost bool
 }
 
 // Prod is true voor een node in een prodcluster.
 func (n Node) Prod() bool { return n.ClusterEnv == string(store.EnvironmentProd) }
 
-// Overview geeft elke node met een agent.
+// Overview geeft elke node met een agent, behalve appliances (OPNsense,
+// TrueNAS).
 func (s *Service) Overview(ctx context.Context) ([]Node, error) {
 	rows, err := s.q.ListUpdateNodes(ctx)
 	if err != nil {
@@ -137,7 +154,14 @@ func (s *Service) Overview(ctx context.Context) ([]Node, error) {
 		if len(r.Facts) > 0 {
 			var f protocol.Facts
 			if json.Unmarshal(r.Facts, &f) == nil {
+				if f.Appliance() != "" {
+					// OPNsense en TrueNAS werken zichzelf bij; apt en het
+					// automatische beleid horen daar niet (die zouden elke
+					// keer opnieuw mislukken).
+					continue
+				}
 				n.Upgrades, n.RebootRequired, n.AptUpdatedAt, n.Docker = f.Upgrades, f.RebootRequired, f.AptUpdatedAt, f.Docker
+				n.PVEHost = f.Proxmox != nil && f.Proxmox.Node != ""
 			}
 		}
 		if r.ClusterID != nil {
@@ -186,6 +210,10 @@ type Docker struct {
 	Tags          []protocol.ImageTag `json:"tags,omitempty"`
 	// Edit schrijft een bestand uit de editor (één node, één project).
 	Edit *protocol.ComposeEdit `json:"edit,omitempty"`
+	// Skip zijn projecten die deze keer niet bijgewerkt worden (fase 47),
+	// zoals een project waarvan de pull mislukte. Start zet per node de
+	// projecten die overblijven.
+	Skip []string `json:"skip,omitempty"`
 }
 
 // needsSmart is true als de Docker-opties protocol 29 vragen.
@@ -207,6 +235,9 @@ type Request struct {
 	NoFailover bool
 	// Auto: gestart door automatisch bijwerken.
 	Auto bool
+	// StartFrom hervat een clusterupdate vanaf deze node (fase 47): de
+	// nodes ervoor in de volgorde zijn al bijgewerkt. Alleen met ClusterID.
+	StartFrom *uuid.UUID
 }
 
 // Select geeft de nodes van een verzoek, in de volgorde van de taak per
@@ -246,7 +277,18 @@ func (s *Service) Select(ctx context.Context, req Request) ([]Node, error) {
 	if len(out) == 0 {
 		return nil, &ConflictError{"dit cluster heeft geen nodes met een agent"}
 	}
-	return Order(out), nil
+	out = Order(out)
+	if req.StartFrom != nil {
+		if req.ClusterID == nil {
+			return nil, &FieldError{"hervatten kan alleen bij een cluster"}
+		}
+		i := slices.IndexFunc(out, func(n Node) bool { return n.NodeID == *req.StartFrom })
+		if i < 0 {
+			return nil, &ConflictError{"de node om mee verder te gaan hoort niet (meer) bij dit cluster"}
+		}
+		out = out[i:]
+	}
+	return out, nil
 }
 
 // Order zet de nodes per cluster op volgorde: zonder VIP eerst, de
@@ -297,6 +339,10 @@ type jobNode struct {
 	HasDatabase bool      `json:"has_database,omitempty"`
 	// Smart: de agent had protocol 29 toen de taak begon.
 	Smart bool `json:"smart,omitempty"`
+	// Projects: met Docker.Skip de projecten die op deze node bijgewerkt
+	// worden; SkipDocker als er geen overblijven (fase 47).
+	Projects   []string `json:"projects,omitempty"`
+	SkipDocker bool     `json:"skip_docker,omitempty"`
 }
 
 // Start zet per cluster één taak in de wachtrij. Een cluster waar al een
@@ -326,7 +372,12 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request, no
 	for _, g := range groups {
 		p := params{Apt: req.Apt, Docker: req.Docker, Reboot: req.Reboot, NoFailover: req.NoFailover, Auto: req.Auto}
 		for _, n := range g.nodes {
-			p.Nodes = append(p.Nodes, jobNode{ID: n.NodeID, Hostname: n.Hostname, VIPHolder: n.VIPHolder, HasDatabase: n.HasDatabase, Smart: n.Smart})
+			jn := jobNode{ID: n.NodeID, Hostname: n.Hostname, VIPHolder: n.VIPHolder, HasDatabase: n.HasDatabase, Smart: n.Smart}
+			if req.Docker != nil && len(req.Docker.Skip) > 0 {
+				jn.Projects = keepProjects(n, req.Docker.Projects, req.Docker.Skip)
+				jn.SkipDocker = len(jn.Projects) == 0
+			}
+			p.Nodes = append(p.Nodes, jn)
 		}
 		spec := jobs.Spec{Kind: Kind, Params: p, ClusterID: g.cluster, Actor: actor}
 		switch {
@@ -339,6 +390,9 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request, no
 		}
 		if req.Auto {
 			spec.Title = "Automatisch: " + spec.Title
+		}
+		if req.StartFrom != nil && len(g.nodes) > 0 {
+			spec.Title += " (verder vanaf " + g.nodes[0].Hostname + ")"
 		}
 		var j store.Job
 		var err error
@@ -379,6 +433,8 @@ func whatText(a *Apt, d *Docker) string {
 type prep struct {
 	Services []string  `json:"services"`
 	At       time.Time `json:"at"`
+	// Containers zijn de containers die vóór de update draaiden.
+	Containers []string `json:"containers,omitempty"`
 }
 
 func (s *Service) run(ctx context.Context, j *jobs.Job) error {
@@ -426,17 +482,42 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 					st.Logf("dit cluster heeft een database: de databasepakketten blijven staan; werk die bij met Bijwerken op de databasekaart")
 				}
 				res, err := s.runOne(ctx, j, st, n, spec)
+				if err != nil && runLost(res) {
+					// Bijvoorbeeld een upgrade van systemd of een herstart
+					// midden in dpkg: de volgende run maakt dpkg eerst af
+					// (dpkg --configure -a) en gaat verder.
+					st.Logf("de run op %s viel weg; ClusterForge wacht op de agent en hervat de update (dpkg --configure -a eerst)", n.Hostname)
+					_ = st.Flush(ctx)
+					if werr := s.waitAgent(ctx, n); werr != nil {
+						return fmt.Errorf("%w; %w", err, werr)
+					}
+					again := spec
+					again.ID = spec.ID + "-hervat"
+					res, err = s.runOne(ctx, j, st, n, again)
+				}
 				aptRes, aptDone = res, true
 				return err
 			}); err != nil {
 				return stop(ctx, err, n)
 			}
 		}
-		if p.Docker != nil {
+		if p.Docker != nil && n.SkipDocker {
+			if err := j.Step(ctx, name+": Docker overgeslagen", func(ctx context.Context, st *jobs.Step) error {
+				st.Logf("de gekozen Compose-projecten worden deze keer overgeslagen: %s", strings.Join(p.Docker.Skip, ", "))
+				return nil
+			}); err != nil {
+				return stop(ctx, err, n)
+			}
+		}
+		if p.Docker != nil && !n.SkipDocker {
+			projects := p.Docker.Projects
+			if len(n.Projects) > 0 {
+				projects = n.Projects
+			}
 			spec := protocol.RunSpec{
 				ID: runID(j, i, "docker"), Kind: protocol.RunDocker, Title: "Docker bijwerken op " + n.Hostname,
 				TimeoutSeconds: int((time.Hour).Seconds()),
-				Docker:         &protocol.DockerRun{Projects: p.Docker.Projects, Prune: p.Docker.Prune},
+				Docker:         &protocol.DockerRun{Projects: projects, Prune: p.Docker.Prune},
 			}
 			if n.Smart {
 				d := spec.Docker
@@ -445,6 +526,16 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			if err := j.Step(ctx, name+": Docker", func(ctx context.Context, st *jobs.Step) error {
 				res, err := s.runOne(ctx, j, st, n, spec)
 				s.saveReports(ctx, j, n, res.Docker)
+				if err != nil && onlyUnchanged(res.Docker) {
+					// Eén project kon zijn images niet halen, maar er
+					// veranderde niets: de rest van het cluster gaat door.
+					for _, d := range res.Docker {
+						if d.Unchanged {
+							st.Logf("let op: %s op %s niet bijgewerkt: %s", d.Project, n.Hostname, d.Problem)
+						}
+					}
+					return nil
+				}
 				if err != nil && p.Auto && s.Assist != nil {
 					for _, d := range res.Docker {
 						if d.Result == protocol.DockerFailed || d.Result == protocol.DockerRolledBack {
@@ -487,6 +578,22 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	return nil
 }
 
+// keepProjects zijn de Compose-projecten van een node zonder de
+// overgeslagen; projects beperkt ze verder als het niet leeg is.
+func keepProjects(n Node, projects, skip []string) []string {
+	var out []string
+	if n.Docker == nil {
+		return nil
+	}
+	for _, p := range n.Docker.Projects {
+		if slices.Contains(skip, p.Name) || (len(projects) > 0 && !slices.Contains(projects, p.Name)) {
+			continue
+		}
+		out = append(out, p.Name)
+	}
+	return out
+}
+
 // stop zegt bij een fout dat de nodes erna niet aan de beurt kwamen.
 func stop(ctx context.Context, err error, n jobNode) error {
 	if ctx.Err() != nil {
@@ -525,10 +632,22 @@ func (s *Service) prepare(ctx context.Context, st *jobs.Step, n jobNode) (prep, 
 		}
 	}
 	slices.Sort(active)
+	if i := slices.Index(active, "ufw"); i >= 0 && !s.ufwOn(ctx, n.ID) {
+		// ufw.service is een oneshot die ook "active" is met een
+		// uitgeschakelde firewall; na de update kan hij "inactive" zijn
+		// zonder dat er iets veranderde. Alleen een ufw die echt filterde,
+		// moet terugkomen.
+		active = slices.Delete(active, i, i+1)
+		st.Logf("ufw stond vóór de update uit; daar wacht ClusterForge niet op")
+	}
 	if len(active) > 0 {
 		st.Logf("draait nu: %s; daar wacht ClusterForge na de update op", strings.Join(active, ", "))
 	}
 	pr := prep{Services: active, At: s.Now()}
+	pr.Containers = s.runningContainers(ctx, n.ID)
+	if len(pr.Containers) > 0 {
+		st.Logf("%d containers draaien nu; na de update wacht ClusterForge tot ze weer draaien en gezond zijn, pas dan volgt de volgende node", len(pr.Containers))
+	}
 	return pr, st.SetState(ctx, pr)
 }
 
@@ -569,6 +688,135 @@ func (s *Service) runOne(ctx context.Context, j *jobs.Job, st *jobs.Step, n jobN
 		return res, errors.New(noderun.Describe(res))
 	}
 	return res, nil
+}
+
+// webTemplates zijn de templates waarvan het VIP een webserver is.
+var webTemplates = []string{"nginx-proxy-manager", "keepalived-nginx"}
+
+// webCheck vraagt na de VIP-wissel echt een pagina op het VIP op: een node
+// waar NPM niet kon starten (poort 80 bezet door nginx op de host) geeft
+// "Welcome to nginx!" voor elke site, terwijl keepalived tevreden is.
+// Onbereikbaar vanaf de server is alleen een waarschuwing (een firewall
+// kan dat verkeer tegenhouden).
+func (s *Service) webCheck(ctx context.Context, clusterID uuid.UUID, vips []string, progress func(string)) error {
+	var tpl string
+	if err := s.pool.QueryRow(ctx, `SELECT coalesce(template_name, '') FROM clusters WHERE id = $1`, clusterID).Scan(&tpl); err != nil || !slices.Contains(webTemplates, tpl) {
+		return nil
+	}
+	get := s.HTTPGet
+	if get == nil {
+		get = httpGet
+	}
+	for _, vip := range vips {
+		url := "http://" + vip + "/"
+		var last error
+		hard := false
+		for try := 0; try < 6; try++ {
+			if try > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+			}
+			code, body, err := get(ctx, url)
+			switch {
+			case err != nil:
+				last, hard = err, false
+				continue
+			case strings.Contains(body, "Welcome to nginx!"):
+				hard = true
+				last = fmt.Errorf("%s geeft de standaardpagina van nginx (\"Welcome to nginx!\"): NPM draait niet op de node met het VIP; kijk of poort 80 daar bezet is door nginx op de host", url)
+				continue
+			case code >= 500:
+				hard = true
+				last = fmt.Errorf("%s antwoordt met HTTP %d", url, code)
+				continue
+			}
+			last = nil
+			progress(fmt.Sprintf("%s antwoordt (HTTP %d)", url, code))
+			break
+		}
+		if last == nil {
+			continue
+		}
+		if hard {
+			return fmt.Errorf("%w; de taak stopt hier", last)
+		}
+		progress(fmt.Sprintf("let op: %s is vanaf ClusterForge niet te bereiken (%v); de webtest is overgeslagen", url, last))
+	}
+	return nil
+}
+
+// httpGet haalt een pagina op (hoogstens 64 KiB).
+func httpGet(ctx context.Context, url string) (int, string, error) {
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	return res.StatusCode, string(body), nil
+}
+
+// onlyUnchanged is true als er projecten mislukten en geen ervan iets
+// veranderde.
+func onlyUnchanged(reps []protocol.DockerReport) bool {
+	failed := 0
+	for _, d := range reps {
+		if d.Result == protocol.DockerFailed || d.Result == protocol.DockerRolledBack {
+			if !d.Unchanged {
+				return false
+			}
+			failed++
+		}
+	}
+	return failed > 0
+}
+
+// ufwOn zegt of ufw volgens de laatste firewallstand van de node aan
+// stond. Zonder stand telt ufw als aan.
+func (s *Service) ufwOn(ctx context.Context, nodeID uuid.UUID) bool {
+	var raw []byte
+	err := s.pool.QueryRow(ctx, `SELECT status FROM firewall_nodes WHERE node_id = $1`, nodeID).Scan(&raw)
+	if err != nil || len(raw) == 0 {
+		return true
+	}
+	var fs protocol.FirewallStatus
+	if json.Unmarshal(raw, &fs) != nil || !fs.Installed {
+		return true
+	}
+	return fs.Active
+}
+
+// runLost is true voor een run die op de node wegviel zonder eindstand.
+func runLost(res protocol.RunStatus) bool {
+	return res.State == protocol.RunFailed && strings.Contains(res.Error, protocol.RunLostError)
+}
+
+// waitAgent wacht op een verse heartbeat van de agent.
+func (s *Service) waitAgent(ctx context.Context, n jobNode) error {
+	since := s.Now()
+	wctx, cancel := context.WithTimeout(ctx, s.RebootTimeout)
+	defer cancel()
+	err := health.Poll(wctx, 2*time.Second, func(ctx context.Context) (bool, error) {
+		rt, err := s.q.GetNodeRuntime(ctx, n.ID)
+		if err != nil {
+			return false, err
+		}
+		return rt.HeartbeatAt != nil && rt.HeartbeatAt.After(since), nil
+	})
+	if err != nil {
+		return fmt.Errorf("de agent van %s kwam niet binnen %s terug: %w", n.Hostname, s.RebootTimeout, err)
+	}
+	return nil
 }
 
 // reboot herstart de node en wacht tot hij terug is.
@@ -618,6 +866,9 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, n jobNode, pr prep)
 	if err != nil {
 		return fmt.Errorf("%s komt niet gezond terug: %w; de taak stopt hier", n.Hostname, err)
 	}
+	if err := s.waitContainers(ctx, n, pr.Containers, progress); err != nil {
+		return err
+	}
 	if rt, err := s.q.GetNodeRuntime(ctx, n.ID); err == nil && rt.ClusterID != nil {
 		vips, err := s.clusterVIPs(ctx, *rt.ClusterID)
 		if err != nil {
@@ -630,6 +881,9 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, n jobNode, pr prep)
 			if err != nil {
 				return fmt.Errorf("de VIP's hebben geen vaste houder: %w; de taak stopt hier", err)
 			}
+			if err := s.webCheck(ctx, *rt.ClusterID, vips, progress); err != nil {
+				return err
+			}
 		}
 	}
 	fctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -637,4 +891,82 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, n jobNode, pr prep)
 	cancel()
 	st.Logf("%s is gezond", n.Hostname)
 	return nil
+}
+
+// runningContainers zijn de containers die nu draaien en niet ongezond
+// zijn, op een node met Docker; leeg zonder Docker of zonder antwoord.
+func (s *Service) runningContainers(ctx context.Context, nodeID uuid.UUID) []string {
+	if s.Containers == nil {
+		return nil
+	}
+	var docker bool
+	if err := s.pool.QueryRow(ctx, `SELECT coalesce(jsonb_typeof(facts->'docker') = 'object', false) FROM node_facts WHERE node_id = $1`, nodeID).Scan(&docker); err != nil || !docker {
+		return nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	m, err := s.Containers(cctx, nodeID)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for name, st := range m {
+		if st == "running" || st == "healthy" || st == "starting" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// waitContainers wacht tot elke container uit want weer draait, en gezond
+// is als hij een healthcheck heeft. Een Docker- of containerd-upgrade
+// herstart alle containers van de node; zonder wachten lag bij een rolling
+// update het hele cluster tegelijk plat (testlijst 1.8).
+func (s *Service) waitContainers(ctx context.Context, n jobNode, want []string, progress func(string)) error {
+	if len(want) == 0 || s.Containers == nil {
+		return nil
+	}
+	poll := s.ContainerPoll
+	if poll <= 0 {
+		poll = 5 * time.Second
+	}
+	progress(fmt.Sprintf("wachten tot de %d containers op %s weer draaien en gezond zijn", len(want), n.Hostname))
+	deadline := s.Now().Add(s.ReadyTimeout)
+	var last string
+	for {
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		m, err := s.Containers(cctx, n.ID)
+		cancel()
+		var waiting []string
+		if err != nil {
+			waiting = []string{"Docker antwoordt nog niet (" + err.Error() + ")"}
+		} else {
+			for _, name := range want {
+				switch st := m[name]; st {
+				case "running", "healthy":
+				case "":
+					waiting = append(waiting, name+" (weg)")
+				default:
+					waiting = append(waiting, name+" ("+st+")")
+				}
+			}
+		}
+		if len(waiting) == 0 {
+			progress(fmt.Sprintf("alle %d containers op %s draaien en zijn gezond", len(want), n.Hostname))
+			return nil
+		}
+		if msg := strings.Join(waiting, ", "); msg != last {
+			progress("nog niet klaar: " + msg)
+			last = msg
+		}
+		if !s.Now().Before(deadline) {
+			return fmt.Errorf("de containers op %s zijn na %s nog niet gezond: %s; de taak stopt hier, de volgende nodes blijven ongemoeid", n.Hostname, s.ReadyTimeout, strings.Join(waiting, ", "))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
 }

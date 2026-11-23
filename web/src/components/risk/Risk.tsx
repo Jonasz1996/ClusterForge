@@ -233,6 +233,21 @@ export function AcceptDialog({ f, onClose }: { f: RiskFinding; onClose: () => vo
 
 // FleetRiskCard staat op het overzicht: de score van het geheel met de trend,
 // de drie bevindingen die het meeste opleveren en de rest uitklapbaar.
+// byCheck groepeert bevindingen per check, in de volgorde van de eerste.
+function byCheck<T extends RiskFinding>(list: T[]): { check: string; title: string; items: T[]; open: number }[] {
+  const out: { check: string; title: string; items: T[]; open: number }[] = [];
+  for (const f of list) {
+    let g = out.find((x) => x.check === f.check);
+    if (!g) {
+      g = { check: f.check, title: f.title || f.text, items: [], open: 0 };
+      out.push(g);
+    }
+    g.items.push(f);
+    if (!f.accepted) g.open++;
+  }
+  return out;
+}
+
 export function FleetRiskCard({ isAdmin }: { isAdmin: boolean }) {
   const q = useRisk();
   const hist = useRiskHistory();
@@ -303,8 +318,30 @@ export function FleetRiskCard({ isAdmin }: { isAdmin: boolean }) {
                 </span>
                 Alle bevindingen ({d.findings.length})
               </summary>
+              {/* Per oorzaak (fase 47): dezelfde check op veel clusters of
+                  nodes is één regel die openklapt. */}
               <ul className="divide-y divide-slate-100 border-t border-slate-100 px-3 dark:divide-slate-800 dark:border-slate-800">
-                {rest.map(item)}
+                {byCheck(rest).map((g) =>
+                  g.items.length === 1 ? (
+                    item(g.items[0])
+                  ) : (
+                    <li key={g.check} className="py-2 text-sm">
+                      <details className="group/c">
+                        <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+                          <span aria-hidden className="text-slate-400 transition group-open/c:rotate-90">
+                            ›
+                          </span>
+                          <Badge tone={severityInfo[g.items[0].severity].tone}>{severityInfo[g.items[0].severity].label}</Badge>
+                          <span className="font-medium">{g.title}</span>
+                          <span className="text-slate-500">
+                            {g.items.length}× · {g.open} open
+                          </span>
+                        </summary>
+                        <ul className="mt-1 ml-5 divide-y divide-slate-100 dark:divide-slate-800">{g.items.map(item)}</ul>
+                      </details>
+                    </li>
+                  ),
+                )}
               </ul>
             </details>
           )}

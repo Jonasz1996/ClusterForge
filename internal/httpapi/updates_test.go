@@ -142,6 +142,79 @@ func TestUpdatesAndCommands(t *testing.T) {
 		t.Fatalf("apt: %v %v", n1.calls, n2.calls)
 	}
 
+	// Hervatten vanaf web01 (fase 47): web02 is al bijgewerkt.
+	if s := c.do("POST", "/api/v1/updates", map[string]any{"cluster_id": lab.ID, "apt": map[string]any{}, "failover": false, "start_from": web01.ID}, &started); s != http.StatusAccepted || len(started.Jobs) != 1 {
+		t.Fatalf("hervatten: %d %+v", s, started)
+	}
+	j = waitJob(t, c, started.Jobs[0].ID)
+	if j.Status != "succeeded" || len(j.Steps) != 3 || !strings.HasPrefix(j.Steps[0].Name, "web01") || !strings.Contains(j.Title, "verder vanaf web01") {
+		t.Fatalf("hervat: %+v", j)
+	}
+	if n2.got("apt-get upgrade") != 1 || n1.got("apt-get upgrade") != 2 {
+		t.Fatalf("hervat apt: %v %v", n1.calls, n2.calls)
+	}
+	if s := c.do("POST", "/api/v1/updates", map[string]any{"node_ids": []string{web01.ID}, "apt": map[string]any{}, "start_from": web01.ID}, nil); s != http.StatusBadRequest {
+		t.Fatalf("hervatten zonder cluster: %d", s)
+	}
+
+	// Alles bijwerken (fase 47): eerst het plan, dan één taak die het
+	// cluster met een gewone clusterupdate bijwerkt.
+	var all struct {
+		Job      *job     `json:"job"`
+		Clusters []string `json:"clusters"`
+		Skipped  []string `json:"skipped"`
+	}
+	if s := c.do("POST", "/api/v1/updates/all", map[string]any{"apt": map[string]any{}, "failover": false, "dry_run": true}, &all); s != http.StatusAccepted || all.Job != nil || len(all.Clusters) != 1 || all.Clusters[0] != "Web" {
+		t.Fatalf("plan: %d %+v", s, all)
+	}
+	if s := c.do("POST", "/api/v1/updates/all", map[string]any{"apt": map[string]any{}, "failover": false}, &all); s != http.StatusAccepted || all.Job == nil {
+		t.Fatalf("alles: %d %+v", s, all)
+	}
+	j = waitJob(t, c, all.Job.ID)
+	if j.Status != "succeeded" || len(j.Steps) != 1 || j.Steps[0].Name != "Web" || n1.got("apt-get upgrade") != 3 || n2.got("apt-get upgrade") != 2 {
+		t.Fatalf("alles: %+v", j)
+	}
+
+	// Hervatten na een fout (fase 47): een update die op web01 stopte, gaat
+	// daar verder met dezelfde keuzes.
+	var failedID string
+	if err := e.pool.QueryRow(context.Background(), `INSERT INTO jobs (kind, title, status, cluster_id, params, finished_at)
+		VALUES ('updates.run', 'Pakketten bijwerken in Web', 'failed', $1,
+		  jsonb_build_object('apt', '{}'::jsonb, 'no_failover', true, 'nodes', jsonb_build_array(
+		    jsonb_build_object('id', $2::text, 'hostname', 'web02'), jsonb_build_object('id', $3::text, 'hostname', 'web01', 'vip_holder', true))),
+		  now()) RETURNING id`, lab.ID, web02.ID, web01.ID).Scan(&failedID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO job_steps (job_id, seq, name, status, finished_at, state, log, error) VALUES
+		($1, 0, 'web02: voorbereiden', 'succeeded', now(), '{}', '{}', ''),
+		($1, 1, 'web02: pakketten (apt)', 'succeeded', now(), '{}', '{}', ''),
+		($1, 2, 'web02: gezond terug', 'succeeded', now(), '{}', '{}', ''),
+		($1, 3, 'web01 (VIP-houder): voorbereiden', 'succeeded', now(), '{}', '{}', ''),
+		($1, 4, 'web01 (VIP-houder): pakketten (apt)', 'failed', now(), '{}', '{}', 'kapot')`, failedID); err != nil {
+		t.Fatal(err)
+	}
+	var hint struct {
+		NodeID   string   `json:"node_id"`
+		Hostname string   `json:"hostname"`
+		Done     []string `json:"done"`
+	}
+	if s := c.do("GET", "/api/v1/updates/resume/"+failedID, nil, &hint); s != http.StatusOK || hint.NodeID != web01.ID || len(hint.Done) != 1 || hint.Done[0] != "web02" {
+		t.Fatalf("waar verder: %d %+v", s, hint)
+	}
+	if s := c.do("POST", "/api/v1/updates/resume/"+failedID, map[string]any{"skip_projects": []string{"x"}}, nil); s != http.StatusBadRequest {
+		t.Fatalf("overslaan zonder Docker: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/updates/resume/"+failedID, map[string]any{}, &started); s != http.StatusAccepted || len(started.Jobs) != 1 {
+		t.Fatalf("verder: %d %+v", s, started)
+	}
+	j = waitJob(t, c, started.Jobs[0].ID)
+	if j.Status != "succeeded" || len(j.Steps) != 3 || !strings.HasPrefix(j.Steps[0].Name, "web01") || n2.got("apt-get upgrade") != 2 || n1.got("apt-get upgrade") != 4 {
+		t.Fatalf("verder: %+v", j)
+	}
+	if s := c.do("GET", "/api/v1/updates/resume/"+started.Jobs[0].ID, nil, nil); s != http.StatusConflict {
+		t.Fatalf("gelukte taak hervatten: %d", s)
+	}
+
 	// Een eigen commando: maken, wijzigen (nieuwe revisie), draaien.
 	script := "grep -v -e '^HANodeName' /etc/zabbix/cf-zabbix_server.conf > /root/zbx-upgrade.conf && zabbix_server -f -c /root/zbx-upgrade.conf"
 	var cmd struct {
@@ -192,6 +265,19 @@ func TestUpdatesAndCommands(t *testing.T) {
 	j = waitJob(t, c, run.ID)
 	if j.Status != "failed" || !strings.Contains(j.Error, "mislukt op web02") || n1.got("/bin/sh") != before+1 {
 		t.Fatalf("verder: %+v", j)
+	}
+	// Eenmalig (fase 47): draait, maar komt niet in de lijst en niet bij de
+	// runs van het eigen commando.
+	var once job
+	if s := c.do("POST", "/api/v1/commands/once", map[string]any{"name": "ufw herstarten", "script": "systemctl restart ufw", "node_ids": []string{web01.ID}}, &once); s != http.StatusAccepted {
+		t.Fatalf("eenmalig: %d", s)
+	}
+	j = waitJob(t, c, once.ID)
+	if j.Status != "succeeded" || len(j.Steps) != 1 || !strings.Contains(strings.Join(j.Steps[0].Log, "\n"), "eenmalig") {
+		t.Fatalf("eenmalig: %+v", j)
+	}
+	if s := c.do("POST", "/api/v1/commands/once", map[string]any{"script": " ", "node_ids": []string{web01.ID}}, nil); s != http.StatusBadRequest {
+		t.Fatalf("leeg script: %d", s)
 	}
 	c.do("GET", "/api/v1/commands/"+cmd.ID, nil, &cmd)
 	if len(cmd.Runs) != 3 {

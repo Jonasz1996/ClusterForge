@@ -329,7 +329,7 @@ function UpdatesCard({ srv }: { srv: PbsServer }) {
         </QueryState>
         <p className="text-slate-500">
           Installeren gaat zoals bij elke node, met apt via de agent:{" "}
-          <Link href={`/nodes/detail?id=${id}#updates`} className="underline">
+          <Link href={`/nodes/detail?id=${id}&tab=software#updates`} className="underline">
             {srv.hostname} → Updates
           </Link>
           .

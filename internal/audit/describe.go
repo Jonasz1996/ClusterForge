@@ -754,6 +754,11 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Agents vanzelf bijwerken aangezet"
 		}
 		return "Agents vanzelf bijwerken uitgezet"
+	case "settings.agent_upgrade_night_only":
+		if p["enabled"] == true {
+			return "Agents alleen 's nachts vanzelf bijwerken aangezet"
+		}
+		return "Agents op elk moment vanzelf bijwerken"
 	case "settings.agent_upgrade_prod_auto":
 		if p["enabled"] == true {
 			return "Agents op prod vanzelf bijwerken aangezet"

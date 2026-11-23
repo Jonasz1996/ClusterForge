@@ -225,7 +225,7 @@ esac`,
 		"CF_VXB_ENV=" + filepath.Join(dir, "oud", "vaultx.env"), "CF_VXB_REALIP=" + filepath.Join(dir, "oud", "nginx-realip.conf"),
 		"CF_VXB_CODE=" + filepath.Join(dir, "oudcode"), "CF_VXB_DB=" + oudDB, "CF_VXB_BACKUPS=" + filepath.Join(dir, "oud", "backups"),
 		"CF_VXB_STATE=" + filepath.Join(dir, "oud", "state"), "CF_VXB_AUTH=" + filepath.Join(dir, "oud", "authorized_keys"),
-		"CF_VXB_PSQL=psql " + pgArgs, "CF_VXB_PGDUMP=pg_dump " + pgArgs, "CF_VXB_MD5_MAX=100000"}
+		"CF_VXB_PSQL=psql " + pgArgs, "CF_VXB_PGDUMP=pg_dump " + pgArgs, "CF_VXB_MD5_MAX=100000", "CF_VXB_TEST=1"}
 	return n
 }
 
@@ -355,6 +355,18 @@ func TestVaultXOvernemen(t *testing.T) {
 	if out, err := n.run("voorstart"); err == nil || !strings.Contains(out, "nog niet overgenomen") {
 		t.Fatalf("voorstart vóór de overname: %v\n%s", err, out)
 	}
+	// En de unit wordt overgeslagen in plaats van rond te draaien
+	// (ExecCondition, testlijst 2, 2.8).
+	if out, err := n.run("wacht"); err == nil || !strings.Contains(out, "wacht op overname") || !n.exists("state/wacht-op-overname") {
+		t.Fatalf("wacht vóór de overname: %v\n%s", err, out)
+	}
+	// Een proces buiten cf-vaultx bezet poort 8000: voorstart zegt dat
+	// duidelijk in plaats van cf-vaultx te laten crashen.
+	n.env = append(n.env, "CF_VX_PORT_HOLDER=4242 /opt/vaultx/venv/bin/uvicorn app.main:app")
+	if out, err := n.run("voorstart"); err == nil || !strings.Contains(out, "oude VaultX bezet poort 8000 (4242 ") {
+		t.Fatalf("voorstart met bezette poort: %v\n%s", err, out)
+	}
+	n.env = n.env[:len(n.env)-1]
 
 	// 0. De oude VaultX draait op deze node zelf (lokaal): een mislukte
 	// overname zet ook zijn eigen vaultx.env terug, die voorstart intussen
@@ -475,6 +487,10 @@ func TestVaultXOvernemen(t *testing.T) {
 	}
 	_ = os.Remove(filepath.Join(n.dir, "oud-actief"))
 
+	// Na de overname mag cf-vaultx starten.
+	if out, err := n.run("wacht"); err != nil || n.exists("state/wacht-op-overname") {
+		t.Fatalf("wacht na de overname: %v\n%s", err, out)
+	}
 	// voorstart: de instellingen van de oude node, met de database van het
 	// cluster, en geen sleutel van de template.
 	if out, err := n.run("voorstart"); err != nil {

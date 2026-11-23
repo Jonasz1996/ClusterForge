@@ -41,6 +41,9 @@ func (s *Server) GetRisk(w http.ResponseWriter, r *http.Request) {
 			redactFinding(&ov.Findings[i].Finding)
 		}
 	}
+	for i := range ov.Findings {
+		ov.Findings[i].Title = risk.Checks[ov.Findings[i].Check]
+	}
 	writeJSON(w, http.StatusOK, ov)
 }
 

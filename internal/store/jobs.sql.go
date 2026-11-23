@@ -295,15 +295,21 @@ FROM jobs j LEFT JOIN users u ON u.id = j.requested_by
 WHERE ($1::uuid IS NULL OR j.node_id = $1)
   AND ($2::uuid IS NULL OR j.proxmox_id = $2)
   AND ($3::uuid IS NULL OR j.cluster_id = $3)
+  AND ($4::uuid IS NULL OR j.requested_by = $4)
+  AND (NOT $5::boolean OR j.requested_by IS NOT NULL)
+  AND ($6::text IS NULL OR j.status::text = $6)
 ORDER BY j.created_at DESC
-LIMIT $4
+LIMIT $7
 `
 
 type ListJobsParams struct {
-	NodeID    *uuid.UUID
-	ProxmoxID *uuid.UUID
-	ClusterID *uuid.UUID
-	MaxRows   int32
+	NodeID      *uuid.UUID
+	ProxmoxID   *uuid.UUID
+	ClusterID   *uuid.UUID
+	RequestedBy *uuid.UUID
+	PeopleOnly  bool
+	Status      *string
+	MaxRows     int32
 }
 
 type ListJobsRow struct {
@@ -316,6 +322,9 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]ListJobsR
 		arg.NodeID,
 		arg.ProxmoxID,
 		arg.ClusterID,
+		arg.RequestedBy,
+		arg.PeopleOnly,
+		arg.Status,
 		arg.MaxRows,
 	)
 	if err != nil {

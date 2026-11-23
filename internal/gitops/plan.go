@@ -120,6 +120,8 @@ type planned struct {
 	// unrendered zegt welke nodes niet te renderen waren; zo'n plan is niet
 	// toe te passen.
 	unrendered []string
+	// rebuild: een parameter met rebuild veranderde; alles opnieuw.
+	rebuild bool
 }
 
 // planChange is planUpdate met de diffs per node erbij. commit is leeg bij
@@ -238,7 +240,17 @@ func (s *Service) planChange(ctx context.Context, c *Cluster, ch *Checked, commi
 	}
 	p.NoSteps = len(p.Nodes) == 0
 	p.Summary = summary(p)
-	return &planned{plan: p, next: next, diffs: diffs, isNew: isNew, newTpl: newTpl, oldTpl: oldTpl, unrendered: warnings}, nil, nil
+	rebuild := false
+	for _, pr := range newTpl.Params {
+		if pr.Rebuild && fmt.Sprint(old.Params[pr.Name]) != fmt.Sprint(next.Params[pr.Name]) {
+			rebuild = true
+			p.Warnings = append(p.Warnings, fmt.Sprintf("%s verandert: elke node krijgt de hele template opnieuw (bouwen en herstarten), één node tegelijk.", pr.Label))
+		}
+	}
+	if rebuild && p.NoSteps {
+		p.NoSteps = false
+	}
+	return &planned{plan: p, next: next, diffs: diffs, isNew: isNew, newTpl: newTpl, oldTpl: oldTpl, unrendered: warnings, rebuild: rebuild}, nil, nil
 }
 
 // kubeWarnings zeggen wat een nieuwe k3s met de nodes doet.

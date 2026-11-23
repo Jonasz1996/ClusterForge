@@ -154,6 +154,7 @@ stop) rm -f "$CF_TEST_DIR/foreign";;
 esac
 exit 0`,
 		"hostname": `echo ` + name,
+		"ss":       `cat "$CF_TEST_DIR/ss" 2>/dev/null; exit 0`,
 	}
 	for cmd, body := range stubs {
 		if err := os.WriteFile(filepath.Join(n.bin, cmd), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
@@ -449,6 +450,17 @@ func TestNPMHealth(t *testing.T) {
 		return strings.Contains(string(b), s)
 	}
 	check(true, "gezond")
+
+	// nginx op de host houdt poort 80 vast: deze node neemt het VIP niet,
+	// ook al zegt NPM gezond (docker-proxy van NPM zelf telt niet).
+	write(t, map[string]string{dir + "/ss": "LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=812,fd=6))\n"})
+	check(false, "poort 80 bezet door nginx")
+	if !logged("poort 80/443 is bezet door \"nginx\"") {
+		t.Error("geen melding over de bezette poort")
+	}
+	write(t, map[string]string{dir + "/ss": "LISTEN 0 4096 0.0.0.0:80 0.0.0.0:* users:((\"docker-proxy\",pid=900,fd=4))\n"})
+	check(true, "poort 80 van docker-proxy (NPM zelf)")
+	_ = os.Remove(dir + "/ss")
 
 	// De container stopt (of de API antwoordt niet) terwijl cf-npm actief is.
 	_ = os.Remove(dir + "/running")

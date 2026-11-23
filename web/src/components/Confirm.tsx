@@ -89,7 +89,7 @@ export function ConfirmHost() {
       )}
       <div className="mt-5 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" onClick={() => settle(false)}>
-          {p.opts.cancelLabel ?? "Annuleren"}
+          {p.opts.cancelLabel ?? (typeof p.message === "string" && /annul/i.test(p.message) ? "Nee, terug" : "Annuleren")}
         </Button>
         <Button ref={okRef} variant={danger ? "danger" : "primary"} onClick={() => settle(true)}>
           {p.opts.confirmLabel ?? (danger ? "Ja, doorgaan" : "Bevestigen")}

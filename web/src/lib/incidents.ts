@@ -31,6 +31,7 @@ export const subjectTypes: Record<IncidentSubject["type"], string> = {
   app: "App",
   cron: "Cronjob",
   cron_job: "Beheerde cronjob",
+  unit: "Dienst in herstartlus",
 };
 
 // statusLabel is een status van een onderwerp in het Nederlands; een test
@@ -63,6 +64,8 @@ export function subjectHref(s: IncidentSubject): string | null {
       return "/cronjobs";
     case "cron_job":
       return `/cronjobs/job?id=${s.id}`;
+    case "unit":
+      return "/logs";
     case "app":
       return s.cluster_id && s.app ? objectHref(s.cluster_id, refOf(s.app.kind, s.app.namespace, s.app.name)) : null;
   }

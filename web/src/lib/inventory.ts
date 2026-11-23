@@ -63,12 +63,14 @@ export const connections: Record<AgentConnection, { label: string; tone: "green"
   offline: { label: "Offline", tone: "red" },
 };
 
-export const statuses: Record<Status, { label: string; tone: "slate" | "green" | "amber" | "red" }> = {
-  healthy: { label: "Gezond", tone: "green" },
-  degraded: { label: "Verminderd", tone: "amber" },
-  down: { label: "Down", tone: "red" },
-  split_brain: { label: "Split-brain", tone: "red" },
-  unknown: { label: "Onbekend", tone: "slate" },
+// Status in gewone taal (fase 47): "verminderd" zei niet of gebruikers er
+// iets van merken. impact zegt het apart: werkt de dienst nog of niet.
+export const statuses: Record<Status, { label: string; tone: "slate" | "green" | "amber" | "red"; impact: string }> = {
+  healthy: { label: "Gezond", tone: "green", impact: "Dienst werkt" },
+  degraded: { label: "Werkt, met waarschuwing", tone: "amber", impact: "Dienst werkt" },
+  down: { label: "Plat", tone: "red", impact: "Dienst plat" },
+  split_brain: { label: "Split-brain (VIP dubbel)", tone: "red", impact: "Dienst onbetrouwbaar" },
+  unknown: { label: "Onbekend", tone: "slate", impact: "Onbekend" },
 };
 
 export const metricsRanges: { value: MetricsRange; label: string }[] = [

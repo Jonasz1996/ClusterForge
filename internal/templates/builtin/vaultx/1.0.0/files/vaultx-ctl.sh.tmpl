@@ -94,12 +94,72 @@ keyhash() { key | sha256sum | cut -c1-16; }
 
 # Een VaultX-api die gezond antwoordt (database bereikbaar).
 healthy() { curl -fsS -m 4 -o /dev/null "http://127.0.0.1:8000/health/ready" 2>/dev/null; }
+# Wie poort 8000 bezet: "pid programma", leeg als niemand (of zonder ss).
+port_holder() {
+  [ -n "${CF_VX_TEST:-}" ] && { echo "${CF_VX_PORT_HOLDER:-}"; return 0; }
+  pid=$(ss -ltnpH 'sport = :8000' 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)
+  [ -n "$pid" ] || return 0
+  echo "$pid $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-80)"
+}
+# Poort 8000 bezet door iets buiten cf-vaultx (zoals de oude VaultX)?
+port_foreign() {
+  h=$(port_holder)
+  [ -n "$h" ] || return 1
+  [ -n "${CF_VX_TEST:-}" ] && return 0
+  pid=${h%% *}
+  ! grep -q 'cf-vaultx\.service' "/proc/$pid/cgroup" 2>/dev/null
+}
 fingerprint() {
   { settings; cat "$STATE/gebouwd" 2>/dev/null; } | sha256sum | cut -d' ' -f1
 }
 
+# wacht (ExecCondition, testlijst 2, 2.8): vóór de overname start cf-vaultx
+# niet. Zo draait systemd geen herstartlus (29.000 pogingen op 22/11): de
+# unit wordt overgeslagen en $WACHT zegt waarom; check start hem vanzelf
+# zodra de overname gebeurd is. Database onbereikbaar is geen wachten op een
+# overname: dan probeert voorstart het opnieuw.
+WACHT=$STATE/wacht-op-overname
+waiting() {
+  if port_foreign; then
+    echo "oude VaultX bezet poort 8000 ($(port_holder))"
+    return 0
+  fi
+  meta=$(db_meta 2>/dev/null) || return 1
+  if [ -z "$(metafield "$meta" ready)" ] && [ "$NIEUW" != true ]; then
+    echo "de kluis is nog niet overgenomen (vaultx-ctl.sh overnemen <IP van de oude node>)"
+    return 0
+  fi
+  return 1
+}
+wacht() {
+  if why=$(waiting); then
+    mkdir -p "$STATE" 2>/dev/null
+    if [ ! -f "$WACHT" ]; then
+      logger -t cf-vaultx "wacht op overname: $why; cf-vaultx start daarna vanzelf" 2>/dev/null
+    fi
+    echo "$why" > "$WACHT"
+    echo "wacht op overname: $why" >&2
+    exit 1
+  fi
+  rm -f "$WACHT"
+  exit 0
+}
+na_overname() {
+  [ -f "$WACHT" ] || return 0
+  [ -n "$(find "$WACHT" -mmin -0.5 2>/dev/null)" ] && return 0
+  if waiting >/dev/null; then
+    touch "$WACHT"
+    return 0
+  fi
+  rm -f "$WACHT"
+  sysctl_ start --no-block cf-vaultx
+}
+
 voorstart() {
   [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
+  if port_foreign; then
+    fail "oude VaultX bezet poort 8000 ($(port_holder)); stop die eerst (systemctl disable --now vaultx, of kill dat proces). cf-vaultx probeert het over 15 s opnieuw"
+  fi
   [ -x "$CODE/venv/bin/uvicorn" ] || fail "VaultX is nog niet gebouwd ($CODE)"
   meta=$(db_meta) || fail "de database op $DB_VIP antwoordt niet (nog niet uitgerold, of Patroni zonder primary); cf-vaultx probeert het over 15 s opnieuw"
   if [ -n "$(metafield "$meta" ready)" ]; then
@@ -407,10 +467,18 @@ overnemen() {
 
   say "VaultX van het cluster starten"
   [ -s "$CF/nginx-realip.conf" ] && install_realip
+  # Anders antwoordt straks de oude VaultX op de gezondheidstest en blijft
+  # cf-vaultx crashen omdat de poort bezet is.
+  if port_foreign; then
+    back "oude VaultX bezet poort 8000 nog ($(port_holder)), ook na het stoppen; stop dat proces en probeer opnieuw"
+  fi
   sysctl_ restart cf-vaultx || back "systemctl restart cf-vaultx (journalctl -u cf-vaultx)"
   i=0
-  while ! healthy; do
+  while ! healthy || ! sysctl_ is-active --quiet cf-vaultx || port_foreign; do
     i=$((i + 1))
+    if port_foreign; then
+      back "oude VaultX bezet poort 8000 ($(port_holder)); cf-vaultx kan niet starten"
+    fi
     [ $i -le "${CF_VX_WAIT:-60}" ] || back "VaultX van het cluster antwoordt niet gezond (journalctl -u cf-vaultx)"
     sleep "${CF_VX_SLEEP:-2}"
   done
@@ -601,6 +669,7 @@ status() {
   if has_ip "$VIP"; then echo "VIP:        $VIP staat hier"; else echo "VIP:        $VIP staat elders"; fi
   if has_ip "$DB_VIP"; then echo "db-VIP:     $DB_VIP staat hier (primary)"; else echo "db-VIP:     $DB_VIP staat elders"; fi
   echo "cf-vaultx:  $(sysctl_ is-active cf-vaultx 2>/dev/null)"
+  [ -f "$WACHT" ] && echo "wacht:      op overname: $(cat "$WACHT")"
   if healthy; then echo "VaultX:     antwoordt gezond"; else echo "VaultX:     antwoordt NIET op 127.0.0.1:8000"; fi
   if meta=$(db_meta 2>/dev/null); then
     echo "database:   ${meta:-geen markering} ($(db_tables) tabellen)"
@@ -616,7 +685,9 @@ status() {
 
 case "${1:-}" in
   voorstart) voorstart ;;
+  wacht) wacht ;;
   check)
+    na_overname
     sysctl_ is-active --quiet nginx || exit 1
     healthy
     ;;

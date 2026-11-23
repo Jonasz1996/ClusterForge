@@ -34,7 +34,7 @@ func (s *Server) ApplyKube(w http.ResponseWriter, r *http.Request, clusterID uui
 		return
 	}
 	preview := deref(in.Preview)
-	if !preview && !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "YAML toepassen") {
+	if !preview && !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "YAML toepassen") {
 		return
 	}
 	force := deref(in.Force)

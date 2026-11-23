@@ -21,6 +21,7 @@ var released = map[string][]string{
 	"nginx-proxy-manager": {"1.0.0"},
 	"home-assistant":      {"1.0.0"},
 	"authentik":           {"1.0.0"},
+	"postfix-relay":       {"1.0.0"},
 	"rustdesk":            {"1.0.0"},
 	"clusterforge":        {"1.0.0"},
 	"vaultx":              {"1.0.0"},

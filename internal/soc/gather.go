@@ -299,7 +299,8 @@ func (s *Service) coverage(ctx context.Context, now time.Time) ([]CoverageRow, e
 			for _, sv := range f.Services {
 				switch strings.TrimSuffix(sv.Name, ".service") {
 				case "ufw":
-					fw.serviceActive = sv.Active == "active"
+					// ufw.service is een oneshot: "active" ook met een
+					// uitgeschakelde ufw. Alleen de firewallstand telt.
 				case "crowdsec":
 					cs.serviceActive = sv.Active == "active"
 				}
@@ -328,18 +329,15 @@ func (s *Service) coverage(ctx context.Context, now time.Time) ([]CoverageRow, e
 }
 
 type coverageFirewall struct {
-	row           bool
-	mode          string
-	status        *protocol.FirewallStatus
-	applyError    string
-	supported     bool
-	serviceActive bool
+	row        bool
+	mode       string
+	status     *protocol.FirewallStatus
+	applyError string
+	supported  bool
 }
 
 func (f coverageFirewall) state() string {
 	switch {
-	case !f.row && f.serviceActive:
-		return StateUnmanaged
 	case !f.row && !f.supported:
 		return StateUnsupported
 	case !f.row:

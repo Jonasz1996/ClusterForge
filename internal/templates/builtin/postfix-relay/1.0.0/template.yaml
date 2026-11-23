@@ -1,0 +1,182 @@
+name: postfix-relay
+version: 1.0.0
+title: Postfix-relay (HA)
+description: >-
+  Een interne mailrelay voor je servers en apps: Postfix op twee kleine
+  nodes achter één VIP van keepalived. Alles wat binnen je eigen VLAN's mail
+  stuurt, stuurt naar het VIP op poort 25; Postfix geeft de mail door aan de
+  smarthost van je provider (met login en TLS) en zet er altijd hetzelfde
+  afzenderadres op. Alleen de netwerken die jij opgeeft mogen relayen: het
+  cluster test bij elke uitrol en elke paar minuten zelf dat het geen open
+  relay is. ClusterForge houdt de wachtrij in het oog en meldt het als die
+  groeit; met Zabbix-agent erbij krijgt Zabbix het item cf.postfix.queue.
+cluster_type: keepalived
+# Terugspringen kost niets (elke node heeft zijn eigen wachtrij), maar ook
+# niets op: het VIP blijft waar het is.
+failback: false
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres waarnaar je servers mail sturen (poort 25). Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    default: 2
+    min: 2
+    max: 3
+  - name: relayhost
+    type: string
+    label: Smarthost
+    help: De SMTP-server van je provider, zoals smtp-relay.brevo.com of smtp.office365.com, zonder poort.
+    pattern: '[A-Za-z0-9][A-Za-z0-9.-]{0,252}'
+  - name: relay_port
+    type: int
+    label: Poort van de smarthost
+    help: 587 of 2525 met STARTTLS, 465 met TLS vanaf het begin, 25 zonder login.
+    default: 587
+    choices: [25, 465, 587, 2525]
+  - name: relay_tls
+    type: bool
+    label: TLS verplicht
+    help: Aan weigert Postfix door te sturen zonder versleuteling. Uit alleen voor een relay van je provider op poort 25 die geen TLS kent.
+    default: true
+  - name: relay_user
+    type: string
+    label: Gebruiker bij de smarthost
+    help: Leeg laten stuurt zonder login (alleen bij een relay die je IP vertrouwt).
+    optional: true
+    pattern: '[A-Za-z0-9._%+@-]{1,128}'
+  - name: relay_password
+    type: secret
+    label: Wachtwoord of API-sleutel
+    help: >-
+      Staat versleuteld bij de geheimen van het cluster. Letters, cijfers en
+      . _ ~ - (6 tot 64 tekens). Zonder gebruiker wordt het niet gebruikt.
+    length: 64
+  - name: sender
+    type: string
+    label: Afzender
+    help: Elke mail gaat met dit adres als afzender buiten, zoals servers@jouwdomein.be. Het domein moet bij je provider geverifieerd zijn (SPF/DKIM).
+    pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+  - name: sender_name
+    type: string
+    label: Naam van de afzender
+    help: Zoals "Servers thuis". Leeg laten houdt de naam die de app meegeeft.
+    optional: true
+    pattern: '[A-Za-z0-9 ._()-]{1,64}'
+  - name: mynetworks
+    type: string
+    label: Netwerken die mogen relayen
+    help: >-
+      Komma-gescheiden CIDR's van je interne VLAN's, zoals
+      192.168.10.0/24,192.168.113.0/24. Nooit 0.0.0.0/0: alleen deze netwerken
+      mogen mail via de relay sturen. Ruimer dan /8 kan niet.
+    pattern: '[0-9]{1,3}(\.[0-9]{1,3}){3}/([89]|[12][0-9]|3[0-2])(,[0-9]{1,3}(\.[0-9]{1,3}){3}/([89]|[12][0-9]|3[0-2]))*'
+  - name: test_to
+    type: string
+    label: Ontvanger van de testmail
+    help: Waar de knop "Testmail sturen" standaard naartoe stuurt.
+    optional: true
+    pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+  - name: queue_warn
+    type: int
+    label: Melding vanaf zoveel mails in de wachtrij
+    help: ClusterForge meldt het ook als de wachtrij drie metingen na elkaar groeit.
+    default: 20
+    min: 1
+    max: 100000
+  - name: message_size_mb
+    type: int
+    label: Grootste mail (MB)
+    default: 25
+    min: 1
+    max: 100
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 1
+    min: 1
+    max: 4
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 512M
+    min: 256M
+    max: 4G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 4G
+    min: 2G
+    max: 100G
+
+roles:
+  - name: relay
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      - package: { names: [postfix, libsasl2-modules, ca-certificates, keepalived, iproute2, bash] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /etc/cf-postfix, mode: "0700" }
+      - file:
+          path: /etc/cf-postfix/relay.conf
+          template: relay.conf.tmpl
+          mode: "0600"
+      - file:
+          path: /usr/local/lib/clusterforge/postfix-ctl.sh
+          template: postfix-ctl.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /etc/sysctl.d/90-cf-postfix.conf
+          content: "# Beheerd door ClusterForge: Postfix luistert ook op het VIP als deze node het niet heeft.\nnet.ipv4.ip_nonlocal_bind = 1\n"
+      - file:
+          path: /etc/postfix/main.cf
+          template: main.cf.tmpl
+      # Kaarten, master.cf (luisteren op 127.0.0.1 en het VIP) en Postfix
+      # herladen; alleen als er iets veranderde.
+      - command:
+          title: Postfix instellen
+          run: /usr/local/lib/clusterforge/postfix-ctl.sh configure
+          unless: /usr/local/lib/clusterforge/postfix-ctl.sh configured
+      - service: { name: postfix, enabled: true, state: started }
+      # Elke uitrol: geen open relay. Faalt dit, dan stopt de uitrol.
+      - command:
+          title: geen open relay
+          run: /usr/local/lib/clusterforge/postfix-ctl.sh relaytest
+          unless: /usr/local/lib/clusterforge/postfix-ctl.sh relaytest-recent
+      - command:
+          title: Zabbix-item voor de wachtrij
+          run: /usr/local/lib/clusterforge/postfix-ctl.sh zabbix
+          unless: /usr/local/lib/clusterforge/postfix-ctl.sh zabbix-ok
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 60s }
+
+services:
+  - { name: postfix, kind: app, unit: postfix, port: 25, depends_on: [keepalived], strength: hard }
+  - { name: keepalived, kind: vip, unit: keepalived }

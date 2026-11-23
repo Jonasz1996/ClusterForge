@@ -640,4 +640,53 @@ func TestDeployGuestAgentTimeout(t *testing.T) {
 	if strings.Contains(logs, "naar pve2") {
 		t.Errorf("kloon naar pve2 zonder gedeelde storage:\n%s", logs)
 	}
+
+	// Fase 48 (4.2): de mislukte uitrol opruimen, zodat slug en adressen
+	// weer vrij zijn, en de aanvraag terug voor de wizard.
+	var f struct {
+		CanClean bool             `json:"can_clean"`
+		Exists   bool             `json:"cluster_exists"`
+		Slug     string           `json:"slug"`
+		Nodes    []map[string]any `json:"nodes"`
+		Request  map[string]any   `json:"request"`
+		Cleanup  *string          `json:"cleanup_job_id"`
+	}
+	path := "/api/v1/deploy/failed/" + res.Job.ID
+	if s := c.do("GET", path, nil, &f); s != http.StatusOK || !f.CanClean || !f.Exists || f.Slug != "lab" || len(f.Nodes) != 2 {
+		t.Fatalf("mislukte uitrol: %d %+v", s, f)
+	}
+	if f.Request["template"] != "keepalived-nginx" || f.Request["params"].(map[string]any)["vip"] != "10.0.20.100" {
+		t.Fatalf("aanvraag: %+v", f.Request)
+	}
+	if s := c.do("POST", path+"/cleanup", map[string]any{"confirm": "verkeerd"}, nil); s != http.StatusBadRequest {
+		t.Fatalf("zonder de slug: %d", s)
+	}
+	var cj job
+	if s := c.do("POST", path+"/cleanup", map[string]any{"confirm": "lab"}, &cj); s != http.StatusAccepted {
+		t.Fatalf("opruimen: %d", s)
+	}
+	if done := waitJob(t, c, cj.ID); done.Status != "succeeded" {
+		t.Fatalf("opruimen: %+v", done)
+	}
+	if s := c.do("GET", path, nil, &f); s != http.StatusOK || f.Exists || f.CanClean || f.Cleanup == nil {
+		t.Fatalf("na opruimen: %d %+v", s, f)
+	}
+	var cnt int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM nodes WHERE hostname LIKE 'lab-%'`).Scan(&cnt); err != nil || cnt != 0 {
+		t.Fatalf("nodes over: %d %v", cnt, err)
+	}
+	// Fase 48 (4.3): het netwerk bij een eerste adres.
+	var nh struct {
+		Prefix  string   `json:"prefix"`
+		Gateway string   `json:"gateway"`
+		Free    []string `json:"free"`
+	}
+	if s := c.do("GET", "/api/v1/deploy/network?ip=10.0.30.20", nil, &nh); s != http.StatusOK || nh.Prefix != "10.0.30.0/24" ||
+		nh.Gateway != "10.0.30.1" || len(nh.Free) == 0 || nh.Free[0] != "10.0.30.20" {
+		t.Fatalf("netwerk: %d %+v", s, nh)
+	}
+	// Opnieuw proberen kan niet meer: het cluster is weg.
+	if s := c.do("POST", "/api/v1/jobs/"+res.Job.ID+"/retry", nil, nil); s != http.StatusConflict {
+		t.Fatalf("opnieuw na opruimen: %d", s)
+	}
 }

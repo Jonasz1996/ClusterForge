@@ -39,6 +39,10 @@ type DockerReport struct {
 	Logs string `json:"logs,omitempty"`
 	// Edited zijn de bestanden die de run aanpaste (tags of de editor).
 	Edited []string `json:"edited,omitempty"`
+	// Unchanged: het project mislukte vóór er iets veranderde (zoals een
+	// pull die faalde); het draait zoals voordien. Een update van een
+	// cluster gaat dan door met de rest.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 // Resultaten van een project.

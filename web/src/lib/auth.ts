@@ -66,3 +66,24 @@ export function returnPath(search: string): string {
   const t = new URLSearchParams(search).get("terug") ?? "";
   return t.startsWith("/") && !t.startsWith("//") && !t.startsWith("/\\") && !t.startsWith("/login") ? t : "/";
 }
+
+export const prod2FAKey = ["security", "prod-2fa"] as const;
+
+// useProd2FA zegt of acties op prod tweestapsverificatie vragen (een
+// instelling van de installatie; standaard aan).
+export function useProd2FA() {
+  return useQuery({
+    queryKey: prod2FAKey,
+    queryFn: async () => unwrap(await api.GET("/security/prod-2fa")),
+    staleTime: 60_000,
+  });
+}
+
+// useProdAllowed is true als de gebruiker op prod mag handelen: met
+// tweestapsverificatie, of als de installatie die niet vraagt.
+export function useProdAllowed() {
+  const me = useMe();
+  const req = useProd2FA();
+  if (me.data?.user.totp_enabled) return true;
+  return req.data ? !req.data.required : false;
+}

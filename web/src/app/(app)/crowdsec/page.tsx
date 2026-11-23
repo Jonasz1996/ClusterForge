@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { NodeDialog } from "@/components/crowdsec/CrowdSecNodeCard";
+import { BlocklistsTab } from "@/components/crowdsec/Blocklists";
+import { ConsoleOff, NotifyTab } from "@/components/crowdsec/Notify";
 import { Modal } from "@/components/Modal";
 import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Textarea, cx } from "@/components/ui";
@@ -30,8 +32,10 @@ const tabs = [
   { key: "overzicht", label: "Overzicht" },
   { key: "alerts", label: "Alerts" },
   { key: "bans", label: "Bans" },
+  { key: "blocklists", label: "Blocklists" },
   { key: "nodes", label: "Nodes" },
   { key: "profielen", label: "Profielen" },
+  { key: "meldingen", label: "Meldingen" },
   { key: "instellingen", label: "Instellingen" },
 ] as const;
 type Tab = (typeof tabs)[number]["key"];
@@ -63,13 +67,15 @@ function CrowdSec() {
     <div className="space-y-6">
       <PageHeader
         title="CrowdSec"
-        description="ClusterForge installeert CrowdSec en de nftables-bouncer op de nodes die je aanzet, herkent de software die er draait en zet daar de juiste collections en logbronnen voor. Een ban op één node geldt meteen op de andere."
+        description="ClusterForge installeert CrowdSec en de nftables-bouncer op de nodes die je aanzet, herkent de software die er draait en zet daar de juiste collections en logbronnen voor. Een ban op één node geldt meteen op de andere. Blocklists, automatisch blokkeren en meldingen beheert ClusterForge zelf, zonder de CrowdSec-cloud."
       />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {data.isError && <Alert>CrowdSec laden mislukte.</Alert>}
       {data.data && tab === "overzicht" && <OverviewTab o={data.data} isAdmin={isAdmin} goNodes={() => setTab("nodes")} />}
       {data.data && tab === "alerts" && <AlertsTab o={data.data} isAdmin={isAdmin} />}
       {data.data && tab === "bans" && <BansTab o={data.data} isAdmin={isAdmin} />}
+      {data.data && tab === "blocklists" && <BlocklistsTab o={data.data} isAdmin={isAdmin} />}
+      {data.data && tab === "meldingen" && <NotifyTab o={data.data} isAdmin={isAdmin} />}
       {data.data && tab === "nodes" && <NodesTab o={data.data} isAdmin={isAdmin} />}
       {data.data && tab === "profielen" && <ProfilesTab o={data.data} />}
       {data.data && tab === "instellingen" && <SettingsTab o={data.data} isAdmin={isAdmin} />}
@@ -386,6 +392,8 @@ function BanDialog({ o, initial, onClose }: { o: CrowdSecOverview; initial: stri
   const [duration, setDuration] = useState("24h");
   const [reason, setReason] = useState("");
   const [where, setWhere] = useState("all");
+  const [central, setCentral] = useState(true);
+  const [permanent, setPermanent] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const clusters = [...new Map(o.nodes.filter((n) => n.enabled && n.cluster_id).map((n) => [n.cluster_id!, n.cluster_name])).entries()];
   const submit = () => {
@@ -398,6 +406,8 @@ function BanDialog({ o, initial, onClose }: { o: CrowdSecOverview; initial: stri
         reason: reason.trim() || undefined,
         cluster_id: where.startsWith("c:") ? where.slice(2) : undefined,
         node_ids: where.startsWith("n:") ? [where.slice(2)] : undefined,
+        central: where === "all" && central,
+        permanent: where === "all" && central && permanent,
       },
       {
         onSuccess: (r) => setResult(`Geblokkeerd op ${r.nodes.join(", ") || "geen node"}${r.errors.length ? `; niet op: ${r.errors.join("; ")}` : ""}.`),
@@ -440,6 +450,23 @@ function BanDialog({ o, initial, onClose }: { o: CrowdSecOverview; initial: stri
               ))}
           </Select>
         </Field>
+        {where === "all" && (
+          <div className="space-y-1 text-sm">
+            <label className="flex items-start gap-2">
+              <input type="checkbox" className="mt-1" checked={central} onChange={(e) => setCentral(e.target.checked)} />
+              <span>
+                Ook in de eigen blocklist
+                <span className="block text-xs text-slate-500">Blijft staan, ook op nodes die later bijkomen of na een herstart van CrowdSec.</span>
+              </span>
+            </label>
+            {central && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={permanent} onChange={(e) => setPermanent(e.target.checked)} />
+                Voor altijd (de duur hierboven geldt dan alleen voor de eerste ban)
+              </label>
+            )}
+          </div>
+        )}
         {decide.isError && <Alert>{errText(decide.error)}</Alert>}
         {result && <Alert kind="success">{result}</Alert>}
         <div className="flex justify-end gap-2">
@@ -748,6 +775,7 @@ function ConsoleSettings({ o, isAdmin }: { o: CrowdSecOverview; isAdmin: boolean
   const failed = managed.filter((n) => n.console_error);
   return (
     <div className="mt-6 max-w-2xl space-y-3 border-t border-slate-200 pt-4 text-sm dark:border-slate-700">
+      <ConsoleOff o={o} isAdmin={isAdmin} />
       <div>
         <h3 className="font-medium">CrowdSec Console</h3>
         <p className="text-xs text-slate-500">

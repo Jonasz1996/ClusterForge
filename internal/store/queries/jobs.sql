@@ -62,6 +62,9 @@ FROM jobs j LEFT JOIN users u ON u.id = j.requested_by
 WHERE (sqlc.narg(node_id)::uuid IS NULL OR j.node_id = sqlc.narg(node_id))
   AND (sqlc.narg(proxmox_id)::uuid IS NULL OR j.proxmox_id = sqlc.narg(proxmox_id))
   AND (sqlc.narg(cluster_id)::uuid IS NULL OR j.cluster_id = sqlc.narg(cluster_id))
+  AND (sqlc.narg(requested_by)::uuid IS NULL OR j.requested_by = sqlc.narg(requested_by))
+  AND (NOT @people_only::boolean OR j.requested_by IS NOT NULL)
+  AND (sqlc.narg(status)::text IS NULL OR j.status::text = sqlc.narg(status))
 ORDER BY j.created_at DESC
 LIMIT @max_rows;
 

@@ -71,7 +71,7 @@ func (n *csNode) exec(_ context.Context, name string, args ...string) ([]byte, e
 		return fmt.Appendf(nil, `[{"id":3,"scenario":"crowdsecurity/ssh-bf","events_count":6,"start_at":%q,"stop_at":%q,
 			"source":{"scope":"Ip","value":"203.0.113.50","cn":"RU"},"decisions":[{"id":9,"origin":"crowdsec"}]}]`,
 			now.Add(-time.Minute).Format(time.RFC3339), now.Format(time.RFC3339)), nil
-	case c == "cscli decisions list -o json":
+	case strings.HasPrefix(c, "cscli decisions list -o json"):
 		return []byte(`[{"id":3,"source":{"scope":"Ip","value":"203.0.113.50","cn":"RU"},
 			"decisions":[{"id":9,"origin":"crowdsec","type":"ban","scope":"Ip","value":"203.0.113.50","duration":"3h50m","scenario":"crowdsecurity/ssh-bf"}]}]`), nil
 	case strings.HasPrefix(c, "cscli decisions"):

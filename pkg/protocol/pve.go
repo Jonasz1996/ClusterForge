@@ -316,6 +316,10 @@ type PVEBootstrapSpec struct {
 	// KnownHost is het adres van de CT voor ssh-keyscan; leeg slaat dat
 	// over.
 	KnownHost string `json:"known_host,omitempty"`
+	// Reach zijn host:poort-adressen die de CT moet bereiken (het adres
+	// van ClusterForge en NATS op 4222), vóór er iets in de CT komt
+	// (fase 48). Een oudere agent slaat de controle over.
+	Reach []string `json:"reach,omitempty"`
 }
 
 // PVERunResult is wat een run pve teruggeeft.

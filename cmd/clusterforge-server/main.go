@@ -64,7 +64,9 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
+	"github.com/Jonasz1996/clusterforge/internal/mailrelay"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/noderun"
 	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
@@ -72,6 +74,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
+	"github.com/Jonasz1996/clusterforge/internal/replace"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
@@ -85,6 +88,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
+	"github.com/Jonasz1996/clusterforge/internal/upkeep"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
@@ -243,6 +247,7 @@ func serve() error {
 	// Fase 45: ClusterForge werkt zichzelf bij vanuit de webinterface en
 	// verhuist naar een eigen cluster (template clusterforge).
 	self := selfhost.NewService(pool, ev, log, runner, bus, bus, box, acf)
+	self.Web = bus
 	self.Version, self.Image, self.Cluster, self.Advertise = version, os.Getenv("CF_IMAGE"), os.Getenv("CF_SELF_CLUSTER"), cfg.NATSAdvertise
 	self.MasterKey, self.VMURL = cfg.MasterKey, cfg.VictoriaMetricsURL
 	self.LoadSettings()
@@ -254,6 +259,10 @@ func serve() error {
 	csec.Box = box
 	// Fase 41: schijfbewaking en veilig opruimen, via scripttaken.
 	dsk := diskwatch.NewService(pool, ev, runner, bus, log)
+	// Fase 46: automatisch onderhoud door de agents (schijf en databases),
+	// per cluster rolling met het clusterslot, via scripttaken.
+	upk := upkeep.NewService(pool, ev, runner, bus, log)
+	upk.Nodes, upk.Disk, upk.DB = upd.Overview, dsk.Full, dbs.Overview
 	// Zabbix-agents: zabbix-agent2 met een eigen PSK per node, via runs en de Zabbix API.
 	zba := zabbixagent.NewService(pool, ev, runner, bus, log)
 	zbm := zabbixmon.NewService(pool, ev, zba, log)
@@ -287,6 +296,7 @@ func serve() error {
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
 	// Docker zoals Portainer (fase 28): lezen en wijzigen via de agent.
 	dkr := dockerhost.NewService(pool, ev, log, runner, bus)
+	upd.Containers = dkr.Running
 	pvh.Sync = pve
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
 	pvh.Box = box
@@ -299,6 +309,13 @@ func serve() error {
 	aivSvc.Version = version
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
+	pub.Run = &noderun.Runner{Bus: bus}
+	// Fase 48: een losse installatie vervangen door een cluster en de oude
+	// later opruimen.
+	rpl := replace.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
+	rpl.Pub, rpl.PVE = pub, pvh
+	// Testlijst 3, N30: de Postfix-relays volgen en testmails sturen.
+	mrl := mailrelay.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
 	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
@@ -377,6 +394,7 @@ func serve() error {
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
 		planner.Task{Name: "automatisch bijwerken", Tick: upd.AutoTick},
+		planner.Task{Name: "automatisch onderhoud", Tick: upk.Tick},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
 		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
@@ -498,6 +516,7 @@ func serve() error {
 	goLoop(ctx, log, "pbs", pbsSvc.Watch)
 	goLoop(ctx, log, "truenas", tnSvc.Watch)
 	goLoop(ctx, log, "aiverslag", aivSvc.Watch)
+	goLoop(ctx, log, "mailrelay", mrl.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -515,7 +534,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Replace: rpl, MailRelay: mrl, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
