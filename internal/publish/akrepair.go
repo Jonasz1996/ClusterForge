@@ -51,19 +51,31 @@ func (s *Service) planAKRepair(ctx context.Context, st Settings, managed map[int
 		if !ok {
 			continue
 		}
-		if !hasSnippet(h) {
-			noSnippet++
-			continue
-		}
 		name := strings.ToLower(v.Domains[0])
+		adv := h
+		// Testlijst 3, N15: een host met provider maar zonder forward auth in
+		// NPM krijgt die er ook bij; zo werkt "afwerken" met één klik.
+		if !hasSnippet(h) {
+			with, err := withSnippet(h, outpost)
+			if err != nil {
+				noSnippet++
+				p.Warnings = append(p.Warnings, name+": "+err.Error())
+				continue
+			}
+			adv = with
+		}
 		label := strings.TrimSuffix(name, "."+st.Domain)
 		ph := PlannedHost{HostID: v.ID, Domain: name, Scheme: "http", Protect: true, Outpost: outpost,
 			AppName: appName(label), AppSlug: slugFor(label),
-			Body: map[string]any{"advanced_config": h}, Old: map[string]any{"advanced_config": h}}
+			Body: map[string]any{"advanced_config": adv}, Old: map[string]any{"advanced_config": h}}
 		if v.CertID > 0 {
 			ph.Scheme = "https"
 		}
-		p.Lines = append(p.Lines, fmt.Sprintf("%s: %s aanmaken in Authentik (NPM blijft zoals hij is)", name, strings.TrimPrefix(v.AuthentikDetail, "ontbreekt: ")))
+		if adv != h {
+			p.Lines = append(p.Lines, fmt.Sprintf("%s: %s aanmaken in Authentik, daarna forward auth in NPM", name, strings.TrimPrefix(v.AuthentikDetail, "ontbreekt: ")))
+		} else {
+			p.Lines = append(p.Lines, fmt.Sprintf("%s: %s aanmaken in Authentik (NPM blijft zoals hij is)", name, strings.TrimPrefix(v.AuthentikDetail, "ontbreekt: ")))
+		}
 		if _, ok := managed[v.ID]; !ok {
 			p.Warnings = append(p.Warnings, name+": nog niet beheerd; ClusterForge neemt hem over")
 		}
@@ -73,7 +85,7 @@ func (s *Service) planAKRepair(ctx context.Context, st Settings, managed map[int
 		p.Lines = append(p.Lines, fmt.Sprintf("%d hosts met een tikfout in de naam overgeslagen: zet eerst de naam recht (Proxy hosts → Naam rechtzetten)", typos))
 	}
 	if noSnippet > 0 {
-		p.Lines = append(p.Lines, fmt.Sprintf("%d hosts hebben wel een provider maar geen forward auth in NPM; die zet je per host achter Authentik met de knop", noSnippet))
+		p.Lines = append(p.Lines, fmt.Sprintf("%d hosts konden geen forward auth krijgen (zie de waarschuwingen)", noSnippet))
 	}
 	if len(p.Hosts) == 0 {
 		if typos > 0 {

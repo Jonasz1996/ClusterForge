@@ -28,6 +28,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/noderun"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -70,6 +71,9 @@ type Service struct {
 	Box  *secrets.Box
 	// Sync start de sync NPM-configuratie meteen; nil slaat dat over.
 	Sync SyncRunner
+	// Run voert scripts uit op nodes (outposts van Authentik herladen);
+	// nil slaat dat over.
+	Run *noderun.Runner
 
 	mu       sync.Mutex
 	npmToken npmToken

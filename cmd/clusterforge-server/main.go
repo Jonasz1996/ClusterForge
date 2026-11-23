@@ -303,6 +303,7 @@ func serve() error {
 	aivSvc.Version = version
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
+	pub.Run = &noderun.Runner{Bus: bus}
 	// Fase 48: een losse installatie vervangen door een cluster en de oude
 	// later opruimen.
 	rpl := replace.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})

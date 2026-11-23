@@ -462,6 +462,15 @@ function HostRow({
                   naar VIP
                 </button>
               )}
+              {akLinked && h.authentik === "half" && !h.typo && (
+                <button
+                  type="button"
+                  className={btn}
+                  onClick={() => onOpen({ title: `Authentik afwerken voor ${name}`, action: { action: "ak_repair", hosts: [h.id] } })}
+                >
+                  Authentik afwerken
+                </button>
+              )}
               {akLinked &&
                 (h.authentik === "beschermd" || h.authentik === "half" ? (
                   h.authentik_by_cf || h.authentik === "half" ? (

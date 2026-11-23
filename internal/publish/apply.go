@@ -1161,7 +1161,7 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 	// gewoon open (Authentik komt pas daarna); de eerste controle eist dus
 	// nog geen doorsturen, anders draaide alles terug.
 	checkErr := j.Step(ctx, "Controle: "+ph.Domain, func(ctx context.Context, step *jobs.Step) error {
-		return s.verify(ctx, step, st, node, hostID, ph, ph.Protect && !created)
+		return s.check(ctx, step, st, node, hostID, ph, ph.Protect && !created)
 	})
 	if checkErr == nil && created && ph.Protect {
 		// Een nieuwe host achter Authentik: eerst gewoon (doel antwoordt),
@@ -1185,7 +1185,7 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 				return err
 			}
 			step.Logf("Forward auth in NPM gezet (outpost %s)", ph.Outpost)
-			return s.verify(ctx, step, st, node, hostID, ph, true)
+			return s.check(ctx, step, st, node, hostID, ph, true)
 		})
 	}
 	if checkErr != nil {
