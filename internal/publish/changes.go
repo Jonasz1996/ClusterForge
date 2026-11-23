@@ -320,7 +320,7 @@ func otherApp(before *protocol.WebCheckResult, after protocol.WebCheckResult, pr
 	if before == nil || before.Error != "" || before.Status == 0 || before.Status >= 500 {
 		return ""
 	}
-	if before.Status < 400 && after.Status >= 400 && !(protected && (after.Status == 401 || after.Status == 403)) {
+	if before.Status < 400 && after.Status >= 400 && (!protected || (after.Status != 401 && after.Status != 403)) {
 		return fmt.Sprintf("vooraf HTTP %d, nu HTTP %d", before.Status, after.Status)
 	}
 	// Een doorverwijzing (naar een aanmelding zoals de Authentik-outpost)
