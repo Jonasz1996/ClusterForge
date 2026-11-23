@@ -61,6 +61,14 @@ arr_on() { [ "$(env_get ARR)" = aan ] && [ -f "$SRC/compose.arr.yaml" ]; }
 limits_ok() {
   [ "$(docker info --format '{{"{{"}}.MemoryLimit{{"}}"}} {{"{{"}}.CPUCfsQuota{{"}}"}}' 2>/dev/null)" = "true true" ]
 }
+# Past een bestand met grenzen op deze node? Docker weigert een container met
+# meer cpus dan de node heeft (media vraagt er 3); dan blijft dat bestand weg.
+limits_fit() {
+  ncpu=$(nproc 2>/dev/null) || return 1
+  sed -n 's/^[[:space:]]*cpus:[[:space:]]*//p' "$1" | tr -d "\"'" |
+    awk -v n="$ncpu" '($1 + 0) > (n + 0) { bad = 1 } END { exit bad }'
+}
+limits_use() { [ -n "$limits" ] && [ -f "$1" ] && limits_fit "$1"; }
 compose() {
   if arr_on; then
     set -- -f "$SRC/compose.arr.yaml" -f /etc/clusterforge/platform-arr.yaml "$@"
@@ -69,19 +77,31 @@ compose() {
   limits=""; limits_ok && limits=1
   if analyse_on; then
     set -- -f /etc/clusterforge/platform-analyse.yaml "$@"
-    if [ -n "$limits" ] && [ -f "$SRC/compose.analyse-limits.yaml" ]; then
+    if limits_use "$SRC/compose.analyse-limits.yaml"; then
       set -- -f "$SRC/compose.analyse-limits.yaml" "$@"
     fi
     set -- -f "$SRC/compose.analyse.yaml" "$@"
   fi
   # De grenzen van office en media (vanaf de versies die ze hebben).
   for lim in media office; do
-    if [ -n "$limits" ] && [ -f "$SRC/compose.$lim-limits.yaml" ]; then
+    if limits_use "$SRC/compose.$lim-limits.yaml"; then
       set -- -f "$SRC/compose.$lim-limits.yaml" "$@"
     fi
   done
   docker compose -p cf-platform --project-directory "$SRC" --env-file "$ENV" \
     -f "$SRC/compose.yaml" -f "$SRC/compose.office.yaml" -f "$SRC/compose.media.yaml" "$@"
+}
+# Voor up: zeggen welke grenzen niet op deze node passen.
+limits_note() {
+  limits_ok || return 0
+  set -- office media
+  if analyse_on; then set -- "$@" analyse; fi
+  for lim in "$@"; do
+    lf=$SRC/compose.$lim-limits.yaml
+    if [ -f "$lf" ] && ! limits_fit "$lf"; then
+      echo "Let op: ${lf##*/} vraagt meer cpu's dan deze node heeft ($(nproc)); $lim start zonder grenzen." >&2
+    fi
+  done
 }
 fingerprint() {
   { cat "$ENV" /etc/clusterforge/platform-cluster.yaml
@@ -589,6 +609,7 @@ case "${1:-}" in
     # Plaatsnamen: niet fataal; zonder bronnen werkt de rest gewoon.
     geo --check >/dev/null 2>&1 || timeout 300 "$0" geo || true
     fingerprint > "$HASH"
+    limits_note
     if arr_on; then
       # Eerst de app (op de voorgrond, zoals zonder mediabeheer); qBittorrent
       # en Prowlarr pas na arr-koppel.

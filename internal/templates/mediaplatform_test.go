@@ -149,7 +149,7 @@ func TestMediaPlatformSyncs(t *testing.T) {
 // active-<unit> (systemctl is-active), cli-<commando> (wat app.cli
 // <commando> in de container afdrukt; zonder bestand kent de versie het
 // commando niet) met cli-<commando>.rc, uid (stat -c %u van elke map),
-// docker-info, services (compose config --services), healthy (/health),
+// docker-info, nproc, services (compose config --services), healthy (/health),
 // vol-status en leader (de master van SeaweedFS), arr-running. Elk
 // nep-commando schrijft zijn argumenten in log.
 type mpNode struct {
@@ -196,6 +196,7 @@ exec ` + realStat + ` "$@"`,
 		"chown":   `echo "chown $*" >> "$CF_TEST_DIR/log"`,
 		"setpriv": `while case "$1" in --*) true;; *) false;; esac; do shift; done; exec "$@"`,
 		"sleep":   `exit 0`,
+		"nproc":   `cat "$CF_TEST_DIR/nproc" 2>/dev/null || echo 8`,
 		"curl": `case "$*" in
 */health*) [ -f "$CF_TEST_DIR/healthy" ];;
 */vol/status*) cat "$CF_TEST_DIR/vol-status";;
@@ -395,15 +396,21 @@ func (n *mpNode) composeFiles() string {
 }
 
 // TestMediaPlatformCompose: de grenzen van media, office en analyse alleen
-// als Docker ze aankan en de versie ze heeft (zoals install.sh), de analyse
-// alleen met ANALYSE=aan en compose.analyse.yaml.
+// als Docker ze aankan en de versie ze heeft (zoals install.sh), en elk
+// bestand alleen als zijn cpus op de node passen (Docker weigert meer); de
+// analyse alleen met ANALYSE=aan en compose.analyse.yaml.
 func TestMediaPlatformCompose(t *testing.T) {
 	tpl, c := mpContext(t, nil)
 	files, _ := npmFiles(t, tpl, c)
 	n := newMPNode(t, files)
 	src := filepath.Join(n.dir, "src/infra/single")
 	base := "compose.yaml compose.office.yaml compose.media.yaml"
-	limits := map[string]string{"compose.office-limits.yaml": "", "compose.media-limits.yaml": "", "compose.analyse-limits.yaml": ""}
+	// Zoals in het platform (0.8.1 en 0.8.2).
+	limits := map[string]string{
+		"compose.office-limits.yaml":  "services:\n  office:\n    mem_limit: 2g\n    cpus: 2\n",
+		"compose.media-limits.yaml":   "services:\n  media:\n    mem_limit: 3g\n    cpus: 3.0\n",
+		"compose.analyse-limits.yaml": "services:\n  analyse:\n    cpus: 1.0\n    cpu_shares: 256\n  analyse-omzetten:\n    cpus: \"1.0\"\n",
+	}
 	for _, tc := range []struct {
 		name  string
 		state map[string]*string
@@ -416,6 +423,10 @@ func TestMediaPlatformCompose(t *testing.T) {
 			base + " compose.office-limits.yaml compose.media-limits.yaml compose.analyse.yaml compose.analyse-limits.yaml platform-analyse.yaml platform-cluster.yaml"},
 		{"0.8.2, docker info faalt", map[string]*string{"docker-info": nil},
 			base + " compose.analyse.yaml platform-analyse.yaml platform-cluster.yaml"},
+		{"0.8.2, 3 vCPU", map[string]*string{"docker-info": on("true true\n"), "nproc": on("3\n")},
+			base + " compose.office-limits.yaml compose.media-limits.yaml compose.analyse.yaml compose.analyse-limits.yaml platform-analyse.yaml platform-cluster.yaml"},
+		{"0.8.2, 2 vCPU: media zonder grenzen", map[string]*string{"nproc": on("2\n")},
+			base + " compose.office-limits.yaml compose.analyse.yaml compose.analyse-limits.yaml platform-analyse.yaml platform-cluster.yaml"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if strings.HasPrefix(tc.name, "0.8.2") {
@@ -432,6 +443,18 @@ func TestMediaPlatformCompose(t *testing.T) {
 			}
 		})
 	}
+	// up zegt het één keer, op de node zelf.
+	n.set(map[string]*string{"vip": on(""), "mounted": on("")})
+	out, err := n.run("up")
+	if want := "Let op: compose.media-limits.yaml vraagt meer cpu's dan deze node heeft (2); media start zonder grenzen."; err != nil ||
+		!strings.Contains(out, want) || strings.Contains(out, "office-limits") || strings.Contains(out, "analyse-limits") {
+		t.Errorf("up met 2 vCPU: %v\n%s", err, out)
+	}
+	n.set(map[string]*string{"nproc": on("4\n")})
+	if out, err := n.run("up"); err != nil || strings.Contains(out, "Let op") {
+		t.Errorf("up met 4 vCPU: %v\n%s", err, out)
+	}
+
 	// Analyse uit: geen bestanden van de analyse, ook niet zijn grenzen.
 	tpl, c = mpContext(t, map[string]any{"analyse": false})
 	files, _ = npmFiles(t, tpl, c)

@@ -155,6 +155,9 @@ params:
   - name: cpu
     type: int
     label: vCPU per node
+    help: >-
+      Met de grenzen van het platform (vanaf 0.8.1, als Docker ze aankan) mag
+      media 3 vCPU gebruiken; met minder start media zonder grenzen.
     default: 4
     min: 2
     max: 32
