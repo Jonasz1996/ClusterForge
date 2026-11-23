@@ -5817,6 +5817,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publish/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert) */
+        get: operations["getPublishChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/publish/adopt": {
         parameters: {
             query?: never;
@@ -26217,6 +26234,29 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getPublishChanges: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"][];
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     adoptPublishHosts: {

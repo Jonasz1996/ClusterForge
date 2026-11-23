@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -244,7 +245,8 @@ func checkURL(ctx context.Context, dial dialFunc, c *protocol.WebCheck) protocol
 		return out
 	}
 	defer func() { _ = res.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	out.Title = pageTitle(body)
 	out.Status = res.StatusCode
 	out.Location = res.Header.Get("Location")
 	out.Server = res.Header.Get("Server")
@@ -260,6 +262,21 @@ func checkURL(ctx context.Context, dial dialFunc, c *protocol.WebCheck) protocol
 		out.CertOK = out.CertError == ""
 	}
 	return out
+}
+
+
+// pageTitle haalt de <title> uit het begin van een pagina, ingekort en
+// zonder witruimte en HTML-entiteiten.
+func pageTitle(body []byte) string {
+	m := titleRe.FindSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	t := strings.Join(strings.Fields(html.UnescapeString(string(m[1]))), " ")
+	if len(t) > 200 {
+		t = t[:200]
+	}
+	return t
 }
 
 // --- ontdekken ---

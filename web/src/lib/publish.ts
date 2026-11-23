@@ -217,7 +217,8 @@ export type PublishActionKind =
   | "restore"
   | "rename"
   | "theme_many"
-  | "ak_repair";
+  | "ak_repair"
+  | "revert";
 
 export type PublishAction = {
   action: PublishActionKind;
@@ -243,7 +244,36 @@ export type PublishAction = {
   ssl_forced?: boolean;
   domains?: string[];
   theme?: boolean;
+  // De host mag daarna een andere app tonen (anders draait de controle terug).
+  allow_other_app?: boolean;
+  change_id?: string;
 };
+
+// Een wijziging die ClusterForge aan een proxy host deed (testlijst 2, 1.1).
+export type PublishChange = {
+  id: string;
+  job_id?: string;
+  host_id: number;
+  domain: string;
+  action: string;
+  created: boolean;
+  deleted: boolean;
+  title_before?: string;
+  title_after?: string;
+  changed_by?: string;
+  changed_at: string;
+  reverted_at?: string;
+  reverted_by?: string;
+  summary: string[];
+};
+
+export function usePublishChanges(hours = 24) {
+  return useQuery({
+    queryKey: ["publish", "changes", hours],
+    queryFn: async () =>
+      unwrap(await api.GET("/publish/changes", { params: { query: { hours } } })) as unknown as PublishChange[],
+  });
+}
 
 export type PublishPlan = {
   title: string;

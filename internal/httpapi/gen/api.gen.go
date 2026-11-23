@@ -16026,6 +16026,11 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetPublishChangesParams defines parameters for GetPublishChanges.
+type GetPublishChangesParams struct {
+	Hours *int `form:"hours,omitempty" json:"hours,omitempty"`
+}
+
 // GetPublishLoginsParams defines parameters for GetPublishLogins.
 type GetPublishLoginsParams struct {
 	Window *GetPublishLoginsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -17750,6 +17755,9 @@ type ServerInterface interface {
 	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
 	// (POST /publish/adopt)
 	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// GetPublishChanges Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+	// (GET /publish/changes)
+	GetPublishChanges(w http.ResponseWriter, r *http.Request, params GetPublishChangesParams)
 	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
 	// (POST /publish/hosts/{hostId}/accept)
 	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
@@ -20219,6 +20227,12 @@ func (_ Unimplemented) StartPublish(w http.ResponseWriter, r *http.Request) {
 // AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
 // (POST /publish/adopt)
 func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishChanges Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+// (GET /publish/changes)
+func (_ Unimplemented) GetPublishChanges(w http.ResponseWriter, r *http.Request, params GetPublishChangesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -31137,6 +31151,39 @@ func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishChanges operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishChangesParams
+
+	// ------------- Optional query parameter "hours" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "hours", r.URL.Query(), &params.Hours, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "hours"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hours", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AcceptPublishDrift operation middleware
 func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -35012,6 +35059,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/actions", wrapper.StartPublish)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/changes", wrapper.GetPublishChanges)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/adopt", wrapper.AdoptPublishHosts)

@@ -180,6 +180,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	dep.Changed = eval.Kick
 	dep.Poll, dep.GuestAgentTimeout, dep.EnrollTimeout = 20*time.Millisecond, 5*time.Second, 8*time.Second
 	dep.HTTPGet = func(context.Context, string) (int, error) { return http.StatusOK, nil }
+	dep.UDPProbe = func(context.Context, string, []byte) error { return nil }
 	// De sync van Kubernetes loopt niet vanzelf; een test roept Sync aan.
 	kub := kube.NewService(pool, bus, log)
 	kub.Interval, kub.Timeout = 0, 5*time.Second

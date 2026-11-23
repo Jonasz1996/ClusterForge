@@ -530,6 +530,16 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 		}
 		out = append(out, v)
 	}
+	// Testlijst 2, 1.1: meerdere hosts naar hetzelfde host:poort.
+	for i, v := range out {
+		if !v.Enabled || len(v.Domains) == 0 {
+			continue
+		}
+		if others := sameTarget(npm.Hosts, v.ID, v.ForwardHost, v.ForwardPort); len(others) > 0 {
+			out[i].Problems = append(out[i].Problems, Problem{Code: "zelfde_doel", Level: "warn",
+				Text: fmt.Sprintf("wijst naar hetzelfde doel %s:%d als %s; kijk na of dat de juiste app is", v.ForwardHost, v.ForwardPort, strings.Join(others, ", "))})
+		}
+	}
 	return out
 }
 
@@ -620,6 +630,7 @@ func notices(ov *Overview) []Notice {
 		{"oud_doel", "Proxy host wijst naar een oud adres (voorstel klaar)", false},
 		{"advanced_oud", "Advanced van een proxy host wijst naar een oud adres (voorstel klaar)", false},
 		{"domein_tikfout", "Proxy host onder een domein dat op het hoofddomein lijkt (tikfout?)", false},
+		{"zelfde_doel", "Meerdere proxy hosts wijzen naar hetzelfde doel", false},
 		{"authentik_half", "Authentik half ingesteld", false},
 	} {
 		if names := group(g.code); len(names) > 0 {

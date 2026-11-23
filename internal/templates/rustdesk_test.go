@@ -151,6 +151,13 @@ exec) [ -f "$CF_TEST_DIR/exec-faalt" ] && exit 1;;
 esac
 exit 0`,
 		"hostname": `echo ` + name,
+		// nft: -f bewaart de regels in nft.rules, delete wist ze.
+		"nft": `echo "nft $*" >> "$CF_TEST_DIR/log"
+case "$1" in
+-f) cat > "$CF_TEST_DIR/nft.rules";;
+delete) rm -f "$CF_TEST_DIR/nft.rules";;
+list) [ -f "$CF_TEST_DIR/nft.rules" ];;
+esac`,
 	}
 	for cmd, body := range stubs {
 		if err := os.WriteFile(filepath.Join(n.bin, cmd), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
@@ -330,5 +337,46 @@ func TestRustDeskTakeoverFailover(t *testing.T) {
 	}
 	if out, err := b.run("status"); err != nil || !strings.Contains(out, "sleutel:   PUBLIEKESLEUTEL=") {
 		t.Fatalf("status: %v %s", err, out)
+	}
+}
+
+// TestRustDeskUDPFromVIP: op de VIP-node antwoordt UDP 21116 vanaf het VIP
+// (nft zet het bronadres), op een backup-node staat die regel er niet.
+func TestRustDeskUDPFromVIP(t *testing.T) {
+	tpl, c := rustdeskContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	a := newRDNode(t, files["/usr/local/lib/clusterforge/rustdesk-ctl.sh"], "rustdesk")
+	a.vip = true
+	if out, err := a.run("master"); err != nil {
+		t.Fatalf("master: %v %s", err, out)
+	}
+	rules, err := os.ReadFile(filepath.Join(a.dir, "nft.rules"))
+	if err != nil {
+		t.Fatalf("geen nft-regels na master:\n%s", a.log())
+	}
+	for _, want := range []string{"ip daddr 192.0.2.50 udp dport 21116 notrack", "udp sport 21116 ip saddr != 192.0.2.50 notrack ip saddr set 192.0.2.50"} {
+		if !strings.Contains(string(rules), want) {
+			t.Fatalf("nft-regels zonder %q:\n%s", want, rules)
+		}
+	}
+	a.vip = false
+	if out, err := a.run("backup"); err != nil {
+		t.Fatalf("backup: %v %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(a.dir, "nft.rules")); err == nil {
+		t.Fatal("nft-regels staan er nog na backup")
+	}
+	ch, err := tpl.RenderChecks(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, x := range ch {
+		if x.UDP != nil && x.UDP.Addr == "192.0.2.50:21116" && x.UDP.Probe == "rustdesk" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("geen udp-controle op het VIP: %+v", ch)
 	}
 }

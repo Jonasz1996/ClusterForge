@@ -6230,6 +6230,19 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /publish/changes:
+    get:
+      operationId: getPublishChanges
+      summary: Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+      parameters:
+        - { name: hours, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 720 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PveObject" } }
+        "401": { $ref: "#/components/responses/Error" }
   /publish/adopt:
     post:
       operationId: adoptPublishHosts

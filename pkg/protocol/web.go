@@ -255,6 +255,10 @@ type WebCheckResult struct {
 	Status   int    `json:"status"`
 	Location string `json:"location,omitempty"`
 	Server   string `json:"server,omitempty"`
+	// Title is de <title> van de pagina (sinds testlijst 2, 23/11): zo ziet
+	// de server of een host na een wijziging nog dezelfde app toont. Leeg
+	// bij een oudere agent of een pagina zonder titel.
+	Title string `json:"title,omitempty"`
 	// CertOK: het certificaat is geldig voor de naam (keten en naam).
 	CertOK       bool       `json:"cert_ok"`
 	CertSubject  string     `json:"cert_subject,omitempty"`
