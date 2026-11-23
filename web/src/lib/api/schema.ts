@@ -5817,6 +5817,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publish/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert) */
+        get: operations["getPublishChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/publish/adopt": {
         parameters: {
             query?: never;
@@ -6992,6 +7009,23 @@ export interface paths {
          *     vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
          */
         put: operations["setAgentUpgradeProdAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-upgrades/night-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin) */
+        put: operations["setAgentUpgradeNightOnly"];
         post?: never;
         delete?: never;
         options?: never;
@@ -11288,13 +11322,17 @@ export interface components {
         };
         AttentionAction: {
             /**
-             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
              * @enum {string}
              */
-            kind: "link" | "restart_service";
+            kind: "link" | "restart_service" | "run_command";
             label: string;
             href?: string;
             unit?: string;
+            /** @description Naam van het eenmalige commando bij run_command */
+            title?: string;
+            /** @description Het script bij run_command */
+            script?: string;
             node_ids?: string[];
         };
         NavUsage: {
@@ -12847,7 +12885,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job";
+            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job" | "unit";
             /** Format: uuid */
             id: string;
             name: string;
@@ -14368,6 +14406,13 @@ export interface components {
             auto: boolean;
             /** @description Ook agents op prod vanzelf bijwerken */
             prod_auto: boolean;
+            /** @description Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent */
+            night_only?: boolean;
+            /**
+             * Format: date-time
+             * @description Begin van het volgende nachtvenster
+             */
+            next_window?: string;
             /** @description Een update op prod mislukte; vanzelf bijwerken op prod staat stil */
             prod_halted: boolean;
             /** @description De node waar de update op prod mislukte */
@@ -26287,6 +26332,29 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getPublishChanges: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     adoptPublishHosts: {
         parameters: {
             query?: never;
@@ -28215,6 +28283,35 @@ export interface operations {
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeNightOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     clearAgentUpgradeProdQueue: {

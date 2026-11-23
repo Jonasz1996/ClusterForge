@@ -215,6 +215,9 @@ type Target struct {
 	Nodes []updates.Node
 	// Prod zijn de prodclusters erin, op slug.
 	Prod []string
+	// Skipped zijn de nodes van het cluster die offline zijn of een te oude
+	// agent hebben; bij een heel cluster worden die overgeslagen (2.3).
+	Skipped []string
 }
 
 // Select kiest de nodes, in de volgorde van de run.
@@ -233,6 +236,10 @@ func (s *Service) Select(ctx context.Context, req RunRequest) (Target, error) {
 			continue
 		case len(req.NodeIDs) > 0 && !slices.Contains(req.NodeIDs, n.NodeID):
 			continue
+		case req.ClusterID != nil && (!n.Supported || !n.Online):
+			// Een heel cluster: offline nodes staan standaard uit (2.3).
+			t.Skipped = append(t.Skipped, n.Hostname)
+			continue
 		case !n.Supported:
 			return Target{}, &ConflictError{fmt.Sprintf("de agent op %s heeft protocol %d en kan nog geen commando's draaien (vanaf %d); werk de agents eerst bij", n.Hostname, n.Protocol, protocol.RunSince)}
 		case !n.Online:
@@ -247,6 +254,9 @@ func (s *Service) Select(ctx context.Context, req RunRequest) (Target, error) {
 		return Target{}, &ConflictError{"niet elke gevraagde node heeft een agent"}
 	}
 	if len(t.Nodes) == 0 {
+		if len(t.Skipped) > 0 {
+			return Target{}, &ConflictError{"geen node van dit cluster is verbonden (" + strings.Join(t.Skipped, ", ") + ")"}
+		}
 		return Target{}, &ConflictError{"dit cluster heeft geen nodes met een agent"}
 	}
 	t.Nodes = updates.Order(t.Nodes)
@@ -264,6 +274,8 @@ type params struct {
 	// Once: een eenmalig commando, zonder eigen commando erachter.
 	Once  bool   `json:"once,omitempty"`
 	Nodes []node `json:"nodes"`
+	// Skipped: nodes van het cluster die offline waren bij het starten.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 type node struct {
@@ -318,6 +330,7 @@ func (s *Service) StartOnce(ctx context.Context, actor events.Actor, o Once, req
 }
 
 func (s *Service) enqueue(ctx context.Context, actor events.Actor, p params, t Target) (store.Job, error) {
+	p.Skipped = t.Skipped
 	var cluster *uuid.UUID
 	same := true
 	for i, n := range t.Nodes {
@@ -370,6 +383,25 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	}
 	hash := Hash(p.Script)
 	var failed []string
+	// Een leescommando loopt op alle nodes door en meldt de fouten aan het
+	// eind (2.2), met een korte tijdslimiet per node (2.3).
+	readOnly := ReadOnly(p.Script)
+	cont := p.ContinueOnError || readOnly
+	timeout := p.TimeoutSeconds
+	if readOnly && (timeout <= 0 || timeout > ReadTimeoutSeconds) {
+		timeout = ReadTimeoutSeconds
+	}
+	if len(p.Skipped) > 0 || readOnly {
+		_ = j.Step(ctx, "Voorbereiden", func(ctx context.Context, st *jobs.Step) error {
+			if len(p.Skipped) > 0 {
+				st.Logf("overgeslagen, niet verbonden: %s", strings.Join(p.Skipped, ", "))
+			}
+			if readOnly {
+				st.Logf("leescommando: loopt door op alle nodes, hoogstens %d seconden per node", timeout)
+			}
+			return nil
+		})
+	}
 	for i, n := range p.Nodes {
 		name := n.Hostname
 		if n.VIPHolder {
@@ -382,10 +414,17 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		spec := protocol.RunSpec{
 			ID: fmt.Sprintf("%s-%d-%d-cmd", j.ID, j.Attempts, i), Kind: protocol.RunScript,
 			Title:  title,
-			Script: Strict(p.Script), User: p.RunAs, TimeoutSeconds: p.TimeoutSeconds,
+			Script: Strict(p.Script), User: p.RunAs, TimeoutSeconds: timeout,
 		}
 		err := j.Step(ctx, name, func(ctx context.Context, st *jobs.Step) error {
-			res, err := s.Run.Do(ctx, st, n.ID, spec)
+			// De agent bewaakt de tijdslimiet zelf; dit vangt een node die
+			// niet meer antwoordt, zodat de volgende nodes niet blijven wachten.
+			nctx, cancel := context.WithTimeout(ctx, spec.Timeout()+2*time.Minute)
+			defer cancel()
+			res, err := s.Run.Do(nctx, st, n.ID, spec)
+			if err != nil && ctx.Err() == nil && nctx.Err() != nil {
+				return fmt.Errorf("geen antwoord binnen %s; de node hangt of is offline", spec.Timeout()+2*time.Minute)
+			}
 			if err != nil {
 				return err
 			}
@@ -411,9 +450,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		case err == nil:
 		case ctx.Err() != nil:
 			return err
-		case p.ContinueOnError && i < len(p.Nodes)-1:
+		case cont && i < len(p.Nodes)-1:
 			failed = append(failed, n.Hostname)
-		case p.ContinueOnError:
+		case cont:
 			failed = append(failed, n.Hostname)
 			return fmt.Errorf("mislukt op %s", strings.Join(failed, ", "))
 		case i < len(p.Nodes)-1:

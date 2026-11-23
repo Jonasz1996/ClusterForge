@@ -10,7 +10,15 @@ import { AKBadge, Empty, StatusBar } from "@/components/publish/bits";
 import { toast } from "@/components/Toast";
 import { Alert, Badge, Button, Card, Input, PageHeader } from "@/components/ui";
 import { useMe } from "@/lib/auth";
-import { useAcceptDrift, useAdoptHosts, usePublishOverview, useReleaseHost, type PublishAction, type PublishHost } from "@/lib/publish";
+import {
+  useAcceptDrift,
+  useAdoptHosts,
+  usePublishChanges,
+  usePublishOverview,
+  useReleaseHost,
+  type PublishAction,
+  type PublishHost,
+} from "@/lib/publish";
 
 type Open = { title: string; action: PublishAction };
 
@@ -97,6 +105,7 @@ export default function PublishNPMPage() {
               </p>
             </>
           )}
+          <ChangesCard admin={admin} onOpen={setOpen} />
           <Card title={`Proxy hosts · ${hosts.length}`}>
             <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
               <Input placeholder="Zoeken" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
@@ -184,6 +193,74 @@ export default function PublishNPMPage() {
       {theme && ov && <ThemeEditor ov={ov} onClose={() => setTheme(false)} />}
       {edit && ov && <HostEditor host={edit === "new" ? null : edit} ov={ov} onClose={() => setEdit(null)} />}
     </div>
+  );
+}
+
+// ChangesCard: wat ClusterForge de laatste 24 uur aan proxy hosts veranderde,
+// met per host terugdraaien (testlijst 2, 1.1).
+function ChangesCard({ admin, onOpen }: { admin: boolean; onOpen: (o: Open) => void }) {
+  const q = usePublishChanges(24);
+  const list = q.data ?? [];
+  if (list.length === 0) return null;
+  return (
+    <Card title={`Laatste 24 uur door ClusterForge veranderd · ${list.length}`}>
+      <div className="overflow-x-auto">
+        <table className={tableClass}>
+          <thead>
+            <tr>
+              <th className={thClass}>Wanneer</th>
+              <th className={thClass}>Host</th>
+              <th className={thClass}>Wat</th>
+              <th className={thClass}>Pagina</th>
+              {admin && <th className={thClass} />}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {list.map((c) => (
+              <tr key={c.id}>
+                <td className={`${tdClass} whitespace-nowrap text-xs`}>
+                  {new Date(c.changed_at).toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" })}
+                  {c.changed_by && <div className="text-slate-500">{c.changed_by}</div>}
+                </td>
+                <td className={tdClass}>
+                  {c.domain}
+                  <div className="text-xs text-slate-500">{c.action}</div>
+                </td>
+                <td className={`${tdClass} text-xs`}>
+                  {c.summary.map((l) => (
+                    <div key={l}>{l}</div>
+                  ))}
+                </td>
+                <td className={`${tdClass} text-xs`}>
+                  {c.title_before || c.title_after ? (
+                    <>
+                      {c.title_before || "?"} → {c.title_after || "?"}
+                    </>
+                  ) : (
+                    <span className="text-slate-500">geen titel</span>
+                  )}
+                </td>
+                {admin && (
+                  <td className={`${tdClass} text-xs whitespace-nowrap`}>
+                    {c.reverted_at ? (
+                      <Badge tone="slate">teruggedraaid</Badge>
+                    ) : (
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => onOpen({ title: `Terugdraaien: ${c.domain}`, action: { action: "revert", change_id: c.id } })}
+                      >
+                        terugdraaien
+                      </button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 

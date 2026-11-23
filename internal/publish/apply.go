@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,11 @@ type Action struct {
 	// Theme bij ActPublish: het sjabloon voor Advanced gebruiken (leeg =
 	// ja als er een standaard-css is).
 	Theme *bool `json:"theme,omitempty"`
+	// AllowOtherApp: de host mag na de wijziging een andere app tonen dan
+	// vooraf (bewust een ander doel). Anders draait de controle terug.
+	AllowOtherApp bool `json:"allow_other_app,omitempty"`
+	// ChangeID is de wijziging bij ActRevert.
+	ChangeID string `json:"change_id,omitempty"`
 }
 
 // Plan is wat een actie zou doen, voor het voorbeeldscherm en de taak.
@@ -134,6 +140,11 @@ type PlannedHost struct {
 	Scheme string `json:"scheme"`
 	// ProviderHost: bij hernoemen krijgt de provider in Authentik deze naam.
 	ProviderPK int `json:"provider_pk,omitempty"`
+	// Before is wat de host vóór de wijziging toonde (HTTP-code, titel);
+	// TitleAfter de titel erna. AllowOtherApp: een andere app is de bedoeling.
+	Before        *protocol.WebCheckResult `json:"before,omitempty"`
+	TitleAfter    string                   `json:"title_after,omitempty"`
+	AllowOtherApp bool                     `json:"allow_other_app,omitempty"`
 }
 
 var (
@@ -591,6 +602,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			return Plan{}, err
 		}
 		akNeeded = st.AuthentikLinked()
+	case ActRevert:
+		if err := s.planRevert(ctx, npm, byID, taken, a, &p); err != nil {
+			return Plan{}, err
+		}
 	default:
 		return Plan{}, invalid("onbekende actie %q", a.Action)
 	}
@@ -599,6 +614,28 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			return Plan{}, err
 		}
 	}
+	// Testlijst 2, 1.1: hetzelfde doel als een andere host is verdacht (zo
+	// opende adguard Web Check). En nooit twee hosts samen naar één nieuw doel.
+	planned := map[string][]string{}
+	for i := range p.Hosts {
+		ph := &p.Hosts[i]
+		ph.AllowOtherApp = ph.AllowOtherApp || a.AllowOtherApp
+		if ph.Delete || a.Action == ActRevert {
+			continue
+		}
+		warnSameTarget(&p, npm.Hosts, *ph)
+		if host, ok := ph.Body["forward_host"].(string); ok {
+			k := fmt.Sprintf("%s:%d", strings.ToLower(host), toInt(ph.Body["forward_port"]))
+			planned[k] = append(planned[k], ph.Domain)
+		}
+	}
+	for k, names := range planned {
+		if len(names) > 1 {
+			sort.Strings(names)
+			p.Warnings = append(p.Warnings, fmt.Sprintf("%s zouden allemaal naar %s wijzen; maar één ervan is waarschijnlijk juist. Pas ze liever per host toe", strings.Join(names, ", "), k))
+		}
+	}
+	p.Lines = append(p.Lines, "Vooraf en achteraf: HTTP-code en titel van de pagina vergelijken; toont de host daarna een andere app, dan gaat hij terug")
 	p.Lines = append([]string{fmt.Sprintf("Kopie van de NPM-database en nginx-config op %s", node.Hostname)}, p.Lines...)
 	p.Lines = append(p.Lines, "Controle: database, config, geen .err, nginx -t en het adres zelf; faalt er een, dan gaat alles terug")
 	if st.NPMClusterID != nil {
@@ -1042,6 +1079,7 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 	var hostID = ph.HostID
 	// 1. De wijziging.
 	err := j.Step(ctx, "NPM: "+ph.Domain, func(ctx context.Context, step *jobs.Step) error {
+		s.lookBefore(ctx, step, node, ph)
 		if ph.CertNew {
 			c, err := s.npmRequestCert(ctx, st, node, ph.Domain)
 			if err != nil {
@@ -1238,7 +1276,19 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 			if c.Location != "" {
 				extra = " → " + trimText(c.Location, 120)
 			}
+			if c.Title != "" {
+				extra += fmt.Sprintf(", titel %q", c.Title)
+			}
 			step.Logf("✓ %s: HTTP %d%s", url, c.Status, extra)
+		}
+		ph.TitleAfter = c.Title
+		if why := otherApp(ph.Before, *c, protected); why != "" {
+			if ph.AllowOtherApp {
+				step.Logf("! %s: %s (zo gevraagd)", url, why)
+			} else {
+				failed = append(failed, fmt.Sprintf("adres: %s toont iets anders dan vooraf (%s). Is dit bewust, kies dan \"andere app is de bedoeling\"", url, why))
+				step.Logf("✗ %s: %s", url, why)
+			}
 		}
 	}
 	if len(failed) > 0 {
@@ -1330,6 +1380,9 @@ func (s *Service) rollback(ctx context.Context, step *jobs.Step, st Settings, no
 
 // remember werkt publish_hosts bij na een geslaagde wijziging.
 func (s *Service) remember(ctx context.Context, j *jobs.Job, st Settings, node nodeRow, a Action, hostID int, created bool, ph *PlannedHost, ak akCreated) error {
+	if err := s.recordChange(ctx, j, a, hostID, created, ph); err != nil {
+		s.log.Warn("publicatie: wijziging niet onthouden", "host", hostID, "err", err)
+	}
 	if ph.Delete {
 		_, err := s.pool.Exec(ctx, `DELETE FROM publish_hosts WHERE npm_host_id = $1`, hostID)
 		return err

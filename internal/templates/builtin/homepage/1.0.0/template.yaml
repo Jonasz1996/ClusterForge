@@ -125,6 +125,9 @@ roles:
       - directory: { path: /opt/cf-homepage, mode: "0755" }
       - directory: { path: /opt/cf-homepage/files, mode: "0755" }
       - directory: { path: /var/lib/cf-homepage, mode: "0700" }
+      # Groep homepage zet homepage-ctl.sh (rechten) na de installatie:
+      # de groep bestaat hier nog niet. De api en de worker lezen er
+      # secret.key (2.9); apply laat de groep ongemoeid.
       - directory: { path: /etc/cf-homepage, mode: "0750" }
       - file:
           path: /etc/cf-homepage/base.env

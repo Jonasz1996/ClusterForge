@@ -68,7 +68,7 @@ func (s *Service) AutoRun(ctx context.Context) error {
 			return err
 		}
 	}
-	if !ov.Auto {
+	if !ov.Auto || (ov.NightOnly && !s.InWindow(s.Now())) {
 		return nil
 	}
 	queued := map[uuid.UUID]bool{}
@@ -240,6 +240,55 @@ func (s *Service) SetProdAuto(ctx context.Context, actor events.Actor, userID *u
 		s.Kick()
 	}
 	return err
+}
+
+// SetNightOnly: vanzelf bijwerken alleen 's nachts (testlijst 2, 2.10).
+func (s *Service) SetNightOnly(ctx context.Context, actor events.Actor, userID *uuid.UUID, enabled bool) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		if err := q.SetAgentUpgradeNightOnly(ctx, store.SetAgentUpgradeNightOnlyParams{NightOnly: enabled, UpdatedBy: userID}); err != nil {
+			return err
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: actor, SubjectType: "settings", SubjectID: "agent-upgrade", Action: "settings.agent_upgrade_night_only",
+			Payload: map[string]any{"enabled": enabled},
+		})
+	})
+	if err == nil && !enabled {
+		s.Kick()
+	}
+	return err
+}
+
+// Het nachtvenster voor vanzelf bijwerken, in de tijd van Brussel.
+const (
+	NightStart = 2
+	NightEnd   = 5
+)
+
+func brussels() *time.Location {
+	if l, err := time.LoadLocation("Europe/Brussels"); err == nil {
+		return l
+	}
+	return time.Local
+}
+
+func inWindow(now time.Time) bool {
+	h := now.In(brussels()).Hour()
+	return h >= NightStart && h < NightEnd
+}
+
+// nextWindow is het begin van het volgende nachtvenster (of nu, erin).
+func nextWindow(now time.Time) time.Time {
+	t := now.In(brussels())
+	if inWindow(now) {
+		return now
+	}
+	start := time.Date(t.Year(), t.Month(), t.Day(), NightStart, 0, 0, 0, t.Location())
+	if !start.After(t) {
+		start = start.AddDate(0, 0, 1)
+	}
+	return start
 }
 
 // SetAuto zet vanzelf bijwerken aan of uit voor alle clusters.

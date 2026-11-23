@@ -718,3 +718,44 @@ func (s *Service) disk(ctx context.Context, nodeID uuid.UUID) (*Disk, error) {
 	}
 	return d, nil
 }
+
+// Running geeft de stand van elke container op een node, zonder cache:
+// "running", "healthy", "starting", "unhealthy" of de Docker-stand
+// (exited, restarting, ...). Na een update van Docker of containerd wacht
+// een rolling update hierop per node (testlijst 1.8).
+func (s *Service) Running(ctx context.Context, nodeID uuid.UUID) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, protocol.DockerRequestTimeout)
+	defer cancel()
+	res, err := s.bus.Docker(ctx, nodeID, protocol.DockerRequest{Op: protocol.DockerOpGet, Path: "/containers/json", Query: map[string]string{"all": "1"}})
+	if err != nil {
+		return nil, err
+	}
+	if res.Error != "" {
+		return nil, errors.New(res.Error)
+	}
+	var list []ContainerSummary
+	if err := json.Unmarshal(res.Data, &list); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(list))
+	for _, c := range list {
+		out[c.Name()] = ContainerState(c.State, c.Status)
+	}
+	return out, nil
+}
+
+// ContainerState vat State en Status van de Docker-API samen.
+func ContainerState(state, status string) string {
+	if state != "running" {
+		return state
+	}
+	switch {
+	case strings.Contains(status, "(health: starting)"):
+		return "starting"
+	case strings.Contains(status, "(unhealthy)"):
+		return "unhealthy"
+	case strings.Contains(status, "(healthy)"):
+		return "healthy"
+	}
+	return "running"
+}

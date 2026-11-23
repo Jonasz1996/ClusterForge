@@ -407,6 +407,7 @@ type AgentUpgradeSetting struct {
 	UpdatedBy *uuid.UUID
 	UpdatedAt time.Time
 	ProdAuto  bool
+	NightOnly bool
 }
 
 type ApiToken struct {
@@ -1795,6 +1796,24 @@ type PublishAutoRule struct {
 	Cleanup    bool
 	UpdatedBy  *uuid.UUID
 	UpdatedAt  time.Time
+}
+
+type PublishChange struct {
+	ID          uuid.UUID
+	JobID       *uuid.UUID
+	NpmHostID   int32
+	Domain      string
+	Action      string
+	Created     bool
+	Deleted     bool
+	Old         []byte
+	New         []byte
+	TitleBefore string
+	TitleAfter  string
+	ChangedBy   *uuid.UUID
+	ChangedAt   time.Time
+	RevertedAt  *time.Time
+	RevertedBy  *uuid.UUID
 }
 
 type PublishConnection struct {

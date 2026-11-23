@@ -58,6 +58,16 @@ export function useSetAgentUpgradeProdAuto() {
   });
 }
 
+// Vanzelf bijwerken alleen 's nachts (testlijst 2, 2.10).
+export function useSetAgentUpgradeNightOnly() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { enabled: boolean }) =>
+      unwrap(await api.PUT("/agent-upgrades/night-only", { body })),
+    onSuccess: (data) => qc.setQueryData(key, data),
+  });
+}
+
 // De rij prodclusters van "ook productie" stoppen.
 export function useClearProdQueue() {
   const qc = useQueryClient();

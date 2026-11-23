@@ -532,11 +532,17 @@ func TestRealNPM(t *testing.T) {
 		}
 		t.Fatalf("%d voorstellen (oud %v)", sugg, old)
 	}
+	// Alleen een exacte naam is zeker (testlijst 1.1): webapp.example.test
+	// gaat mee in bulk, webapp2 (zelfde container, andere naam) is een gok
+	// en wordt per host gezet.
 	plan, err := s.Plan(ctx, Action{Action: ActRetargetMany})
-	if err != nil || len(plan.Hosts) != 2 {
+	if err != nil || len(plan.Hosts) != 1 || plan.Hosts[0].HostID != old[0] {
 		t.Fatalf("plan: %v %+v", err, plan)
 	}
 	run(Action{Action: ActRetargetMany}, store.JobStatusSucceeded)
+	alive()
+	s.Refresh(ctx)
+	run(Action{Action: ActUpdate, HostID: old[1], ForwardHost: gateway, ForwardPort: backend}, store.JobStatusSucceeded)
 	for _, hid := range old {
 		if c := conf(hid); !strings.Contains(c, gateway) || !strings.Contains(c, fmt.Sprint(backend)) {
 			t.Fatalf("host %d niet omgezet:\n%s", hid, c)

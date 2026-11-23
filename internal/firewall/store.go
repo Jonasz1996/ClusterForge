@@ -84,6 +84,14 @@ func (n Node) Pending() bool { return n.PlanHash != "" && n.PlanHash != n.Applie
 // Enabled: ClusterForge kijkt naar de firewall van deze node.
 func (n Node) Enabled() bool { return n.Mode == "preview" || n.Mode == "managed" }
 
+// hasKeepalived: keepalived staat op de node (facts of units).
+func (n Node) hasKeepalived() bool {
+	if n.facts != nil && n.facts.Keepalived != nil {
+		return true
+	}
+	return slices.Contains(n.units(), "keepalived")
+}
+
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	var st Settings
 	err := s.pool.QueryRow(ctx, `SELECT auto_apply, lan, admin, ssh_from, unknown_ports, strict, confirm_seconds, grace_hours, monitor,
@@ -103,7 +111,14 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 const nodesSQL = `
 SELECT n.id, n.hostname, coalesce(host(n.primary_ip), ''), n.cluster_id,
        coalesce(c.name, ''), coalesce(c.slug, ''), coalesce(c.environment::text, ''), coalesce(c.template_name, ''),
-       a.protocol_version, s.heartbeat_at, f.facts,
+       a.protocol_version, s.heartbeat_at,
+       -- Alleen wat de firewall gebruikt: de volledige facts (pakketten,
+       -- containers, ...) maakten de tab Nodes traag (testlijst 2.13).
+       CASE WHEN f.facts IS NOT NULL THEN jsonb_build_object(
+           'os', f.facts->'os', 'primary_address', f.facts->'primary_address', 'interfaces', f.facts->'interfaces',
+           'services', f.facts->'services', 'keepalived', f.facts->'keepalived',
+           'opnsense', CASE WHEN f.facts->'opnsense' IS NOT NULL AND f.facts->'opnsense' <> 'null' THEN '{}'::jsonb END,
+           'truenas', CASE WHEN f.facts->'truenas' IS NOT NULL AND f.facts->'truenas' <> 'null' THEN '{}'::jsonb END) END,
        coalesce(fn.mode, 'off'), fn.status, fn.status_at, coalesce(fn.status_error, ''), fn.plan, coalesce(fn.plan_hash, ''),
        coalesce(fn.applied_hash, ''), fn.applied_at, fn.apply_job_id, coalesce(j.status::text IN ('queued', 'running'), false),
        coalesce(fn.apply_error, ''), fn.apply_failed_at, fn.blocked_at, coalesce(fn.blocked_source, ''),

@@ -444,9 +444,17 @@ func (h pveHost) available(ctx context.Context) ([]protocol.PVEAppliance, error)
 func parsePveamAvailable(out []byte) []protocol.PVEAppliance {
 	list := []protocol.PVEAppliance{}
 	for line := range strings.Lines(string(out)) {
+		// Op naam, niet op kolompositie: sommige versies zetten er een extra
+		// kolom bij (testlijst 2.4). De naam is het veld met ".tar.".
 		f := strings.Fields(line)
-		if len(f) == 2 {
-			list = append(list, protocol.PVEAppliance{Section: f[0], File: f[1]})
+		if len(f) < 2 {
+			continue
+		}
+		for _, x := range f[1:] {
+			if strings.Contains(x, ".tar.") {
+				list = append(list, protocol.PVEAppliance{Section: f[0], File: x})
+				break
+			}
 		}
 	}
 	return list

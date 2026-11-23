@@ -82,6 +82,13 @@ type Service struct {
 	// HTTPGet haalt een pagina op voor de webtest na de VIP-wissel; nil
 	// gebruikt HTTP.
 	HTTPGet func(ctx context.Context, url string) (int, string, error)
+	// Containers geeft de stand van de containers op een node (zie
+	// dockerhost.Running). Na de update van een node wacht de taak tot de
+	// containers die ervoor draaiden weer draaien en gezond zijn, voor ze
+	// aan de volgende node begint (testlijst 1.8). Mag nil zijn.
+	Containers func(ctx context.Context, nodeID uuid.UUID) (map[string]string, error)
+	// ContainerPoll is hoe vaak dat gevraagd wordt; nul is vijf seconden.
+	ContainerPoll time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus Commander) *Service {
@@ -426,6 +433,8 @@ func whatText(a *Apt, d *Docker) string {
 type prep struct {
 	Services []string  `json:"services"`
 	At       time.Time `json:"at"`
+	// Containers zijn de containers die vóór de update draaiden.
+	Containers []string `json:"containers,omitempty"`
 }
 
 func (s *Service) run(ctx context.Context, j *jobs.Job) error {
@@ -635,6 +644,10 @@ func (s *Service) prepare(ctx context.Context, st *jobs.Step, n jobNode) (prep, 
 		st.Logf("draait nu: %s; daar wacht ClusterForge na de update op", strings.Join(active, ", "))
 	}
 	pr := prep{Services: active, At: s.Now()}
+	pr.Containers = s.runningContainers(ctx, n.ID)
+	if len(pr.Containers) > 0 {
+		st.Logf("%d containers draaien nu; na de update wacht ClusterForge tot ze weer draaien en gezond zijn, pas dan volgt de volgende node", len(pr.Containers))
+	}
 	return pr, st.SetState(ctx, pr)
 }
 
@@ -853,6 +866,9 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, n jobNode, pr prep)
 	if err != nil {
 		return fmt.Errorf("%s komt niet gezond terug: %w; de taak stopt hier", n.Hostname, err)
 	}
+	if err := s.waitContainers(ctx, n, pr.Containers, progress); err != nil {
+		return err
+	}
 	if rt, err := s.q.GetNodeRuntime(ctx, n.ID); err == nil && rt.ClusterID != nil {
 		vips, err := s.clusterVIPs(ctx, *rt.ClusterID)
 		if err != nil {
@@ -875,4 +891,82 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, n jobNode, pr prep)
 	cancel()
 	st.Logf("%s is gezond", n.Hostname)
 	return nil
+}
+
+// runningContainers zijn de containers die nu draaien en niet ongezond
+// zijn, op een node met Docker; leeg zonder Docker of zonder antwoord.
+func (s *Service) runningContainers(ctx context.Context, nodeID uuid.UUID) []string {
+	if s.Containers == nil {
+		return nil
+	}
+	var docker bool
+	if err := s.pool.QueryRow(ctx, `SELECT coalesce(jsonb_typeof(facts->'docker') = 'object', false) FROM node_facts WHERE node_id = $1`, nodeID).Scan(&docker); err != nil || !docker {
+		return nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	m, err := s.Containers(cctx, nodeID)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for name, st := range m {
+		if st == "running" || st == "healthy" || st == "starting" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// waitContainers wacht tot elke container uit want weer draait, en gezond
+// is als hij een healthcheck heeft. Een Docker- of containerd-upgrade
+// herstart alle containers van de node; zonder wachten lag bij een rolling
+// update het hele cluster tegelijk plat (testlijst 1.8).
+func (s *Service) waitContainers(ctx context.Context, n jobNode, want []string, progress func(string)) error {
+	if len(want) == 0 || s.Containers == nil {
+		return nil
+	}
+	poll := s.ContainerPoll
+	if poll <= 0 {
+		poll = 5 * time.Second
+	}
+	progress(fmt.Sprintf("wachten tot de %d containers op %s weer draaien en gezond zijn", len(want), n.Hostname))
+	deadline := s.Now().Add(s.ReadyTimeout)
+	var last string
+	for {
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		m, err := s.Containers(cctx, n.ID)
+		cancel()
+		var waiting []string
+		if err != nil {
+			waiting = []string{"Docker antwoordt nog niet (" + err.Error() + ")"}
+		} else {
+			for _, name := range want {
+				switch st := m[name]; st {
+				case "running", "healthy":
+				case "":
+					waiting = append(waiting, name+" (weg)")
+				default:
+					waiting = append(waiting, name+" ("+st+")")
+				}
+			}
+		}
+		if len(waiting) == 0 {
+			progress(fmt.Sprintf("alle %d containers op %s draaien en zijn gezond", len(want), n.Hostname))
+			return nil
+		}
+		if msg := strings.Join(waiting, ", "); msg != last {
+			progress("nog niet klaar: " + msg)
+			last = msg
+		}
+		if !s.Now().Before(deadline) {
+			return fmt.Errorf("de containers op %s zijn na %s nog niet gezond: %s; de taak stopt hier, de volgende nodes blijven ongemoeid", n.Hostname, s.ReadyTimeout, strings.Join(waiting, ", "))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
 }

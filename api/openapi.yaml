@@ -6230,6 +6230,19 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /publish/changes:
+    get:
+      operationId: getPublishChanges
+      summary: Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+      parameters:
+        - { name: hours, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 720 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PveObject" } }
+        "401": { $ref: "#/components/responses/Error" }
   /publish/adopt:
     post:
       operationId: adoptPublishHosts
@@ -7490,6 +7503,28 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/night-only:
+    put:
+      operationId: setAgentUpgradeNightOnly
+      summary: Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /agent-upgrades/prod-queue:
     delete:
       operationId: clearAgentUpgradeProdQueue
@@ -11904,11 +11939,13 @@ components:
       properties:
         kind:
           type: string
-          enum: [link, restart_service]
-          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando"
+          enum: [link, restart_service, run_command]
+          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids"
         label: { type: string }
         href: { type: string }
         unit: { type: string }
+        title: { type: string, description: Naam van het eenmalige commando bij run_command }
+        script: { type: string, description: Het script bij run_command }
         node_ids: { type: array, items: { type: string, format: uuid } }
     NavUsage:
       type: object
@@ -13436,7 +13473,7 @@ components:
       type: object
       required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present, app]
       properties:
-        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job] }
+        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job, unit] }
         id: { type: string, format: uuid }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -15147,6 +15184,8 @@ components:
         archs: { type: array, items: { type: string }, description: "Architecturen waarvoor de server een agent heeft" }
         auto: { type: boolean, description: Agents vanzelf bijwerken staat aan }
         prod_auto: { type: boolean, description: Ook agents op prod vanzelf bijwerken, één prodcluster tegelijk }
+        night_only: { type: boolean, description: "Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent" }
+        next_window: { type: string, format: date-time, description: Begin van het volgende nachtvenster }
         prod_halted: { type: boolean, description: Een update op prod mislukte; vanzelf bijwerken op prod staat stil }
         halted_by: { type: string, description: De node waar de update op prod mislukte }
         prod_queue:

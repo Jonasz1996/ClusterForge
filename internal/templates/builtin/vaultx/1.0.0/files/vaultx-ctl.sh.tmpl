@@ -113,6 +113,48 @@ fingerprint() {
   { settings; cat "$STATE/gebouwd" 2>/dev/null; } | sha256sum | cut -d' ' -f1
 }
 
+# wacht (ExecCondition, testlijst 2, 2.8): vóór de overname start cf-vaultx
+# niet. Zo draait systemd geen herstartlus (29.000 pogingen op 22/11): de
+# unit wordt overgeslagen en $WACHT zegt waarom; check start hem vanzelf
+# zodra de overname gebeurd is. Database onbereikbaar is geen wachten op een
+# overname: dan probeert voorstart het opnieuw.
+WACHT=$STATE/wacht-op-overname
+waiting() {
+  if port_foreign; then
+    echo "oude VaultX bezet poort 8000 ($(port_holder))"
+    return 0
+  fi
+  meta=$(db_meta 2>/dev/null) || return 1
+  if [ -z "$(metafield "$meta" ready)" ] && [ "$NIEUW" != true ]; then
+    echo "de kluis is nog niet overgenomen (vaultx-ctl.sh overnemen <IP van de oude node>)"
+    return 0
+  fi
+  return 1
+}
+wacht() {
+  if why=$(waiting); then
+    mkdir -p "$STATE" 2>/dev/null
+    if [ ! -f "$WACHT" ]; then
+      logger -t cf-vaultx "wacht op overname: $why; cf-vaultx start daarna vanzelf" 2>/dev/null
+    fi
+    echo "$why" > "$WACHT"
+    echo "wacht op overname: $why" >&2
+    exit 1
+  fi
+  rm -f "$WACHT"
+  exit 0
+}
+na_overname() {
+  [ -f "$WACHT" ] || return 0
+  [ -n "$(find "$WACHT" -mmin -0.5 2>/dev/null)" ] && return 0
+  if waiting >/dev/null; then
+    touch "$WACHT"
+    return 0
+  fi
+  rm -f "$WACHT"
+  sysctl_ start --no-block cf-vaultx
+}
+
 voorstart() {
   [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
   if port_foreign; then
@@ -627,6 +669,7 @@ status() {
   if has_ip "$VIP"; then echo "VIP:        $VIP staat hier"; else echo "VIP:        $VIP staat elders"; fi
   if has_ip "$DB_VIP"; then echo "db-VIP:     $DB_VIP staat hier (primary)"; else echo "db-VIP:     $DB_VIP staat elders"; fi
   echo "cf-vaultx:  $(sysctl_ is-active cf-vaultx 2>/dev/null)"
+  [ -f "$WACHT" ] && echo "wacht:      op overname: $(cat "$WACHT")"
   if healthy; then echo "VaultX:     antwoordt gezond"; else echo "VaultX:     antwoordt NIET op 127.0.0.1:8000"; fi
   if meta=$(db_meta 2>/dev/null); then
     echo "database:   ${meta:-geen markering} ($(db_tables) tabellen)"
@@ -642,7 +685,9 @@ status() {
 
 case "${1:-}" in
   voorstart) voorstart ;;
+  wacht) wacht ;;
   check)
+    na_overname
     sysctl_ is-active --quiet nginx || exit 1
     healthy
     ;;
