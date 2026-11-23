@@ -374,6 +374,7 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Get("/deploy/failed/{id}", s.getFailedDeploy)
 		api.With(s.requireSession).Post("/deploy/failed/{id}/cleanup", s.cleanupFailedDeploy)
 		api.With(s.requireSession).Get("/deploy/network", s.deployNetwork)
+		api.With(s.requireSession).Post("/clusters/{clusterId}/params/reveal", s.revealParam)
 		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)

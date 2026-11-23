@@ -131,7 +131,7 @@ var Known = map[string]Spec{
 	"command.saved":                    {CategoryInventory, "Eigen commando bewaard"},
 	"command.deleted":                  {CategoryInventory, "Eigen commando weggehaald"},
 	"recipe.deleted":                   {CategoryInventory, "Receptversie weggehaald"},
-	"cluster.secret_revealed":          {CategorySecurity, "Wachtwoord van databasegebruiker getoond"},
+	"cluster.secret_revealed":          {CategorySecurity, "Geheim van het cluster getoond"},
 	"blueprint.saved":                  {CategoryInventory, "Cluster samengesteld uit recepten"},
 	"node.created":                     {CategoryInventory, "Node toegevoegd"},
 	"node.updated":                     {CategoryInventory, "Node gewijzigd"},
