@@ -95,3 +95,28 @@ export function useCleanupFailedDeploy() {
     },
   });
 }
+
+// NetHint volgt internal/deploy/network.go (fase 48, 4.3).
+export type NetHint = {
+  prefix?: string;
+  first_ip?: string;
+  vlan?: number | null;
+  bridge?: string;
+  gateway?: string;
+  dns?: string[] | null;
+  source: Record<string, string>;
+  interface?: string;
+  free: string[];
+  free_count: number;
+  wan?: string;
+};
+
+export function useNetHint(ip: string, enabled = true) {
+  return useQuery({
+    queryKey: ["deploy-network", ip],
+    queryFn: () => call<NetHint>("GET", `/deploy/network?ip=${encodeURIComponent(ip)}&want=12`),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}

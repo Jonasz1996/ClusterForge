@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // Fase 48 (4.2): een mislukte uitrol opruimen, of opnieuw met andere
@@ -77,4 +79,32 @@ func (s *Server) cleanupFailedDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// deployNetwork geeft bij een eerste adres VLAN, gateway, DNS, de vrije
+// adressen en het publieke adres van de firewall (fase 48, 4.3).
+func (s *Server) deployNetwork(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	var fw []protocol.OPNsenseFacts
+	if s.opnsense != nil {
+		list, err := s.opnsense.Firewalls(r.Context())
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		for _, f := range list {
+			if f.Facts != nil {
+				fw = append(fw, *f.Facts)
+			}
+		}
+	}
+	want, _ := strconv.Atoi(r.URL.Query().Get("want"))
+	h, err := s.deploy.NetworkHint(r.Context(), r.URL.Query().Get("ip"), fw, min(max(want, 1), 64))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
 }

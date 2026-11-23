@@ -675,6 +675,16 @@ func TestDeployGuestAgentTimeout(t *testing.T) {
 	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM nodes WHERE hostname LIKE 'lab-%'`).Scan(&cnt); err != nil || cnt != 0 {
 		t.Fatalf("nodes over: %d %v", cnt, err)
 	}
+	// Fase 48 (4.3): het netwerk bij een eerste adres.
+	var nh struct {
+		Prefix  string   `json:"prefix"`
+		Gateway string   `json:"gateway"`
+		Free    []string `json:"free"`
+	}
+	if s := c.do("GET", "/api/v1/deploy/network?ip=10.0.30.20", nil, &nh); s != http.StatusOK || nh.Prefix != "10.0.30.0/24" ||
+		nh.Gateway != "10.0.30.1" || len(nh.Free) == 0 || nh.Free[0] != "10.0.30.20" {
+		t.Fatalf("netwerk: %d %+v", s, nh)
+	}
 	// Opnieuw proberen kan niet meer: het cluster is weg.
 	if s := c.do("POST", "/api/v1/jobs/"+res.Job.ID+"/retry", nil, nil); s != http.StatusConflict {
 		t.Fatalf("opnieuw na opruimen: %d", s)
