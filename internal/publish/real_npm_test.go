@@ -513,6 +513,21 @@ func TestRealNPM(t *testing.T) {
 		t.Fatal(err)
 	}
 	alive()
+	// Testlijst 3: een gok (webapp2 → zelfde container, andere naam) komt
+	// pas als de <title> van het nieuwe doel bij de naam past.
+	for s.probing.Load() {
+		time.Sleep(50 * time.Millisecond)
+	}
+	ov, _ = s.Overview(ctx)
+	for _, h := range ov.Hosts {
+		if len(old) == 2 && h.ID == old[1] && h.Suggest != nil {
+			t.Fatalf("gok zonder passende titel: %+v", h.Suggest)
+		}
+	}
+	probes := s.probes(ctx)
+	probes[targetURL("http", gateway, backend)] = Probe{Status: 200, Title: "WebApp", At: s.Now()}
+	s.saveRead(ctx, "probes", probes, nil)
+	alive()
 	ov, _ = s.Overview(ctx)
 	sugg := 0
 	for _, h := range ov.Hosts {
