@@ -956,18 +956,41 @@ bouwen() {
   (cd "$CODE/frontend" && npm ci --no-audit --no-fund --loglevel=error > /dev/null &&
     npm run build --silent -- --outDir dist.new --emptyOutDir > /dev/null) || undo "frontend bouwen"
   [ -s "$CODE/frontend/dist.new/index.html" ] || undo "de frontend-build gaf geen index.html"
+  prev_venv=$(readlink "$CODE/.venv" 2>/dev/null)
+  prev_built=$(cat "$STATE/gebouwd" 2>/dev/null)
   ln -sfn "$name" "$CODE/.venv.tmp" && mv -Tf "$CODE/.venv.tmp" "$CODE/.venv" || undo ".venv"
   rm -rf "$CODE/frontend/dist.vorige"
   [ -d "$CODE/frontend/dist" ] && mv "$CODE/frontend/dist" "$CODE/frontend/dist.vorige"
   mv "$CODE/frontend/dist.new" "$CODE/frontend/dist" || fail "dist"
-  for d in "$CODE"/.venv-*; do
-    [ -d "$d" ] || continue
-    [ "${d##*/}" = "$name" ] || rm -rf "$d"
-  done
   chown -R root:root "$CODE"
   echo "$VERSION $commit" > "$STATE/gebouwd"
   versie_schrijven "$commit"
   echo "Gebouwd: $commit"
+  # Testlijst 3, N31: nieuwe code draait pas na een herstart. Alleen als de
+  # commit veranderde en de api hier draait; lukt het niet, dan gaat de
+  # vorige build terug.
+  if [ -n "$prev" ] && [ "$prev" != "$commit" ] && sysctl_ is-active --quiet "$API"; then
+    say "Herstarten op $commit"
+    sysctl_ try-restart "$API" "$SYSLOG"
+    worker_mag && sysctl_ try-restart "$WORKER"
+    if ! draait_versie; then
+      echo "Nieuwe build draait niet gezond; vorige build ($prev) terugzetten" >&2
+      git -C "$CODE" checkout -q -f --detach "$prev"
+      [ -n "$prev_venv" ] && [ -d "$CODE/$prev_venv" ] && ln -sfn "$prev_venv" "$CODE/.venv.tmp" && mv -Tf "$CODE/.venv.tmp" "$CODE/.venv"
+      if [ -d "$CODE/frontend/dist.vorige" ]; then
+        rm -rf "$CODE/frontend/dist.nieuw" && mv "$CODE/frontend/dist" "$CODE/frontend/dist.nieuw" && mv "$CODE/frontend/dist.vorige" "$CODE/frontend/dist"
+      fi
+      [ -n "$prev_built" ] && echo "$prev_built" > "$STATE/gebouwd"
+      versie_schrijven "$prev"
+      sysctl_ try-restart "$API" "$SYSLOG"
+      worker_mag && sysctl_ try-restart "$WORKER"
+      fail "de build van $commit draait niet gezond; terug op $prev"
+    fi
+  fi
+  for d in "$CODE"/.venv-*; do
+    [ -d "$d" ] || continue
+    [ "${d##*/}" = "$name" ] || rm -rf "$d"
+  done
 }
 # Wat er draait, voor "wat is er nieuw" in de homepage (zoals install.sh).
 versie_schrijven() {
@@ -975,6 +998,11 @@ versie_schrijven() {
   printf 'versie=%s\ncommit=%s\nkanaal=cluster\ndatum=%s\n' "$v" "$1" "$(date -Iseconds)" > "$ETC/versie"
   chgrp homepage "$ETC/versie" 2>/dev/null
   chmod 0640 "$ETC/versie"
+  # Het versiebestand van de oude installatie (/etc/homepage/versie) bleef
+  # anders op de commit van vóór de overname staan (N31).
+  if [ "$OUD_ETC" != "$ETC" ] && [ -f "$OUD_ETC/versie" ] && ! { has_oud && oud_enabled; }; then
+    cp -p "$ETC/versie" "$OUD_ETC/versie" 2>/dev/null
+  fi
 }
 # laatste_commit: de commit van een branch op GitHub nu (leeg bij een
 # commit, tag of als GitHub niet antwoordt). Testlijst 3, N10: een cluster
