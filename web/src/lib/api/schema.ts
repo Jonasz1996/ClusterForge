@@ -99,8 +99,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Het commando waarmee een beheerder een account herstelt
-         * @description Openbaar. Het antwoord hangt alleen af van de ingevulde naam, nooit van of het account bestaat; de database wordt niet geraadpleegd.
+         * Een herstelcode aanvragen die de beheerder in de CLI plakt
+         * @description Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server user reset <code>` zoekt het account op.
          */
         post: operations["accountRecoveryHelp"];
         delete?: never;
@@ -11326,6 +11326,13 @@ export interface components {
             username: string;
         };
         RecoveryHelp: {
+            /** @description Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Tot wanneer de beheerder de code kan gebruiken
+             */
+            expires_at: string;
             commands: components["schemas"]["RecoveryCommand"][];
             /** @description Hoe lang het tijdelijke wachtwoord geldig is */
             ttl_minutes: number;

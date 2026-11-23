@@ -48,6 +48,10 @@ type ResetResult struct {
 // sessies en dwingt bij de volgende login een nieuw wachtwoord en een nieuwe
 // TOTP af. Alleen voor de CLI: wie een shell op de server heeft, mag dit.
 func (s *Service) ResetUser(ctx context.Context, username string, ttl time.Duration) (ResetResult, error) {
+	return s.resetUser(ctx, username, ttl, map[string]any{"via": "cli"})
+}
+
+func (s *Service) resetUser(ctx context.Context, username string, ttl time.Duration, extra map[string]any) (ResetResult, error) {
 	if ttl <= 0 {
 		ttl = TempPasswordTTL
 	}
@@ -84,11 +88,11 @@ func (s *Service) ResetUser(ctx context.Context, username string, ttl time.Durat
 	if err := s.ev.Write(ctx, nil, events.Event{
 		Actor: events.System(), SubjectType: "user", SubjectID: user.ID.String(),
 		Action: "user.reset",
-		Payload: map[string]any{
-			"username": user.Username, "via": "cli", "host": host,
+		Payload: withExtra(map[string]any{
+			"username": user.Username, "host": host,
 			"totp_was_on": user.TotpEnabledAt != nil, "expires_at": expires.UTC().Format(time.RFC3339),
 			"sessies_beeindigd": n,
-		},
+		}, extra),
 	}); err != nil {
 		return ResetResult{}, fmt.Errorf("reset is gebeurd, maar het logboek schrijven mislukte: %w", err)
 	}
@@ -171,4 +175,121 @@ func newTempPassword() (string, error) {
 		b.WriteByte(tempAlphabet[n.Int64()])
 	}
 	return b.String(), nil
+}
+
+func withExtra(m, extra map[string]any) map[string]any {
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
+}
+
+// ResetRequestTTL is hoe lang een herstelcode van de loginpagina geldig is.
+const ResetRequestTTL = 24 * time.Hour
+
+// ErrUnknownCode: de code bestaat niet, is verlopen of al gebruikt.
+var ErrUnknownCode = errors.New("onbekende, verlopen of al gebruikte herstelcode")
+
+// codeAlphabet: hoofdletters en cijfers zonder 0/O en 1/I.
+const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// codeLabel is het leesbare deel van de code: wat de bezoeker invulde, in
+// kleine letters en alleen tekens die veilig in een shell staan.
+func codeLabel(input string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(input) {
+		if b.Len() >= 32 {
+			break
+		}
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "account"
+	}
+	return b.String()
+}
+
+// normalizeCode maakt een geplakte code gelijk aan de uitgegeven vorm: het
+// willekeurige deel na de laatste punt in hoofdletters, spaties weg.
+func normalizeCode(code string) string {
+	code = strings.Join(strings.Fields(code), "")
+	i := strings.LastIndexByte(code, '.')
+	if i < 0 {
+		return strings.ToUpper(code)
+	}
+	return strings.ToLower(code[:i]) + "." + strings.ToUpper(code[i+1:])
+}
+
+// LooksLikeCode zegt of de CLI een herstelcode kreeg in plaats van een naam.
+func LooksLikeCode(s string) bool {
+	s = normalizeCode(s)
+	i := strings.LastIndexByte(s, '.')
+	if i < 0 || len(s)-i-1 != 19 {
+		return false
+	}
+	for j, r := range s[i+1:] {
+		if (j+1)%5 == 0 {
+			if r != '-' {
+				return false
+			}
+		} else if !strings.ContainsRune(codeAlphabet, r) {
+			return false
+		}
+	}
+	return true
+}
+
+// RequestReset geeft een herstelcode voor "Wachtwoord vergeten of kan niet
+// inloggen?". Er wordt niet gekeken of het account bestaat: elk verzoek
+// krijgt een code, zodat het antwoord niets verraadt. Pas de CLI zoekt de
+// gebruiker op. De code draagt de ingevulde naam leesbaar in zich, maar
+// telt alleen als de server hem uitgaf: in de database staat de hash.
+func (s *Service) RequestReset(ctx context.Context, input, ip string) (code string, expires time.Time, err error) {
+	input = strings.TrimSpace(input)
+	if input == "" || len(input) > 128 {
+		return "", time.Time{}, ValidationError{Msg: "vul je gebruikersnaam of e-mailadres in"}
+	}
+	var b strings.Builder
+	b.WriteString(codeLabel(input))
+	b.WriteByte('.')
+	max := big.NewInt(int64(len(codeAlphabet)))
+	for i := 0; i < 16; i++ {
+		if i > 0 && i%4 == 0 {
+			b.WriteByte('-')
+		}
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		b.WriteByte(codeAlphabet[n.Int64()])
+	}
+	code = b.String()
+	expires = s.now().Add(ResetRequestTTL)
+	if err := s.q.CreateResetRequest(ctx, store.CreateResetRequestParams{
+		CodeHash: hashToken(code), Username: input, Ip: ip, ExpiresAt: expires,
+	}); err != nil {
+		return "", time.Time{}, err
+	}
+	return code, expires, nil
+}
+
+// ResetByCode is `user reset <code>`: het verzoek achter de code geeft de
+// gebruikersnaam. De code werkt één keer, ook als het account niet bestaat.
+func (s *Service) ResetByCode(ctx context.Context, code string, ttl time.Duration) (ResetResult, string, error) {
+	if ttl > MaxTempPasswordTTL {
+		return ResetResult{}, "", ValidationError{Msg: fmt.Sprintf("geldigheid mag hoogstens %s zijn", MaxTempPasswordTTL)}
+	}
+	req, err := s.q.ClaimResetRequest(ctx, hashToken(normalizeCode(code)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ResetResult{}, "", ErrUnknownCode
+	}
+	if err != nil {
+		return ResetResult{}, "", err
+	}
+	res, err := s.resetUser(ctx, req.Username, ttl, map[string]any{
+		"via": "code", "verzoek": req.ID.String(), "verzoek_ip": req.Ip,
+	})
+	return res, req.Username, err
 }

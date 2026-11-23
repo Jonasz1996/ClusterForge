@@ -10,10 +10,10 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 )
 
-// AccountRecoveryHelp geeft onder "Kan niet inloggen?" het commando waarmee
-// een beheerder het account herstelt. Het antwoord hangt alleen af van de
-// ingevulde naam: de database wordt niet geraadpleegd, dus tekst noch
-// responstijd verraden of het account bestaat.
+// AccountRecoveryHelp geeft onder "Wachtwoord vergeten of kan niet
+// inloggen?" een herstelcode voor de beheerder. Elk verzoek krijgt er een:
+// er wordt geen gebruiker opgezocht, dus tekst noch responstijd verraden of
+// het account bestaat.
 func (s *Server) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := clientIP(r)
@@ -30,33 +30,35 @@ func (s *Server) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	name := strings.TrimSpace(req.Username)
-	// Alleen een naam die als gebruikersnaam kan bestaan, komt in een
-	// commando dat iemand in een shell plakt.
-	if !auth.ValidUsername(name) {
-		writeError(w, http.StatusBadRequest, "validation", "vul je gebruikersnaam in: letters, cijfers, punt, streepje of underscore")
+	code, expires, err := s.auth.RequestReset(ctx, req.Username, ip)
+	if s.authError(w, r, err) {
 		return
 	}
 	// Wat er ingevuld werd, komt niet in het logboek: dat zou een lijst
-	// met geprobeerde namen worden.
+	// met geprobeerde namen worden. De beheerder ziet de naam bij user.reset.
 	s.throttle.Write(ctx, ip, events.Event{
 		Actor: events.System(), SubjectType: "auth", SubjectID: "recovery", Action: "auth.recovery_requested",
 		Payload: map[string]any{"ip": ip},
 	})
 	writeJSON(w, http.StatusOK, gen.RecoveryHelp{
-		Commands:   recoveryCommands(s.cfg.ResetCommand, name),
+		Code:       code,
+		ExpiresAt:  expires,
+		Commands:   recoveryCommands(s.cfg.ResetCommand, code),
 		TtlMinutes: int(auth.TempPasswordTTL.Minutes()),
 	})
 }
 
-func recoveryCommands(custom, name string) []gen.RecoveryCommand {
+// recoveryCommands geeft het commando met de code erin. In CF_RESET_COMMAND
+// staat {code} (of, van vroeger, {user}) voor de code.
+func recoveryCommands(custom, code string) []gen.RecoveryCommand {
 	type cmd = gen.RecoveryCommand
 	if custom != "" {
-		return []cmd{{Label: "Op de server", Command: strings.ReplaceAll(custom, "{user}", name)}}
+		c := strings.ReplaceAll(strings.ReplaceAll(custom, "{code}", code), "{user}", code)
+		return []cmd{{Label: "Op de server", Command: c}}
 	}
 	return []cmd{
-		{Label: "Docker Compose: op de server, in de map van docker-compose.yml (bv. /opt/clusterforge/deploy)", Command: "docker compose exec server clusterforge-server user reset " + name},
-		{Label: "ClusterForge-cluster (HA): op een van de nodes", Command: "docker exec cf-clusterforge-server clusterforge-server user reset " + name},
+		{Label: "Docker Compose: op de server, in de map van docker-compose.yml (bv. /opt/clusterforge/deploy)", Command: "docker compose exec server clusterforge-server user reset " + code},
+		{Label: "ClusterForge-cluster (HA): op een van de nodes", Command: "docker exec cf-clusterforge-server clusterforge-server user reset " + code},
 	}
 }
 

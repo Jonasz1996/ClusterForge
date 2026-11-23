@@ -1683,6 +1683,16 @@ type OpnsenseFlowRead struct {
 	Error   string
 }
 
+type PasswordResetRequest struct {
+	ID        uuid.UUID
+	CodeHash  []byte
+	Username  string
+	Ip        string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
 type ProxmoxBackup struct {
 	ConnectionID uuid.UUID
 	Volid        string

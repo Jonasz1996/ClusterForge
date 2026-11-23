@@ -12,6 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
+const claimResetRequest = `-- name: ClaimResetRequest :one
+UPDATE password_reset_requests SET used_at = now()
+WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+RETURNING id, code_hash, username, ip, created_at, expires_at, used_at
+`
+
+// Neemt een openstaand, niet verlopen verzoek; daarna werkt de code niet meer.
+func (q *Queries) ClaimResetRequest(ctx context.Context, codeHash []byte) (PasswordResetRequest, error) {
+	row := q.db.QueryRow(ctx, claimResetRequest, codeHash)
+	var i PasswordResetRequest
+	err := row.Scan(
+		&i.ID,
+		&i.CodeHash,
+		&i.Username,
+		&i.Ip,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.UsedAt,
+	)
+	return i, err
+}
+
 const clearMustSetupTOTP = `-- name: ClearMustSetupTOTP :exec
 UPDATE users SET must_setup_totp = false, updated_at = now() WHERE id = $1
 `
@@ -46,6 +68,28 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const createResetRequest = `-- name: CreateResetRequest :exec
+INSERT INTO password_reset_requests (code_hash, username, ip, expires_at)
+VALUES ($1, $2, $3, $4)
+`
+
+type CreateResetRequestParams struct {
+	CodeHash  []byte
+	Username  string
+	Ip        string
+	ExpiresAt time.Time
+}
+
+func (q *Queries) CreateResetRequest(ctx context.Context, arg CreateResetRequestParams) error {
+	_, err := q.db.Exec(ctx, createResetRequest,
+		arg.CodeHash,
+		arg.Username,
+		arg.Ip,
+		arg.ExpiresAt,
+	)
+	return err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -89,6 +133,18 @@ DELETE FROM sessions WHERE user_id = $1
 
 func (q *Queries) DeleteAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteAllUserSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOldResetRequests = `-- name: DeleteOldResetRequests :execrows
+DELETE FROM password_reset_requests WHERE expires_at < now() - interval '7 days'
+`
+
+func (q *Queries) DeleteOldResetRequests(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldResetRequests)
 	if err != nil {
 		return 0, err
 	}

@@ -706,28 +706,37 @@ func adminCreate(args []string) error {
 
 // userReset herstelt een account waar de gebruiker niet meer in kan: TOTP
 // uit, een tijdelijk wachtwoord dat één keer werkt, en bij de volgende login
-// verplicht een nieuw wachtwoord en een nieuwe TOTP.
+// verplicht een nieuw wachtwoord en een nieuwe TOTP. Normaal met de
+// herstelcode van de loginpagina; -gebruiker is de noodweg als de
+// webinterface niet bereikbaar is.
 func userReset(args []string) error {
 	fs := flag.NewFlagSet("user reset", flag.ContinueOnError)
 	ttl := fs.Duration("geldig", auth.TempPasswordTTL, "hoe lang het tijdelijke wachtwoord werkt (hoogstens 24h)")
+	byName := fs.String("gebruiker", "", "noodweg zonder code: deze gebruikersnaam resetten")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "gebruik: clusterforge-server user reset [-geldig 1h] <gebruikersnaam>")
+		fmt.Fprintln(os.Stderr, "gebruik: clusterforge-server user reset <herstelcode>")
+		fmt.Fprintln(os.Stderr, "   of:   clusterforge-server user reset -gebruiker <naam>   (als de loginpagina niet bereikbaar is)")
 		fs.PrintDefaults()
 	}
-	// De naam mag voor of na de vlaggen staan.
-	var name string
+	// De code mag voor of na de vlaggen staan.
+	var code string
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		name, args = args[0], args[1:]
+		code, args = args[0], args[1:]
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if name == "" && fs.NArg() > 0 {
-		name = fs.Arg(0)
+	if code == "" && fs.NArg() > 0 {
+		code = fs.Arg(0)
 	}
-	if name == "" {
+	switch {
+	case code == "" && *byName == "":
 		fs.Usage()
-		return errors.New("geef de gebruikersnaam")
+		return errors.New("geef de herstelcode van de loginpagina")
+	case code != "" && *byName != "":
+		return errors.New("geef een herstelcode of -gebruiker, niet allebei")
+	case code != "" && !auth.LooksLikeCode(code):
+		return fmt.Errorf("%q is geen herstelcode (die ziet eruit als naam.ABCD-EFGH-JKLM-NPQR); de gebruiker vraagt er een aan via \"Wachtwoord vergeten of kan niet inloggen?\" op de loginpagina, of gebruik -gebruiker <naam>", code)
 	}
 
 	cfg, err := config.FromEnv()
@@ -749,11 +758,21 @@ func userReset(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := authSvc.ResetUser(ctx, name, *ttl)
-	if errors.Is(err, auth.ErrUnknownUser) {
-		return fmt.Errorf("gebruiker %q bestaat niet", name)
+	var res auth.ResetResult
+	name := *byName
+	if code != "" {
+		res, name, err = authSvc.ResetByCode(ctx, code, *ttl)
+	} else {
+		res, err = authSvc.ResetUser(ctx, name, *ttl)
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, auth.ErrUnknownCode):
+		return errors.New("deze herstelcode is onbekend, verlopen (na 24 uur) of al gebruikt; laat de gebruiker een nieuwe aanvragen")
+	case errors.Is(err, auth.ErrUnknownUser) && code != "":
+		return fmt.Errorf("er bestaat geen account %q; de code is nu opgebruikt", name)
+	case errors.Is(err, auth.ErrUnknownUser):
+		return fmt.Errorf("gebruiker %q bestaat niet", name)
+	case err != nil:
 		return err
 	}
 	fmt.Printf("Account %s is gereset.\n\n", res.User.Username)

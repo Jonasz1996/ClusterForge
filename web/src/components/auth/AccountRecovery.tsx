@@ -12,9 +12,9 @@ type RecoveryHelp = components["schemas"]["RecoveryHelp"];
 
 const box = "space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900";
 
-// RecoveryForm is "Kan niet inloggen?": wie zijn gebruikersnaam invult,
-// krijgt het commando voor de systeembeheerder. De tekst is altijd dezelfde,
-// of het account nu bestaat of niet.
+// RecoveryForm is "Wachtwoord vergeten of kan niet inloggen?": wie zijn
+// login invult, krijgt een herstelcode voor de beheerder. Elke invoer krijgt
+// dezelfde bevestiging, of het account nu bestaat of niet.
 export function RecoveryForm({ initial, onBack }: { initial: string; onBack: () => void }) {
   const [username, setUsername] = useState(initial);
   const [help, setHelp] = useState<RecoveryHelp | null>(null);
@@ -37,32 +37,44 @@ export function RecoveryForm({ initial, onBack }: { initial: string; onBack: () 
 
   return (
     <div className={box}>
-      <h2 className="text-base font-semibold">Kan niet inloggen?</h2>
+      <h2 className="text-base font-semibold">Wachtwoord vergeten of kan niet inloggen?</h2>
       {error && <Alert>{error}</Alert>}
       {!help ? (
         <form onSubmit={onSubmit} className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Wachtwoord vergeten of je authenticator-app kwijt? Vul de gebruikersnaam in waarmee je inlogt. Je krijgt het commando
-            waarmee je systeembeheerder je account herstelt.
+            Vul je login in. Je krijgt een herstelcode die je aan je systeembeheerder geeft; die maakt er een tijdelijk wachtwoord
+            mee.
           </p>
           <div>
-            <Label htmlFor="recover-username">Gebruikersnaam</Label>
+            <Label htmlFor="recover-username">Gebruikersnaam of e-mailadres</Label>
             <Input
               id="recover-username"
               autoComplete="username"
               autoFocus
               required
+              maxLength={128}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
           </div>
           <Button type="submit" disabled={busy} className="w-full">
-            {busy ? "Bezig…" : "Toon het commando"}
+            {busy ? "Bezig…" : "Herstelcode aanvragen"}
           </Button>
         </form>
       ) : (
         <div className="space-y-4 text-sm">
-          <p className="font-medium">Vraag je systeembeheerder dit uit te voeren:</p>
+          <Alert kind="success">
+            Je aanvraag is ontvangen. Als er een account bij deze login hoort, kan je beheerder het met deze code herstellen.
+          </Alert>
+          <div className="space-y-1">
+            <p className="font-medium">Je herstelcode</p>
+            <CommandLine text={help.code} large />
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Geldig tot {new Date(help.expires_at).toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" })}, één keer
+              te gebruiken.
+            </p>
+          </div>
+          <p className="font-medium">Geef deze code aan je systeembeheerder en vraag dit uit te voeren:</p>
           {help.commands.map((c) => (
             <div key={c.command} className="space-y-1">
               <p className="text-xs text-slate-500 dark:text-slate-400">{c.label}</p>
@@ -70,11 +82,8 @@ export function RecoveryForm({ initial, onBack }: { initial: string; onBack: () 
             </div>
           ))}
           <p className="text-slate-600 dark:text-slate-400">
-            Je krijgt dan een tijdelijk wachtwoord waarmee je de toegang tot je account herstelt. Het werkt één keer en verloopt na{" "}
-            {help.ttl_minutes} minuten. Daarna stel je meteen een nieuw wachtwoord en een nieuwe tweestapsverificatie in.
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Bestaat dit account niet, dan meldt het commando dat aan je beheerder.
+            Je beheerder krijgt dan een tijdelijk wachtwoord voor je. Het werkt één keer en verloopt na {help.ttl_minutes} minuten.
+            Daarna stel je meteen een nieuw wachtwoord en een nieuwe tweestapsverificatie in.
           </p>
         </div>
       )}
@@ -85,11 +94,11 @@ export function RecoveryForm({ initial, onBack }: { initial: string; onBack: () 
   );
 }
 
-function CommandLine({ text }: { text: string }) {
+function CommandLine({ text, large = false }: { text: string; large?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-start gap-2 rounded-md bg-slate-900 p-2 text-slate-100">
-      <code className="min-w-0 flex-1 break-words font-mono text-xs leading-5">{text}</code>
+      <code className={`min-w-0 flex-1 break-words font-mono ${large ? "text-base font-semibold leading-6" : "text-xs leading-5"}`}>{text}</code>
       <button
         type="button"
         className="shrink-0 rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700"

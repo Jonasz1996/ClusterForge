@@ -85,7 +85,7 @@ type Config struct {
 	// (CF_TEST_WINDOW, standaard "zo 03:00-05:00"; de tijdzone komt uit TZ).
 	TestWindow planner.Window
 	// ResetCommand is het commando dat de loginpagina toont onder "Kan niet
-	// inloggen?", met {user} voor de gebruikersnaam. Leeg = de standaard
+	// inloggen?", met {code} voor de herstelcode. Leeg = de standaard
 	// voor Docker Compose en voor het ClusterForge-cluster.
 	ResetCommand string
 	// JournalLogins bewaart SSH-logins in het journaal

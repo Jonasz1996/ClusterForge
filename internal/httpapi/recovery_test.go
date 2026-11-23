@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
+	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -136,33 +138,69 @@ func TestUserResetExpires(t *testing.T) {
 	}
 }
 
+type recoveryHelp struct {
+	Code     string `json:"code"`
+	Commands []struct {
+		Label   string `json:"label"`
+		Command string `json:"command"`
+	} `json:"commands"`
+	TTL int `json:"ttl_minutes"`
+}
+
 func TestAccountRecoveryHelp(t *testing.T) {
 	e := newTestEnv(t)
+	ctx := context.Background()
 	e.createUser("jonas", "een-lang-wachtwoord", store.UserRoleAdmin)
 	c := e.client()
-	type help struct {
-		Commands []struct {
-			Label   string `json:"label"`
-			Command string `json:"command"`
-		} `json:"commands"`
-		TTL int `json:"ttl_minutes"`
-	}
-	var a, b help
-	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas"}, &a); s != 200 {
+	var a, b recoveryHelp
+	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "Jonas"}, &a); s != 200 {
 		t.Fatalf("recovery: %d", s)
 	}
-	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "niemand"}, &b); s != 200 {
+	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "niemand@example.com"}, &b); s != 200 {
 		t.Fatalf("recovery onbekend: %d", s)
 	}
-	// Zelfde antwoord, op de naam na.
-	if len(a.Commands) != 2 || a.TTL != 60 || len(b.Commands) != len(a.Commands) ||
-		strings.ReplaceAll(b.Commands[0].Command, "niemand", "jonas") != a.Commands[0].Command ||
-		a.Commands[0].Command != "docker compose exec server clusterforge-server user reset jonas" {
+	// Zelfde vorm, de naam leesbaar in de code, en een geldige code.
+	if !strings.HasPrefix(a.Code, "jonas.") || !strings.HasPrefix(b.Code, "niemandexample.com.") ||
+		!auth.LooksLikeCode(a.Code) || !auth.LooksLikeCode(b.Code) || len(a.Commands) != len(b.Commands) || a.TTL != 60 ||
+		a.Commands[0].Command != "docker compose exec server clusterforge-server user reset "+a.Code {
 		t.Fatalf("antwoorden: %+v / %+v", a, b)
 	}
+	// Een zelf verzonnen code met dezelfde naam werkt niet.
+	if _, _, err := e.auth.ResetByCode(ctx, "jonas.ABCD-EFGH-JKLM-NPQR", 0); !errors.Is(err, auth.ErrUnknownCode) {
+		t.Fatalf("verzonnen code: %v", err)
+	}
+	// De echte code werkt één keer, ook in kleine letters geplakt.
+	res, name, err := e.auth.ResetByCode(ctx, strings.ToLower(a.Code), 0)
+	if err != nil || name != "Jonas" || res.User.Username != "jonas" || res.TempPassword == "" {
+		t.Fatalf("reset met code: %v %q %+v", err, name, res)
+	}
+	if s, _, er := e.client().login("jonas", res.TempPassword, ""); s != 200 {
+		t.Fatalf("login met tijdelijk wachtwoord: %d %s", s, er.Code)
+	}
+	if _, _, err := e.auth.ResetByCode(ctx, a.Code, 0); !errors.Is(err, auth.ErrUnknownCode) {
+		t.Fatalf("code tweede keer: %v", err)
+	}
+	// Onbekend account: pas de CLI zegt het, en de code is op.
+	if _, _, err := e.auth.ResetByCode(ctx, b.Code, 0); !errors.Is(err, auth.ErrUnknownUser) {
+		t.Fatalf("code voor onbekend account: %v", err)
+	}
+	// Verlopen code.
+	var d recoveryHelp
+	c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas"}, &d)
+	if _, err := e.pool.Exec(ctx, `UPDATE password_reset_requests SET expires_at = now() - interval '1 second' WHERE used_at IS NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.auth.ResetByCode(ctx, d.Code, 0); !errors.Is(err, auth.ErrUnknownCode) {
+		t.Fatalf("verlopen code: %v", err)
+	}
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE action = 'user.reset' AND payload->>'via' = 'code'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("logboek user.reset via code: %d %v", n, err)
+	}
+
 	var er apiErr
-	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas; rm -rf /"}, &er); s != 400 {
-		t.Fatalf("ongeldige naam: %d", s)
+	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "  "}, &er); s != 400 {
+		t.Fatalf("lege login: %d", s)
 	}
 	e.api.recoveryLimiter = newIPLimiter(time.Hour, 2)
 	c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas"}, nil)
@@ -170,11 +208,11 @@ func TestAccountRecoveryHelp(t *testing.T) {
 	if s := c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas"}, nil); s != http.StatusTooManyRequests {
 		t.Fatalf("rate limit: %d", s)
 	}
-	e.api.cfg.ResetCommand = "ssh cf1 sudo cf-reset {user}"
+	e.api.cfg.ResetCommand = "ssh cf1 sudo cf-reset {code}"
 	e.api.recoveryLimiter = newIPLimiter(time.Hour, 2)
-	var d help
-	c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas"}, &d)
-	if len(d.Commands) != 1 || d.Commands[0].Command != "ssh cf1 sudo cf-reset jonas" {
-		t.Fatalf("eigen commando: %+v", d)
+	var f recoveryHelp
+	c.do("POST", "/api/v1/auth/recovery", map[string]any{"username": "jonas"}, &f)
+	if len(f.Commands) != 1 || f.Commands[0].Command != "ssh cf1 sudo cf-reset "+f.Code {
+		t.Fatalf("eigen commando: %+v", f)
 	}
 }

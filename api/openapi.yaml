@@ -86,10 +86,11 @@ paths:
   /auth/recovery:
     post:
       operationId: accountRecoveryHelp
-      summary: Het commando waarmee een beheerder een account herstelt
+      summary: Een herstelcode aanvragen die de beheerder in de CLI plakt
       description: >
-        Openbaar. Het antwoord hangt alleen af van de ingevulde naam, nooit
-        van of het account bestaat; de database wordt niet geraadpleegd.
+        Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of
+        niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server
+        user reset <code>` zoekt het account op.
       security: []
       requestBody:
         required: true
@@ -11939,8 +11940,10 @@ components:
         username: { type: string }
     RecoveryHelp:
       type: object
-      required: [commands, ttl_minutes]
+      required: [code, expires_at, commands, ttl_minutes]
       properties:
+        code: { type: string, description: Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich }
+        expires_at: { type: string, format: date-time, description: Tot wanneer de beheerder de code kan gebruiken }
         commands:
           type: array
           items: { $ref: "#/components/schemas/RecoveryCommand" }

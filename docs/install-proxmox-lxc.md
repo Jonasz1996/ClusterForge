@@ -305,18 +305,22 @@ curl -fsSL http://192.168.10.153:8080/install/agent.sh | sudo sh -s -- --server 
 
 ## Account herstellen (wachtwoord of authenticator kwijt)
 
-Op de loginpagina staat **Kan niet inloggen?**. Wie daar zijn gebruikersnaam invult, krijgt het commando te zien dat de systeembeheerder moet uitvoeren. Die pagina zegt nooit of het account bestaat en is beperkt tot een paar aanvragen per minuut per IP-adres.
+1. Op de loginpagina klikt de gebruiker op **Wachtwoord vergeten of kan niet inloggen?** en vult zijn gebruikersnaam in.
+2. Hij krijgt een herstelcode zoals `jonas.K7QM-3XPA-9TRW-H2MC` en geeft die aan de beheerder. Elke invoer krijgt dezelfde bevestiging en een code, of het account nu bestaat of niet; de pagina is beperkt tot een paar aanvragen per minuut per IP-adres.
+3. De beheerder plakt de code in één commando:
 
 ```bash
 cd /opt/clusterforge/deploy
-docker compose exec server clusterforge-server user reset jonas
+docker compose exec server clusterforge-server user reset jonas.K7QM-3XPA-9TRW-H2MC
 # ClusterForge-cluster (HA), op een van de nodes:
-docker exec cf-clusterforge-server clusterforge-server user reset jonas
+docker exec cf-clusterforge-server clusterforge-server user reset jonas.K7QM-3XPA-9TRW-H2MC
 ```
 
-Dat zet de tweestapsverificatie van die gebruiker uit, beëindigt al zijn sessies en toont een tijdelijk wachtwoord. Dat werkt één keer en verloopt na een uur (`-geldig 30m` voor korter, hoogstens `24h`). Na het inloggen moet de gebruiker eerst een nieuw wachtwoord en daarna een nieuwe TOTP instellen; tot dan werkt de rest van ClusterForge niet. Elke reset staat in het logboek als `user.reset`.
+De code is een token van de server: alleen een code die de loginpagina uitgaf werkt, één keer, binnen 24 uur. De CLI leest de gebruikersnaam uit het verzoek, zet de tweestapsverificatie uit, beëindigt alle sessies en toont een tijdelijk wachtwoord. Dat werkt één keer en verloopt na een uur (`-geldig 30m` voor korter, hoogstens `24h`). Na het inloggen moet de gebruiker eerst een nieuw wachtwoord en daarna een nieuwe TOTP instellen; tot dan werkt de rest van ClusterForge niet. Elke reset staat in het logboek als `user.reset`.
 
-Toont de loginpagina een ander commando beter (bv. via ssh), zet dan `CF_RESET_COMMAND` met `{user}` voor de gebruikersnaam, bv. `CF_RESET_COMMAND="ssh root@cf01 docker exec cf-clusterforge-server clusterforge-server user reset {user}"`.
+Is de loginpagina niet bereikbaar, dan is er een noodweg zonder code: `clusterforge-server user reset -gebruiker jonas`.
+
+Toont de loginpagina beter een ander commando (bv. via ssh), zet dan `CF_RESET_COMMAND` met `{code}` voor de herstelcode, bv. `CF_RESET_COMMAND="ssh root@cf01 docker exec cf-clusterforge-server clusterforge-server user reset {code}"`.
 
 ## Problemen
 

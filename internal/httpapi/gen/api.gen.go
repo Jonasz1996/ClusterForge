@@ -12979,7 +12979,12 @@ type RecoveryCommand struct {
 
 // RecoveryHelp defines model for RecoveryHelp.
 type RecoveryHelp struct {
+	// Code Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich
+	Code     string            `json:"code"`
 	Commands []RecoveryCommand `json:"commands"`
+
+	// ExpiresAt Tot wanneer de beheerder de code kan gebruiken
+	ExpiresAt time.Time `json:"expires_at"`
 
 	// TtlMinutes Hoe lang het tijdelijke wachtwoord geldig is
 	TtlMinutes int `json:"ttl_minutes"`
@@ -16883,7 +16888,7 @@ type ServerInterface interface {
 	// SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 	// (PUT /auth/preferences)
 	SetPreferences(w http.ResponseWriter, r *http.Request)
-	// AccountRecoveryHelp Het commando waarmee een beheerder een account herstelt
+	// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
 	// (POST /auth/recovery)
 	AccountRecoveryHelp(w http.ResponseWriter, r *http.Request)
 	// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
@@ -18434,7 +18439,7 @@ func (_ Unimplemented) SetPreferences(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// AccountRecoveryHelp Het commando waarmee een beheerder een account herstelt
+// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
 // (POST /auth/recovery)
 func (_ Unimplemented) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)

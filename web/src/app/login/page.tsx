@@ -155,7 +155,7 @@ export default function LoginPage() {
                 setRecovering(true);
               }}
             >
-              Kan niet inloggen?
+              Wachtwoord vergeten of kan niet inloggen?
             </button>
           )}
           {needsCode && (

@@ -460,6 +460,10 @@ func (s *Service) useTOTP(ctx context.Context, user store.User, code string) err
 
 // CleanupSessions verwijdert verlopen sessies.
 func (s *Service) CleanupSessions(ctx context.Context) (int64, error) {
+	// Oude herstelcodes van de loginpagina gaan mee.
+	if _, err := s.q.DeleteOldResetRequests(ctx); err != nil {
+		return 0, err
+	}
 	return s.q.DeleteExpiredSessions(ctx)
 }
 

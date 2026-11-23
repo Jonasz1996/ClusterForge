@@ -64,3 +64,16 @@ UPDATE users SET must_setup_totp = false, updated_at = now() WHERE id = $1;
 
 -- name: DeleteAllUserSessions :execrows
 DELETE FROM sessions WHERE user_id = $1;
+
+-- name: CreateResetRequest :exec
+INSERT INTO password_reset_requests (code_hash, username, ip, expires_at)
+VALUES ($1, $2, $3, $4);
+
+-- name: ClaimResetRequest :one
+-- Neemt een openstaand, niet verlopen verzoek; daarna werkt de code niet meer.
+UPDATE password_reset_requests SET used_at = now()
+WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+RETURNING *;
+
+-- name: DeleteOldResetRequests :execrows
+DELETE FROM password_reset_requests WHERE expires_at < now() - interval '7 days';

@@ -75,7 +75,7 @@ var Known = map[string]Spec{
 	"auth.rate_limited":         {CategorySecurity, "Loginlimiet bereikt"},
 	"user.created":              {CategorySecurity, "Gebruiker aangemaakt"},
 	"user.reset":                {CategorySecurity, "Account gereset via de CLI (tijdelijk wachtwoord, TOTP uit)"},
-	"auth.recovery_requested":   {CategorySecurity, "Herstelcommando opgevraagd op de loginpagina"},
+	"auth.recovery_requested":   {CategorySecurity, "Herstelcode aangevraagd op de loginpagina"},
 	// Voor het gebruikersbeheer dat later komt.
 	"user.disabled":         {CategorySecurity, "Gebruiker uitgeschakeld"},
 	"user.enabled":          {CategorySecurity, "Gebruiker weer ingeschakeld"},
