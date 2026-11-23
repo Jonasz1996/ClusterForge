@@ -470,6 +470,28 @@ func TestMediaPlatformUp(t *testing.T) {
 	}
 }
 
+// De hulpteksten zeggen wat er echt gebeurt: Versie wijzigen bouwt niet.
+func TestMediaPlatformHelp(t *testing.T) {
+	tpl, _ := mpContext(t, nil)
+	help := map[string]string{}
+	for _, p := range tpl.Params {
+		help[p.Name] = p.Help
+	}
+	for name, want := range map[string][]string{
+		"platform_ref": {"Versie wijzigen bouwt niet; gebruik het commando Platform bijwerken.", "Nooit install.sh op een clusternode."},
+		"analyse":      {"±4 GB vrij op de schijf", "12 tot 16 GB RAM per node"},
+	} {
+		for _, w := range want {
+			if !strings.Contains(help[name], w) {
+				t.Errorf("hulptekst van %s mist %q: %s", name, w, help[name])
+			}
+		}
+	}
+	if strings.Contains(help["platform_ref"], "bouwt de nieuwe versie") {
+		t.Errorf("hulptekst van platform_ref: %s", help["platform_ref"])
+	}
+}
+
 func sha256hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])

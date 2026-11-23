@@ -66,9 +66,9 @@ params:
     type: string
     label: Versie
     help: >-
-      Branch, tag of commit van het platform. Een andere waarde bouwt de nieuwe
-      versie node voor node, en herstart het platform op de node met het VIP,
-      na een back-up van de database. Nooit install.sh op een clusternode.
+      Branch, tag of commit van het platform. Versie wijzigen bouwt niet;
+      gebruik het commando Platform bijwerken. Nooit install.sh op een
+      clusternode.
     default: main
     pattern: '[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*'
   - name: db_vip
@@ -103,6 +103,8 @@ params:
     help: >-
       De container analyse van het platform (vanaf 0.8.1). Elke node haalt de
       modellen zelf (±40 MB, met zoeken op beeld ±1,6 GB bij de eerste keer).
+      Tijdens het omzetten van zoeken op beeld ±4 GB vrij op de schijf; reken
+      op 12 tot 16 GB RAM per node.
     default: true
   - name: beeld
     type: bool
