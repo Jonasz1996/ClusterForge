@@ -10,6 +10,7 @@ import {
   useAgentUpgrades,
   useClearProdQueue,
   useSetAgentUpgradeAuto,
+  useSetAgentUpgradeNightOnly,
   useSetAgentUpgradeProdAuto,
   useSetClusterAgentUpgradeAuto,
   useStartAgentUpgrades,
@@ -73,6 +74,7 @@ function StartError({ error }: { error: Error }) {
 function AutoSwitches({ ov, isAdmin }: { ov: AgentUpgradeOverview; isAdmin: boolean }) {
   const setAuto = useSetAgentUpgradeAuto();
   const setProdAuto = useSetAgentUpgradeProdAuto();
+  const setNight = useSetAgentUpgradeNightOnly();
   return (
     <div className="space-y-2">
       <label className="flex items-start gap-2">
@@ -109,8 +111,29 @@ function AutoSwitches({ ov, isAdmin }: { ov: AgentUpgradeOverview; isAdmin: bool
           </span>
         </span>
       </label>
-      {(setAuto.isError || setProdAuto.isError) && (
-        <Alert>{(setAuto.error ?? setProdAuto.error)!.message}</Alert>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={ov.night_only ?? true}
+          disabled={!isAdmin || !ov.auto || setNight.isPending}
+          onChange={(e) => setNight.mutate({ enabled: e.target.checked })}
+        />
+        <span>
+          Alleen &apos;s nachts (02:00-05:00)
+          <span className="block text-slate-500">
+            Elke agentupdate verbreekt even de verbinding. &apos;s Nachts gaat
+            elke agent in één keer naar de nieuwste versie, ook na meerdere
+            updates van ClusterForge op een dag. De knop Bijwerken werkt altijd
+            meteen.
+            {ov.night_only && ov.next_window && new Date(ov.next_window) > new Date()
+              ? ` Volgende keer: ${new Date(ov.next_window).toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" })}.`
+              : ""}
+          </span>
+        </span>
+      </label>
+      {(setAuto.isError || setProdAuto.isError || setNight.isError) && (
+        <Alert>{(setAuto.error ?? setProdAuto.error ?? setNight.error)!.message}</Alert>
       )}
     </div>
   );

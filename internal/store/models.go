@@ -407,6 +407,7 @@ type AgentUpgradeSetting struct {
 	UpdatedBy *uuid.UUID
 	UpdatedAt time.Time
 	ProdAuto  bool
+	NightOnly bool
 }
 
 type ApiToken struct {

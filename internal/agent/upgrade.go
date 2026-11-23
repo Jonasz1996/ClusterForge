@@ -324,9 +324,20 @@ func (a *Agent) restartSelf() {
 		return
 	}
 	if out, err := restartAgent(context.Background(), a.exec); err != nil {
+		// Testlijst 2, 2.10: dan bleef de oude agent draaien en zag je de
+		// fout alleen in de log. Onder systemd (Restart=always) stopt de
+		// agent zichzelf: systemd start dan de nieuwe binary.
+		if hostOS != "freebsd" && os.Getenv("INVOCATION_ID") != "" {
+			a.Log.Error("cf-agent herstarten mislukt; de agent stopt zelf zodat systemd de nieuwe start", "err", err, "output", strings.TrimSpace(string(out)))
+			exitSelf(75)
+			return
+		}
 		a.Log.Error("cf-agent herstarten mislukt; de nieuwe agent start bij de volgende herstart", "err", err, "output", strings.TrimSpace(string(out)))
 	}
 }
+
+// exitSelf stopt het proces; tests vervangen hem.
+var exitSelf = os.Exit
 
 // resumeUpgrade draait bij de start. Is deze agent de nieuwe van een update
 // die nog niet bevestigd is, bijvoorbeeld na een reboot, dan staat de

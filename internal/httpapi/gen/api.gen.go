@@ -4820,6 +4820,12 @@ type AgentUpgradeOverview struct {
 	// HaltedBy De node waar de update op prod mislukte
 	HaltedBy string `json:"halted_by"`
 
+	// NextWindow Begin van het volgende nachtvenster
+	NextWindow *time.Time `json:"next_window,omitempty"`
+
+	// NightOnly Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent
+	NightOnly *bool `json:"night_only,omitempty"`
+
 	// OffClusterIds Clusters waar vanzelf bijwerken uitstaat
 	OffClusterIds []openapi_types.UUID `json:"off_cluster_ids"`
 
@@ -15416,6 +15422,11 @@ type SetAgentUpgradeAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
 }
 
+// SetAgentUpgradeNightOnlyJSONBody defines parameters for SetAgentUpgradeNightOnly.
+type SetAgentUpgradeNightOnlyJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
 type SetAgentUpgradeProdAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
@@ -16154,6 +16165,9 @@ type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 // SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
 type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
 
+// SetAgentUpgradeNightOnlyJSONRequestBody defines body for SetAgentUpgradeNightOnly for application/json ContentType.
+type SetAgentUpgradeNightOnlyJSONRequestBody SetAgentUpgradeNightOnlyJSONBody
+
 // SetAgentUpgradeProdAutoJSONRequestBody defines body for SetAgentUpgradeProdAuto for application/json ContentType.
 type SetAgentUpgradeProdAutoJSONRequestBody SetAgentUpgradeProdAutoJSONBody
 
@@ -16735,6 +16749,9 @@ type ServerInterface interface {
 	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/auto)
 	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
+	// SetAgentUpgradeNightOnly Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+	// (PUT /agent-upgrades/night-only)
+	SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request)
 	// SetAgentUpgradeProdAuto Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/prod-auto)
 	SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request)
@@ -18175,6 +18192,12 @@ func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request
 // SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 // (PUT /agent-upgrades/auto)
 func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentUpgradeNightOnly Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+// (PUT /agent-upgrades/night-only)
+func (_ Unimplemented) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -21064,6 +21087,20 @@ func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentUpgradeNightOnly operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentUpgradeNightOnly(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -35281,6 +35318,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/agent-upgrades/prod-auto", wrapper.SetAgentUpgradeProdAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-upgrades/night-only", wrapper.SetAgentUpgradeNightOnly)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/agent-upgrades/prod-queue", wrapper.ClearAgentUpgradeProdQueue)

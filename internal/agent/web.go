@@ -264,7 +264,6 @@ func checkURL(ctx context.Context, dial dialFunc, c *protocol.WebCheck) protocol
 	return out
 }
 
-
 // pageTitle haalt de <title> uit het begin van een pagina, ingekort en
 // zonder witruimte en HTML-entiteiten.
 func pageTitle(body []byte) string {

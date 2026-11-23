@@ -6948,6 +6948,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-upgrades/night-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin) */
+        put: operations["setAgentUpgradeNightOnly"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-upgrades/prod-queue": {
         parameters: {
             query?: never;
@@ -14321,6 +14338,13 @@ export interface components {
             auto: boolean;
             /** @description Ook agents op prod vanzelf bijwerken */
             prod_auto: boolean;
+            /** @description Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent */
+            night_only?: boolean;
+            /**
+             * Format: date-time
+             * @description Begin van het volgende nachtvenster
+             */
+            next_window?: string;
             /** @description Een update op prod mislukte; vanzelf bijwerken op prod staat stil */
             prod_halted: boolean;
             /** @description De node waar de update op prod mislukte */
@@ -28091,6 +28115,35 @@ export interface operations {
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeNightOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     clearAgentUpgradeProdQueue: {

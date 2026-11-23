@@ -14,7 +14,12 @@ ORDER BY lower(coalesce(c.name, '~')), lower(n.hostname);
 
 -- name: GetAgentUpgradeSettings :one
 SELECT coalesce((SELECT auto FROM agent_upgrade_settings LIMIT 1), true)::boolean AS auto,
-       coalesce((SELECT prod_auto FROM agent_upgrade_settings LIMIT 1), false)::boolean AS prod_auto;
+       coalesce((SELECT prod_auto FROM agent_upgrade_settings LIMIT 1), false)::boolean AS prod_auto,
+       coalesce((SELECT night_only FROM agent_upgrade_settings LIMIT 1), true)::boolean AS night_only;
+
+-- name: SetAgentUpgradeNightOnly :exec
+INSERT INTO agent_upgrade_settings (night_only, updated_by) VALUES (@night_only, @updated_by)
+ON CONFLICT ((true)) DO UPDATE SET night_only = EXCLUDED.night_only, updated_by = EXCLUDED.updated_by, updated_at = now();
 
 -- name: SetAgentUpgradeProdAuto :exec
 INSERT INTO agent_upgrade_settings (prod_auto, updated_by) VALUES (@prod_auto, @updated_by)

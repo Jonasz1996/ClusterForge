@@ -171,6 +171,8 @@ type Service struct {
 	Now        func() time.Time
 	// Changed wordt aangeroepen als een agent bijgewerkt is.
 	Changed func()
+	// InWindow zegt of het nu in het nachtvenster is; tests vervangen hem.
+	InWindow func(time.Time) bool
 
 	kick chan struct{}
 
@@ -189,7 +191,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		pool: pool, q: store.New(pool), ev: ev, log: log, bus: bus, runner: runner, Dir: dir, Version: version,
 		Poll: 2 * time.Second, Back: protocol.UpgradeRollbackAfter + 2*time.Minute, RollbackAfter: protocol.UpgradeRollbackAfter,
 		failedTo: map[uuid.UUID]failure{},
-		Interval: time.Minute, StartDelay: 2 * time.Minute, Now: time.Now, kick: make(chan struct{}, 1),
+		Interval: time.Minute, StartDelay: 2 * time.Minute, Now: time.Now, kick: make(chan struct{}, 1), InWindow: inWindow,
 	}
 	if runner != nil {
 		runner.Register(Kind, s.run)
@@ -209,6 +211,10 @@ type Overview struct {
 	// ProdAuto: ook agents op prod vanzelf bijwerken, één prodcluster
 	// tegelijk.
 	ProdAuto bool
+	// NightOnly: vanzelf bijwerken alleen tussen NightStart en NightEnd
+	// (Brussel); NextWindow is wanneer dat venster weer begint.
+	NightOnly  bool
+	NextWindow time.Time
 	// ProdHalted: op prod mislukte een update naar de agent van nu;
 	// vanzelf bijwerken op prod staat stil tot die node met de knop
 	// bijgewerkt is. HaltedBy is die node.
@@ -230,7 +236,8 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return ov, err
 	}
-	ov.Auto, ov.ProdAuto = settings.Auto, settings.ProdAuto
+	ov.Auto, ov.ProdAuto, ov.NightOnly = settings.Auto, settings.ProdAuto, settings.NightOnly
+	ov.NextWindow = nextWindow(s.Now())
 	queue, err := s.q.ListAgentUpgradeProdQueue(ctx)
 	if err != nil {
 		return ov, err

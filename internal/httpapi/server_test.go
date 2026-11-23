@@ -283,6 +283,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	// Agents bijwerken: niet vanzelf; een test roept AutoRun aan.
 	agentDir := t.TempDir()
 	upg := agentupgrade.NewService(pool, ev, log, runner, bus, agentDir, "test")
+	// Tests werken agents op elk uur vanzelf bij, niet alleen 's nachts.
+	upg.InWindow = func(time.Time) bool { return true }
 	upg.Interval, upg.Poll, upg.Back, upg.RollbackAfter = 0, 20*time.Millisecond, 5*time.Second, time.Second
 	upg.Changed = eval.Kick
 	acf := agentconf.NewService(pool, ev, log, runner, bus)
