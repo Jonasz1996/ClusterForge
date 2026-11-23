@@ -48,9 +48,21 @@ params:
   - name: replication
     type: string
     label: Replicatie van SeaweedFS
-    help: 001 is twee kopieën op verschillende nodes (B2 van het platform), 002 drie.
+    help: >-
+      001 is twee kopieën op verschillende nodes (B2 van het platform), 002
+      drie. Een map met een eigen regel in SeaweedFS (zoals films en series)
+      houdt die.
     default: "001"
     pattern: '00[12]'
+  - name: blob_split
+    type: bool
+    label: Films en series apart (blobs-media)
+    help: >-
+      Het platform zet inhoud waar alleen films en series naar wijzen in
+      blobs-media/ (fase 11, PLATFORM_BLOB_SPLIT). Met een regel voor die map
+      in SeaweedFS (fs.configure, collectie media, bv. 001) staan ze op minder
+      kopieën; al de rest blijft op de replicatie hierboven.
+    default: false
   - name: seaweedfs_image
     type: string
     label: Image van SeaweedFS

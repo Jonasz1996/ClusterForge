@@ -15,7 +15,8 @@
 #                                    de modellen van gezichten en zoeken op beeld
 #   platform-ctl.sh geo [--check]    de bronnen van de plaatsnamen (gedeelde data)
 #   platform-ctl.sh replicatie [--check]
-#                                    bestaande volumes naar de replicatie van ClusterForge
+#                                    bestaande volumes (zonder collectie) naar de
+#                                    replicatie van ClusterForge
 #   platform-ctl.sh sleutels-klaar   mag de sync de sleutels van gezichten van hier
 #                                    kopiëren en elders wissen? (voor de sync)
 #   platform-ctl.sh compose …        docker compose met de bestanden van het cluster
@@ -437,23 +438,37 @@ arr_stop() {
 # kopieën (volume.fix.replication). Nieuwe volumes krijgen de nieuwe waarde
 # al van de master. --check: staan alle volumes al op de gewenste waarde, of
 # is deze node niet de leider?
+#
+# Alleen de volumes zonder collectie (de standaardcollectie). Een collectie
+# heeft haar eigen regel: films en series staan in collectie media op 2
+# kopieën (fs.configure op /blobs-media/, PLATFORM_BLOB_SPLIT); die blijven
+# zoals ze zijn. Daarom per volume (-volumeId), niet met -collectionPattern:
+# wat een leeg patroon betekent, verschilt per versie van SeaweedFS.
 REPLICATIE='{{ .params.replication }}'
 weed_leader() {
   curl -fsS --max-time 5 http://127.0.0.1:9333/cluster/status 2>/dev/null | grep -q '"IsLeader": *true'
 }
-volumes_placements() {
-  # De ReplicaPlacement van elk volume, als xyz, uit de volume server van elke node.
-  curl -fsS --max-time 20 http://127.0.0.1:9333/vol/status 2>/dev/null |
-    grep -o '"ReplicaPlacement": *{[^}]*}' |
-    awk '{ n = r = d = 0
-      if (match($0, /"(node|SameRackCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); n = v }
-      if (match($0, /"(rack|DiffRackCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); r = v }
-      if (match($0, /"(dc|DiffDataCenterCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); d = v }
-      print d r n }'
+volumes_default() {
+  # Elk volume zonder collectie als "id xyz" (xyz: zijn ReplicaPlacement), uit
+  # de volume server van elke node. Een volume is een object in een lijst; de
+  # objecten erin (ReplicaPlacement, Ttl) hebben geen lijsten, dus elk volume
+  # komt op een eigen regel, wat de volgorde van de velden ook is.
+  curl -fsS --max-time 20 http://127.0.0.1:9333/vol/status 2>/dev/null | tr -d '\n' |
+    sed 's/}[[:space:]]*,[[:space:]]*{/}\n{/g; s/\[[[:space:]]*{/[\n{/g' |
+    awk '/^[{]/ && /"Collection": *""/ && match($0, /"Id": *[0-9]+/) {
+      id = substr($0, RSTART, RLENGTH); sub(/.*: */, "", id)
+      if (!match($0, /"ReplicaPlacement": *[{][^}]*[}]/)) next
+      rp = substr($0, RSTART, RLENGTH); n = r = d = 0
+      if (match(rp, /"(node|SameRackCount)": *[0-9]+/)) { v = substr(rp, RSTART, RLENGTH); sub(/.*: */, "", v); n = v }
+      if (match(rp, /"(rack|DiffRackCount)": *[0-9]+/)) { v = substr(rp, RSTART, RLENGTH); sub(/.*: */, "", v); r = v }
+      if (match(rp, /"(dc|DiffDataCenterCount)": *[0-9]+/)) { v = substr(rp, RSTART, RLENGTH); sub(/.*: */, "", v); d = v }
+      print id, d r n }'
 }
+# De ids van de volumes zonder collectie die niet op $REPLICATIE staan.
+volumes_other() { volumes_default | awk -v want="$REPLICATIE" '$2 != want { print $1 }' | sort -un; }
 replicatie() {
   weed_leader || { [ "${1:-}" = --check ] && return 0; echo "Niet de leider van de masters; die zet de replicatie om."; return 0; }
-  other=$(volumes_placements | grep -vx "$REPLICATIE" | wc -l)
+  other=$(volumes_other | wc -l)
   if [ "${1:-}" = --check ]; then
     [ "$other" = 0 ] || systemctl is-active --quiet cf-platform-replicatie
     return $?
@@ -469,9 +484,11 @@ replicatie() {
     return 0
   fi
   say "$other volumes naar replicatie $REPLICATIE, dan de ontbrekende kopieën maken"
-  printf 'lock\nvolume.configure.replication -replication %s -collectionPattern *\nvolume.fix.replication\nunlock\n' "$REPLICATIE" |
-    /usr/local/bin/weed shell -master=127.0.0.1:9333
-  left=$(volumes_placements | grep -vx "$REPLICATIE" | wc -l)
+  { echo lock
+    for id in $(volumes_other); do echo "volume.configure.replication -volumeId $id -replication $REPLICATIE"; done
+    echo volume.fix.replication
+    echo unlock; } | /usr/local/bin/weed shell -master=127.0.0.1:9333
+  left=$(volumes_other | wc -l)
   echo "Nog $left volumes niet op $REPLICATIE"
 }
 

@@ -3,6 +3,7 @@ package templates
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -45,7 +46,8 @@ func mpContext(t *testing.T, extra map[string]any) (*Template, Context) {
 func TestRenderMediaPlatform(t *testing.T) {
 	tpl, c := mpContext(t, nil)
 	params := c.Params
-	if params["replication"] != "001" || params["nodes"] != 3 || params["db_password"] == nil || params["arr"] != false {
+	if params["replication"] != "001" || params["nodes"] != 3 || params["db_password"] == nil || params["arr"] != false ||
+		params["blob_split"] != false {
 		t.Fatalf("standaarden: %+v", params)
 	}
 	files, services := npmFiles(t, tpl, c)
@@ -56,20 +58,21 @@ func TestRenderMediaPlatform(t *testing.T) {
 	peers := "192.168.10.146:9333,192.168.10.147:9333,192.168.10.148:9333"
 	for path, want := range map[string][]string{
 		"/etc/clusterforge/seaweedfs.yaml": {"image: chrislusf/seaweedfs:3.97", "master -ip=192.168.10.147", "-peers=" + peers,
-			"-defaultReplication=001", "-mserver=" + peers, "-port=8081"},
+			"-defaultReplication=001", "-mserver=" + peers, "-port=8081", "-defaultReplicaPlacement=001"},
 		"/etc/seaweedfs/filer.toml": {"[postgres2]", `hostname = "192.168.10.144"`, "port = 5432", `database = "seaweedfs"`, `password = "Wachtwoord-123"`},
 		"/etc/clusterforge/platform.env": {"DATA_ROOT=/srv/platform-data\n", "NODE_NAME=media-02\n",
 			"PLATFORM_DATABASE_URL=postgresql+asyncpg://platform:Wachtwoord-123@192.168.10.144:5432/platform\n",
 			"PLATFORM_CLUSTER_NODES=media-01=192.168.10.146,media-02=192.168.10.147,media-03=192.168.10.148\n",
 			"OFFICE_JWT_SECRET=officegeheim1\n", "ANALYSE=aan\n", "BEELD=aan\n", "PLAATSEN=aan\n",
 			"MODELLEN_ROOT=/opt/cf-platform/modellen\n", "SLEUTELS_ROOT=/var/lib/cf-platform/sleutels/gezichten\n",
-			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n", "\nARR=uit\n"},
+			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n", "\nARR=uit\n", "\nPLATFORM_BLOB_SPLIT=false\n"},
 		"/etc/clusterforge/platform-arr.yaml": {"qbittorrent:\n    restart: \"no\"\n    volumes:\n      - /var/lib/cf-platform/torrents:/downloads\n",
 			"prowlarr:\n    restart: \"no\"\n", "platform:\n    volumes:\n      - /var/lib/cf-platform/torrents:/data/import/torrents\n"},
 		"/etc/clusterforge/platform-analyse.yaml":      {"analyse:\n    image: cf-platform:local", "analyse-omzetten:", "PLATFORM_ANALYSE_POSTGRES: \"true\""},
 		"/etc/systemd/system/cf-platform-status.timer": {"OnUnitActiveSec=60"},
-		"/etc/clusterforge/platform-cluster.yaml":      {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local"},
-		"/usr/local/lib/clusterforge/platform-src.sh":  {"REF='claude/stappenplan-uitwerken-lu4uv3'", "SRC=/opt/cf-platform/src", "-p cf-platform"},
+		"/etc/clusterforge/platform-cluster.yaml": {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local",
+			"PLATFORM_BLOB_SPLIT: ${PLATFORM_BLOB_SPLIT:-false}\n"},
+		"/usr/local/lib/clusterforge/platform-src.sh": {"REF='claude/stappenplan-uitwerken-lu4uv3'", "SRC=/opt/cf-platform/src", "-p cf-platform"},
 		"/usr/local/lib/clusterforge/platform-ctl.sh": {"docker image inspect -f '{{.Id}}' cf-platform:local", "-f /etc/clusterforge/platform-cluster.yaml",
 			"docker compose -p cf-platform", "VIP='192.168.10.150'", "overstap proef|echt", "db-copy \"$url\" --leegmaken",
 			"REPLICATIE='001'", "db_backup\n    systemctl restart cf-platform", "\"app\":\"media-platform\"", "--format '{{.Names}} {{.Status}}'",
@@ -77,7 +80,7 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"docker info --format '{{.MemoryLimit}} {{.CPUCfsQuota}}'"},
 		"/etc/systemd/system/cf-platform.service": {"ConditionPathExists=/srv/platform-data/.cf-platform-active", "\nBindsTo=keepalived.service\n",
 			"\nAfter=docker.service cf-platform-mount.service keepalived.service\n", "\nSuccessExitStatus=3\n"},
-		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-replication=001"},
+		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-allowOthers -cacheDir=/var/cache/weed-mount'\n"},
 		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
 	} {
 		got, ok := files[path]
@@ -89,6 +92,12 @@ func TestRenderMediaPlatform(t *testing.T) {
 			if !strings.Contains(got, w) {
 				t.Errorf("%s mist %q:\n%s", path, w, got)
 			}
+		}
+	}
+	// De mount geeft geen replicatie mee: de filer kiest per map (fs.configure).
+	for _, l := range strings.Split(files["/etc/systemd/system/cf-platform-mount.service"], "\n") {
+		if strings.HasPrefix(l, "ExecStart=") && strings.Contains(l, "-replication") {
+			t.Errorf("mount met -replication: %s", l)
 		}
 	}
 	scripts := []string{"/usr/local/lib/clusterforge/platform-src.sh", "/usr/local/lib/clusterforge/platform-ctl.sh", "/usr/local/lib/clusterforge/platform-weed.sh"}
@@ -587,6 +596,99 @@ func TestMediaPlatformArr(t *testing.T) {
 		if l := node.log(); !strings.Contains(l, " stop\n") || !strings.Contains(l, "docker stop qbit1\n") || !strings.Contains(l, "docker stop prowl1\n") {
 			t.Errorf("down: %s", l)
 		}
+	}
+}
+
+// TestMediaPlatformBlobSplit: aan zet PLATFORM_BLOB_SPLIT=true in platform.env.
+func TestMediaPlatformBlobSplit(t *testing.T) {
+	tpl, c := mpContext(t, map[string]any{"blob_split": true})
+	files, _ := npmFiles(t, tpl, c)
+	if env := files["/etc/clusterforge/platform.env"]; !strings.Contains(env, "\nPLATFORM_BLOB_SPLIT=true\n") || !strings.Contains(env, "\nARR=uit\n") {
+		t.Errorf("platform.env:\n%s", env)
+	}
+}
+
+// vol is een volume in /vol/status zoals een oudere SeaweedFS het schrijft
+// (Id eerst); een nieuwere zet Collection eerst (hier een map).
+type vol struct {
+	Id               int
+	Size             int
+	ReplicaPlacement map[string]int
+	Ttl              map[string]int
+	Collection       string
+}
+
+func volStatus(t *testing.T, pretty bool, nodes map[string][]any) string {
+	t.Helper()
+	v := map[string]any{"Version": "30GB 3.97", "Volumes": map[string]any{"Free": 10, "Max": 30,
+		"DataCenters": map[string]any{"dc1": map[string]any{"rack1": nodes}}}}
+	var b []byte
+	var err error
+	if pretty {
+		b, err = json.MarshalIndent(v, "", "  ")
+	} else {
+		b, err = json.Marshal(v)
+	}
+	must(t, err)
+	return string(b)
+}
+
+// TestMediaPlatformReplicatie: de replicatie van ClusterForge geldt alleen
+// voor de volumes zonder collectie; collectie media (films en series op 2
+// kopieën) blijft zoals ze is, en de controle wordt er niet rood van.
+func TestMediaPlatformReplicatie(t *testing.T) {
+	tpl, c := mpContext(t, map[string]any{"replication": "002"})
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	media := func(id int) map[string]any {
+		return map[string]any{"Id": id, "Collection": "media", "ReplicaPlacement": map[string]int{"node": 1}, "Ttl": nil, "DiskId": 0}
+	}
+	plain := func(id, copies int) map[string]any {
+		return map[string]any{"Id": id, "Collection": "", "ReplicaPlacement": map[string]int{"node": copies}, "Ttl": map[string]int{"Count": 0}, "DiskId": 0}
+	}
+	nodes := func(two int) map[string][]any {
+		return map[string][]any{
+			"192.168.10.146:8081": {vol{Id: 1, ReplicaPlacement: map[string]int{"node": 2}, Ttl: map[string]int{"Count": 0, "Unit": 0}},
+				vol{Id: 2, ReplicaPlacement: map[string]int{"node": two}}, vol{Id: 3, ReplicaPlacement: map[string]int{"node": 1}, Collection: "media"}},
+			"192.168.10.147:8081": {media(3), plain(1, 2), plain(5, two), media(4)},
+			"192.168.10.148:8081": {plain(1, 2), media(4), plain(5, two)},
+		}
+	}
+	for _, pretty := range []bool{false, true} {
+		n.set(map[string]*string{"leader": on(""), "vol-status": on(volStatus(t, pretty, nodes(1))), "weed-in": nil})
+		if _, err := n.run("replicatie", "--check"); err == nil {
+			t.Errorf("--check (pretty %v): volumes 2 en 5 staan op 001", pretty)
+		}
+		out, err := n.run("replicatie", "--nu")
+		if err != nil || !strings.Contains(out, "2 volumes naar replicatie 002") {
+			t.Fatalf("replicatie --nu: %v\n%s", err, out)
+		}
+		in, _ := os.ReadFile(filepath.Join(n.dir, "weed-in"))
+		if want := "lock\nvolume.configure.replication -volumeId 2 -replication 002\n" +
+			"volume.configure.replication -volumeId 5 -replication 002\nvolume.fix.replication\nunlock\n"; string(in) != want {
+			t.Errorf("weed shell (pretty %v):\n%s", pretty, in)
+		}
+		if !strings.Contains(n.log(), "weed shell -master=127.0.0.1:9333") {
+			t.Errorf("weed: %s", n.log())
+		}
+		// Volumes 2 en 5 omgezet: in orde, ook al staat media op 001.
+		n.set(map[string]*string{"vol-status": on(volStatus(t, pretty, nodes(2)))})
+		if out, err := n.run("replicatie", "--check"); err != nil {
+			t.Errorf("--check na de omzetting (pretty %v): %v %s", pretty, err, out)
+		}
+		if out, err := n.run("replicatie"); err != nil || !strings.Contains(out, "Alle volumes staan al op 002") {
+			t.Errorf("replicatie: %v %s", err, out)
+		}
+	}
+	// Niet de leider: niets te doen.
+	n.set(map[string]*string{"leader": nil, "vol-status": on(volStatus(t, false, nodes(1)))})
+	if out, err := n.run("replicatie", "--check"); err != nil {
+		t.Errorf("--check zonder leider: %v %s", err, out)
+	}
+	// Op de achtergrond, in een eigen unit.
+	n.set(map[string]*string{"leader": on("")})
+	if out, err := n.run("replicatie"); err != nil || !strings.Contains(n.log(), "systemd-run --unit cf-platform-replicatie") {
+		t.Errorf("replicatie: %v %s\n%s", err, out, n.log())
 	}
 }
 

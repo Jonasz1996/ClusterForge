@@ -11,6 +11,8 @@ services:
       PLATFORM_MODE: cluster
       PLATFORM_DATABASE_URL: ${PLATFORM_DATABASE_URL:?}
       PLATFORM_CLUSTER_NODES: ${PLATFORM_CLUSTER_NODES:?}
+      # Films en series in blobs-media/ (fase 11; platform.env, standaard uit).
+      PLATFORM_BLOB_SPLIT: ${PLATFORM_BLOB_SPLIT:-false}
   office:
     restart: "no"
   media:
