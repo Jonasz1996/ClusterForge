@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -90,7 +91,7 @@ func (s *Server) upkeepSetPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := p.User.ID
-	if err := s.upkeep.SetPolicy(r.Context(), events.User(uid), &uid, chi.URLParam(r, "scope"), in.Mode, in.Policy); err != nil {
+	if err := s.upkeep.SetPolicy(r.Context(), events.User(uid), &uid, upkeepScope(r), in.Mode, in.Policy); err != nil {
 		s.upkeepError(w, r, err)
 		return
 	}
@@ -112,10 +113,21 @@ func (s *Server) upkeepStart(w http.ResponseWriter, r *http.Request) {
 	if in.Preview {
 		mode = upkeep.ModePreview
 	}
-	id, err := s.upkeep.Start(r.Context(), events.User(p.User.ID), chi.URLParam(r, "scope"), mode, false)
+	id, err := s.upkeep.Start(r.Context(), events.User(p.User.ID), upkeepScope(r), mode, false)
 	if err != nil {
 		s.upkeepError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"job_id": id})
+}
+
+// upkeepScope leest de scope uit het pad. chi geeft de ruwe waarde als het
+// pad gecodeerde tekens heeft: env%3Alab moet env:lab worden (testlijst 3,
+// N1: "dit beleid bestaat niet").
+func upkeepScope(r *http.Request) string {
+	raw := chi.URLParam(r, "scope")
+	if v, err := url.PathUnescape(raw); err == nil {
+		return v
+	}
+	return raw
 }

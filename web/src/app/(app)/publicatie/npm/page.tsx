@@ -48,6 +48,9 @@ export default function PublishNPMPage() {
   const akHalf = (ov?.hosts ?? []).filter((h) => h.authentik === "half" && !h.typo);
   const suggested = (ov?.hosts ?? []).filter((h) => h.suggest?.sure || (h.advanced_fix?.length ?? 0) > 0);
   const typos = (ov?.hosts ?? []).filter((h) => h.typo_domains);
+  const deadNets = ov?.dead_nets ?? [];
+  const inDeadNet = new Set(deadNets.flatMap((d) => d.hosts));
+  const dead = (ov?.hosts ?? []).filter((h) => h.cleanup && !inDeadNet.has(h.id));
 
   const doAdopt = async (ids: number[]) => {
     try {
@@ -104,6 +107,37 @@ export default function PublishNPMPage() {
                 Er loopt altijd maar één taak tegelijk op NPM; hosts met een tikfout slaat Authentik aanvullen over.
               </p>
             </>
+          )}
+          {admin && (deadNets.length > 0 || dead.length > 0) && (
+            <Card title="Opruimen? Doelen die niet meer antwoorden">
+              <p className="mb-2 text-sm text-slate-600 dark:text-slate-300">
+                ClusterForge vroeg deze adressen zelf op vanaf de NPM-node: er antwoordt niets en geen enkele dienst heeft dezelfde naam. Er wordt
+                niets gegokt. Opruimen maakt per host eerst een kopie; terugzetten kan per host hieronder bij &quot;Wat ClusterForge veranderde&quot;.
+              </p>
+              <ul className="space-y-2 text-sm">
+                {deadNets.map((d) => (
+                  <li key={d.prefix} className="flex flex-wrap items-center gap-2">
+                    <span>
+                      Net <b>{d.prefix}</b> bestaat niet meer: {d.hosts.length} proxy hosts ({d.names.slice(0, 6).join(", ")}
+                      {d.names.length > 6 ? ", …" : ""})
+                    </span>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setOpen({ title: `${d.hosts.length} proxy hosts in ${d.prefix} opruimen`, action: { action: "delete_dead", net: d.prefix } })}
+                    >
+                      Alles in {d.prefix} opruimen
+                    </Button>
+                  </li>
+                ))}
+                {dead.length > 0 && (
+                  <li className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {dead.length} losse {dead.length === 1 ? "host" : "hosts"}: {dead.map((h) => h.domains[0]).join(", ")}
+                    </span>
+                  </li>
+                )}
+              </ul>
+            </Card>
           )}
           <ChangesCard admin={admin} onOpen={setOpen} />
           <Card title={`Proxy hosts · ${hosts.length}`}>
@@ -344,7 +378,7 @@ function HostRow({
         {h.problems.map((p) => (
           <div
             key={p.code}
-            className={`mt-1 text-xs ${p.level === "crit" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-300"}`}
+            className={`mt-1 text-xs ${p.level === "crit" ? "text-red-700 dark:text-red-400" : p.level === "warn" ? "text-amber-700 dark:text-amber-300" : "text-slate-500"}`}
           >
             {p.text}
           </div>
@@ -363,6 +397,15 @@ function HostRow({
                 onClick={() => onOpen({ title: `Nieuw doel voor ${name}`, action: { action: "retarget_many", hosts: [h.id] } })}
               >
                 voorstel toepassen
+              </button>
+            )}
+            {h.cleanup && (
+              <button
+                type="button"
+                className="text-red-700 underline dark:text-red-400"
+                onClick={() => onOpen({ title: `${name} opruimen`, action: { action: "delete_dead", hosts: [h.id] } })}
+              >
+                opruimen
               </button>
             )}
             {h.typo_domains && (

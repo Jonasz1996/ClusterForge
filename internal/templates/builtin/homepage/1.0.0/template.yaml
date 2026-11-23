@@ -52,8 +52,9 @@ params:
   - name: version
     type: string
     label: Versie van de homepage
-    help: Een commit, tag of branch van github.com/Jonasz1996/homepage. Neem je een bestaande homepage over, geef dan haar commit (regel commit= in /etc/homepage/versie op de oude node; homepage-ctl.sh status toont hem). Een andere waarde bouwt de homepage op elke node opnieuw en herstart ze.
+    help: Een commit, tag of branch van github.com/Jonasz1996/homepage. Neem je een bestaande homepage over, geef dan haar commit (regel commit= in /etc/homepage/versie op de oude node; homepage-ctl.sh status toont hem). Een andere waarde bouwt de homepage op elke node opnieuw en herstart ze, één node tegelijk, met een controle dat elke node die commit draait. Op een branch (main) toont de drift het als main op GitHub verder is; Drift herstellen bouwt dan de laatste commit.
     default: main
+    rebuild: true
     pattern: '[A-Za-z0-9][A-Za-z0-9._/-]{0,99}'
   - name: db_password
     type: secret

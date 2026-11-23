@@ -78,6 +78,7 @@ type v2Tile struct {
 	Status      string         `json:"status"`
 	StatusLabel string         `json:"status_label"`
 	Reason      string         `json:"reason"`
+	ReasonCode  string         `json:"reason_code,omitempty"`
 	OK          bool           `json:"ok"`
 	URL         string         `json:"url"`
 	Href        string         `json:"clusterforge_url"`
@@ -569,7 +570,7 @@ func (s *Server) tile(r *http.Request, d homeAppsSet, a homeapps.App) v2Tile {
 	base := baseURL(r, s.cfg.TrustProxyHeaders)
 	t := v2Tile{
 		Key: a.Key, Slug: a.Slug, Name: a.Name, Group: a.Group, Icon: a.Icon, Status: a.Status, StatusLabel: a.StatusLabel,
-		Reason: a.Reason, OK: a.Status == homeapps.StatusOK, URL: a.URL,
+		Reason: a.Reason, ReasonCode: a.ReasonCode, OK: a.Status == homeapps.StatusOK, URL: a.URL,
 		Href: base + "/homepage-apps?app=" + a.Slug, API: base + dashboardV2Base + "/apps/" + a.Slug,
 		Fields: d.fields[a.Key], Values: d.values[a.Key], Sections: d.sects[a.Key], App: a, UpdatedAt: d.at,
 	}

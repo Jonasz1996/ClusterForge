@@ -168,12 +168,19 @@ export default function PublishServicesPage() {
                   <span>
                     {n.hostname}
                     {n.cluster_name && <span className="ml-2 text-xs text-slate-500">{n.cluster_name}</span>}
+                    {n.npm_standby && (
+                      <span className="ml-2 text-xs text-slate-500" title="NPM draait alleen op de node met het VIP; deze node neemt bij een failover de laatste kopie over">
+                        NPM: stand-by{n.npm_copied_at ? ` (kopie van ${new Date(n.npm_copied_at).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })})` : ""}
+                      </span>
+                    )}
                   </span>
                   <span className="flex items-center gap-2 text-xs">
                     {n.ready ? (
                       <span className="text-slate-500">{n.ready}</span>
                     ) : n.error ? (
-                      <Badge tone="red">{n.error}</Badge>
+                      <Badge tone="red">
+                        {n.error} ({ago(n.checked_at)})
+                      </Badge>
                     ) : (
                       <span className="text-slate-500">
                         {n.services} diensten · {ago(n.checked_at)}

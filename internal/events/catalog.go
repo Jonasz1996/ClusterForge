@@ -136,6 +136,7 @@ var Known = map[string]Spec{
 	"node.created":                     {CategoryInventory, "Node toegevoegd"},
 	"node.updated":                     {CategoryInventory, "Node gewijzigd"},
 	"node.deleted":                     {CategoryInventory, "Node verwijderd"},
+	"node.pentest_changed":             {CategoryInventory, "Pentest-instellingen van node gewijzigd"},
 	"vip.created":                      {CategoryInventory, "VIP toegevoegd"},
 	"vip.updated":                      {CategoryInventory, "VIP gewijzigd"},
 	"vip.deleted":                      {CategoryInventory, "VIP verwijderd"},

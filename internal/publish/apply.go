@@ -79,6 +79,8 @@ type Action struct {
 	// OldDomain en NewDomain bij ActRename.
 	OldDomain string `json:"old_domain,omitempty"`
 	NewDomain string `json:"new_domain,omitempty"`
+	// Net bij ActDeleteDead: alle hosts in dat verdwenen net (192.168.0.x).
+	Net string `json:"net,omitempty"`
 	// KeepOld: de oude naam blijft als extra naam op de host.
 	KeepOld bool `json:"keep_old,omitempty"`
 	// Fase 42, bij ActUpdate: eigen Advanced (zonder het blok van
@@ -580,6 +582,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			p.Lines = append(p.Lines, "Authentik: applicatie en provider van ClusterForge weg")
 		}
 		p.Hosts = append(p.Hosts, ph)
+	case ActDeleteDead:
+		if err := s.planDeleteDead(ctx, npm, a, &p); err != nil {
+			return Plan{}, err
+		}
 	case ActRetargetMany:
 		if err := s.planRetargetMany(ctx, st, npm, managed, a, &p); err != nil {
 			return Plan{}, err
@@ -1013,7 +1019,7 @@ func (s *Service) runApply(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
-	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair || p.Action.Action == ActMoveAddress) && len(p.Plan.Hosts) > 1 {
+	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair || p.Action.Action == ActMoveAddress || p.Action.Action == ActDeleteDead) && len(p.Plan.Hosts) > 1 {
 		return s.runMany(ctx, j, st, node, snapshot, p)
 	}
 	for i := range p.Plan.Hosts {
@@ -1151,8 +1157,11 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 		return err
 	}
 	// 2. De controles.
+	// Testlijst 3, N15: een nieuwe host achter Authentik is na deze stap nog
+	// gewoon open (Authentik komt pas daarna); de eerste controle eist dus
+	// nog geen doorsturen, anders draaide alles terug.
 	checkErr := j.Step(ctx, "Controle: "+ph.Domain, func(ctx context.Context, step *jobs.Step) error {
-		return s.verify(ctx, step, st, node, hostID, ph, ph.Protect)
+		return s.verify(ctx, step, st, node, hostID, ph, ph.Protect && !created)
 	})
 	if checkErr == nil && created && ph.Protect {
 		// Een nieuwe host achter Authentik: eerst gewoon (doel antwoordt),

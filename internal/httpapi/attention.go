@@ -342,6 +342,18 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Testlijst 3, N2: clusters waar alle sites, de aanmelding of
+	// ClusterForge zelf op draaien, horen op Prod; anders zijn "alleen
+	// Lab/Test" en "ook productie" zinloos.
+	if ids, names, err := s.shouldBeProd(ctx); err == nil && len(ids) > 0 {
+		href := "/clusters"
+		if len(ids) == 1 {
+			href = "/clusters/detail?id=" + ids[0].String()
+		}
+		add("cluster-should-be-prod", amber, "Belangrijk cluster staat niet op Prod (NPM, Authentik of ClusterForge zelf)",
+			names+": zet de omgeving op Prod bij het cluster (Bewerken → Omgeving)", href, len(ids))
+	}
+
 	// Vervangen installaties (fase 48): na de termijn zonder problemen
 	// voorstellen om de oude op te ruimen.
 	if s.replace != nil {
@@ -439,4 +451,43 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// shouldBeProd geeft de clusters die niet op prod staan maar NPM, Authentik
+// of ClusterForge zelf draaien.
+func (s *Server) shouldBeProd(ctx context.Context) ([]uuid.UUID, string, error) {
+	var extra []uuid.UUID
+	if s.publish != nil {
+		if st, err := s.publish.Settings(ctx); err == nil {
+			for _, id := range []*uuid.UUID{st.NPMClusterID, st.AuthentikClusterID} {
+				if id != nil {
+					extra = append(extra, *id)
+				}
+			}
+		}
+	}
+	self := ""
+	if s.selfHost != nil {
+		self = s.selfHost.Cluster
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, name FROM clusters
+		WHERE environment::text <> 'prod'
+		AND (coalesce(template_name, '') IN ('nginx-proxy-manager', 'authentik', 'clusterforge') OR id = ANY($1) OR (slug = $2 AND $2 <> ''))
+		ORDER BY name`, extra, self)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	var ns []string
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, "", err
+		}
+		ids = append(ids, id)
+		ns = append(ns, name)
+	}
+	return ids, names(ns), rows.Err()
 }

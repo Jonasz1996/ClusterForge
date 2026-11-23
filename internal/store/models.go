@@ -1282,6 +1282,15 @@ type HomeAppDoubt struct {
 	DecidedAt  time.Time
 }
 
+type ImportFinding struct {
+	RunID      uuid.UUID
+	NodeID     *uuid.UUID
+	TokenName  string
+	Findings   []byte
+	ScanRunID  *uuid.UUID
+	ReceivedAt time.Time
+}
+
 type Incident struct {
 	ID               uuid.UUID
 	Number           int32
@@ -1573,6 +1582,17 @@ type NodeLinkProposal struct {
 	CreatedAt    time.Time
 	DecidedAt    *time.Time
 	DecidedBy    *uuid.UUID
+}
+
+type NodePentest struct {
+	NodeID          uuid.UUID
+	NodeType        string
+	ClonedFrom      string
+	PentestAllowed  bool
+	PentestWindow   string
+	RollbackAllowed bool
+	UpdatedBy       *uuid.UUID
+	UpdatedAt       time.Time
 }
 
 type NodeStatus struct {
