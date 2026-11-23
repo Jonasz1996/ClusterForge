@@ -399,6 +399,15 @@ function HostRow({
                 voorstel toepassen
               </button>
             )}
+            {h.other_app && h.revert_change && (
+              <button
+                type="button"
+                className="text-red-700 underline dark:text-red-400"
+                onClick={() => onOpen({ title: `${name}: vorig doel terugzetten`, action: { action: "revert", change_id: h.revert_change } })}
+              >
+                vorig doel terugzetten
+              </button>
+            )}
             {h.cleanup && (
               <button
                 type="button"

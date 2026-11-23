@@ -1221,7 +1221,8 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 		}
 		return nil
 	}
-	if h, err := s.npmHost(ctx, st, node, hostID); err != nil {
+	h, herr := s.npmHost(ctx, st, node, hostID)
+	if err := herr; err != nil {
 		failed = append(failed, "host teruglezen: "+err.Error())
 	} else if h == nil {
 		failed = append(failed, fmt.Sprintf("host %d bestaat niet in NPM", hostID))
@@ -1261,6 +1262,16 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 	// Het adres zelf, op de NPM-node via 127.0.0.1.
 	url := ph.Scheme + "://" + firstName(ph) + "/"
 	cr, err := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: &protocol.WebCheck{URL: url, Connect: "127.0.0.1"}})
+	// Testlijst 3, N28: een doorverwijzing naar https op dezelfde naam
+	// (SSL afdwingen) zegt niets over het doel; die ene stap volgen.
+	if err == nil && cr.Check != nil && cr.Check.Error == "" && cr.Check.Status >= 300 && cr.Check.Status < 400 &&
+		strings.HasPrefix(strings.ToLower(cr.Check.Location), "https://"+strings.ToLower(firstName(ph))) {
+		u2 := "https://" + firstName(ph) + "/"
+		if r2, err2 := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: &protocol.WebCheck{URL: u2, Connect: "127.0.0.1"}}); err2 == nil && r2.Check != nil {
+			step.Logf("· %s stuurt door naar https; dat adres controleren", url)
+			url, cr = u2, r2
+		}
+	}
 	switch {
 	case err != nil:
 		failed = append(failed, "adres: "+err.Error())
@@ -1300,10 +1311,50 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 			}
 		}
 	}
+	// N28: het doel zelf moet vanaf de NPM-node antwoorden.
+	if h != nil && h.ForwardHost != "" && h.ForwardPort > 0 {
+		if msg := s.checkTargetFrom(ctx, step, node, h.ForwardScheme, h.ForwardHost, h.ForwardPort); msg != "" {
+			failed = append(failed, msg)
+		}
+	}
 	if len(failed) > 0 {
 		return errors.New(strings.Join(failed, "; "))
 	}
 	return nil
+}
+
+// checkTargetFrom kijkt of het doel van een host vanaf de NPM-node een
+// HTTP-antwoord geeft. Leeg als het antwoordt; anders de fout met een
+// voorstel voor de firewall (testlijst 3, N28).
+func (s *Service) checkTargetFrom(ctx context.Context, step *jobs.Step, node nodeRow, scheme, host string, port int) string {
+	u := targetURL(scheme, host, port)
+	res, err := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: checkFor(u)})
+	msg := ""
+	switch {
+	case err != nil:
+		msg = err.Error()
+	case res.Check == nil:
+		msg = "geen antwoord"
+	case res.Check.Error != "":
+		msg = res.Check.Error
+	case res.Check.Status == 0:
+		msg = "geen HTTP-antwoord"
+	}
+	if msg == "" {
+		step.Logf("✓ doel %s antwoordt vanaf %s (HTTP %d)", u, node.Hostname, res.Check.Status)
+		return ""
+	}
+	from := node.Hostname
+	if node.PrimaryIP != "" {
+		from += " (" + node.PrimaryIP + ")"
+	}
+	step.Logf("✗ doel %s onbereikbaar vanaf NPM-node %s: %s", u, from, trimText(msg, 160))
+	src := node.PrimaryIP
+	if src == "" {
+		src = node.Hostname
+	}
+	return fmt.Sprintf("doel %s onbereikbaar vanaf NPM-node %s (%s). Firewall? Voorstel voor OPNsense: sta %s toe naar %s poort %d (TCP)",
+		u, from, trimText(msg, 120), src, host, port)
 }
 
 func firstName(ph *PlannedHost) string {

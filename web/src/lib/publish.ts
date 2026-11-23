@@ -105,6 +105,10 @@ export type PublishHost = {
   target_probe?: { status?: number; title?: string; error?: string; at: string };
   target_alive?: boolean;
   cleanup?: boolean;
+  // N29: de host toont de pagina van een andere dienst; revert_change zet
+  // de laatste wijziging van ClusterForge aan het doel terug.
+  other_app?: string;
+  revert_change?: string;
 };
 
 export type PublishDeadNet = { prefix: string; hosts: number[]; names: string[] };

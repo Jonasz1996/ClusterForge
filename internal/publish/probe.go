@@ -67,6 +67,19 @@ func (s *Service) ProbeTargets(ctx context.Context, st Settings) {
 	}
 	old := s.probes(ctx)
 	want := map[string]bool{}
+	// N29: doelen waar meerdere hosts naar wijzen, om te zien welke app
+	// daar echt draait.
+	shared := map[string]int{}
+	for _, h := range ov.Hosts {
+		if h.Enabled && h.ForwardHost != "" {
+			shared[targetURL(h.ForwardScheme, h.ForwardHost, h.ForwardPort)]++
+		}
+	}
+	for u, n := range shared {
+		if n > 1 {
+			want[u] = true
+		}
+	}
 	for _, h := range ov.Hosts {
 		if !h.Enabled || h.ServiceKey != "" || h.ForwardHost == "" {
 			continue

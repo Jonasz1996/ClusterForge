@@ -84,6 +84,10 @@ type HostView struct {
 	// Cleanup: het doel antwoordt niet en er is geen dienst met dezelfde
 	// naam; opruimen is het voorstel, geen gegokt nieuw doel (N14).
 	Cleanup bool `json:"cleanup,omitempty"`
+	// OtherApp: de host toont de pagina van een andere dienst (N29), met
+	// de wijziging van ClusterForge om terug te zetten als die er is.
+	OtherApp     string     `json:"other_app,omitempty"`
+	RevertChange *uuid.UUID `json:"revert_change,omitempty"`
 	// guess is de gok vóór de titelcontrole (voor ProbeTargets).
 	guess *TargetSuggestion
 }
@@ -309,6 +313,7 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 		ov.Outpost, _ = s.outpostFor(ctx, st)
 	}
 	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now(), ov.Outpost, s.probes(ctx))
+	s.revertFor(ctx, ov.Hosts)
 	ov.DeadNets = deadNets(ov.Hosts, nodes)
 	if ov.DeadNets == nil {
 		ov.DeadNets = []DeadNet{}
@@ -609,7 +614,60 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 				Text: fmt.Sprintf("wijst naar hetzelfde doel %s:%d als %s; kijk na of dat de juiste app is", v.ForwardHost, v.ForwardPort, strings.Join(others, ", "))})
 		}
 	}
+	otherApps(out, probes)
 	return out
+}
+
+// otherApps markeert hosts die de pagina van een andere dienst tonen
+// (testlijst 3, N29): meerdere hosts wijzen naar hetzelfde doel, de titel
+// van dat doel (of de naam van de dienst) past bij de naam van minstens één
+// van die hosts en niet bij deze.
+func otherApps(out []HostView, probes Probes) {
+	groups := map[string][]int{}
+	for i, v := range out {
+		if !v.Enabled || len(v.Domains) == 0 || v.ForwardHost == "" {
+			continue
+		}
+		k := strings.ToLower(v.ForwardHost) + ":" + fmt.Sprint(v.ForwardPort)
+		groups[k] = append(groups[k], i)
+	}
+	for _, idx := range groups {
+		if len(idx) < 2 {
+			continue
+		}
+		first := out[idx[0]]
+		title := ""
+		if p, ok := probes[targetURL(first.ForwardScheme, first.ForwardHost, first.ForwardPort)]; ok && p.Alive() && p.Status < 400 {
+			title = p.Title
+		}
+		fits := func(v HostView) bool {
+			if title != "" && titleFits(title, v.Domains[0], "") {
+				return true
+			}
+			return v.ServiceName != "" && titleFits(v.ServiceName, v.Domains[0], "")
+		}
+		var good []string
+		for _, i := range idx {
+			if fits(out[i]) {
+				good = append(good, out[i].Domains[0])
+			}
+		}
+		if len(good) == 0 || len(good) == len(idx) {
+			continue
+		}
+		shows := title
+		if shows == "" {
+			shows = first.ServiceName
+		}
+		for _, i := range idx {
+			if fits(out[i]) {
+				continue
+			}
+			out[i].OtherApp = shows
+			out[i].Problems = append(out[i].Problems, Problem{Code: "andere_dienst", Level: "crit",
+				Text: fmt.Sprintf("toont de pagina van %q, de dienst van %s; terugzetten of opruimen?", shows, strings.Join(good, ", "))})
+		}
+	}
 }
 
 func driftText(field string, have, want any) string {
@@ -712,6 +770,7 @@ func notices(ov *Overview) []Notice {
 		{"doel_dood", "Proxy host naar een adres dat niet antwoordt (opruimen?)", false},
 		{"advanced_oud", "Advanced van een proxy host wijst naar een oud adres (voorstel klaar)", false},
 		{"domein_tikfout", "Proxy host onder een domein dat op het hoofddomein lijkt (tikfout?)", false},
+		{"andere_dienst", "Proxy host toont de pagina van een andere dienst (terugzetten?)", true},
 		{"zelfde_doel", "Meerdere proxy hosts wijzen naar hetzelfde doel", false},
 		{"authentik_half", "Authentik half ingesteld", false},
 	} {
@@ -738,4 +797,20 @@ func (s *Service) Notices(ctx context.Context) ([]Notice, error) {
 		return nil, err
 	}
 	return append(ov.Notices, s.feedNotices(ctx)...), nil
+}
+
+// revertFor zoekt voor hosts die een andere dienst tonen de laatste
+// wijziging van ClusterForge aan hun doel (NPM-historiek) om terug te zetten.
+func (s *Service) revertFor(ctx context.Context, hosts []HostView) {
+	for i, h := range hosts {
+		if h.OtherApp == "" {
+			continue
+		}
+		var id uuid.UUID
+		err := s.pool.QueryRow(ctx, `SELECT id FROM publish_changes WHERE npm_host_id = $1 AND reverted_at IS NULL AND NOT created AND NOT deleted
+			AND (old ? 'forward_host' OR old ? 'forward_port') ORDER BY changed_at DESC LIMIT 1`, h.ID).Scan(&id)
+		if err == nil {
+			hosts[i].RevertChange = &id
+		}
+	}
 }
