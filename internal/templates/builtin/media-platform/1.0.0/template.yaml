@@ -116,6 +116,16 @@ params:
     label: Plaatsnamen bij foto's
     help: De bronnen (±15 MB) komen één keer op de gedeelde bestanden.
     default: true
+  - name: arr
+    type: bool
+    label: Mediabeheer (qBittorrent en Prowlarr)
+    help: >-
+      Downloaden met qBittorrent en torrentsites via Prowlarr (fase 11, alleen
+      een versie met compose.arr.yaml). Ze draaien alleen op de node met het
+      VIP. De downloads staan op die node zelf (/var/lib/cf-platform/torrents):
+      na een failover begint een lopende download opnieuw. Poorten 6881 (tcp en
+      udp, torrent) en 9696 (Prowlarr, alleen in het eigen netwerk).
+    default: false
   - name: secure_cookies
     type: bool
     label: Cookies alleen over https
@@ -261,6 +271,10 @@ roles:
       - file:
           path: /etc/clusterforge/platform-analyse.yaml
           template: platform-analyse.yaml.tmpl
+      # Mediabeheer (fase 11): alleen met ARR=aan (platform-ctl.sh).
+      - file:
+          path: /etc/clusterforge/platform-arr.yaml
+          template: platform-arr.yaml.tmpl
       # Gezichten en zoeken op beeld (0.8.1): de modellen op elke node zelf,
       # zodat het platform na een failover meteen alles heeft.
       - command:

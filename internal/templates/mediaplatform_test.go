@@ -45,7 +45,7 @@ func mpContext(t *testing.T, extra map[string]any) (*Template, Context) {
 func TestRenderMediaPlatform(t *testing.T) {
 	tpl, c := mpContext(t, nil)
 	params := c.Params
-	if params["replication"] != "001" || params["nodes"] != 3 || params["db_password"] == nil {
+	if params["replication"] != "001" || params["nodes"] != 3 || params["db_password"] == nil || params["arr"] != false {
 		t.Fatalf("standaarden: %+v", params)
 	}
 	files, services := npmFiles(t, tpl, c)
@@ -63,7 +63,9 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"PLATFORM_CLUSTER_NODES=media-01=192.168.10.146,media-02=192.168.10.147,media-03=192.168.10.148\n",
 			"OFFICE_JWT_SECRET=officegeheim1\n", "ANALYSE=aan\n", "BEELD=aan\n", "PLAATSEN=aan\n",
 			"MODELLEN_ROOT=/opt/cf-platform/modellen\n", "SLEUTELS_ROOT=/var/lib/cf-platform/sleutels/gezichten\n",
-			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n"},
+			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n", "\nARR=uit\n"},
+		"/etc/clusterforge/platform-arr.yaml": {"qbittorrent:\n    restart: \"no\"\n    volumes:\n      - /var/lib/cf-platform/torrents:/downloads\n",
+			"prowlarr:\n    restart: \"no\"\n", "platform:\n    volumes:\n      - /var/lib/cf-platform/torrents:/data/import/torrents\n"},
 		"/etc/clusterforge/platform-analyse.yaml":      {"analyse:\n    image: cf-platform:local", "analyse-omzetten:", "PLATFORM_ANALYSE_POSTGRES: \"true\""},
 		"/etc/systemd/system/cf-platform-status.timer": {"OnUnitActiveSec=60"},
 		"/etc/clusterforge/platform-cluster.yaml":      {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local"},
@@ -489,6 +491,102 @@ func TestMediaPlatformHelp(t *testing.T) {
 	}
 	if strings.Contains(help["platform_ref"], "bouwt de nieuwe versie") {
 		t.Errorf("hulptekst van platform_ref: %s", help["platform_ref"])
+	}
+}
+
+// TestMediaPlatformArr: qBittorrent en Prowlarr alleen met ARR=aan en een
+// versie met compose.arr.yaml, na arr-koppel, met de downloads op de node.
+func TestMediaPlatformArr(t *testing.T) {
+	up := map[string]*string{"vip": on(""), "mounted": on(""), "healthy": on(""),
+		"services": on("platform\noffice\nmedia\nqbittorrent\nprowlarr\n"), "cli-arr-koppel": on("qBittorrent: gekoppeld als gebruiker platform\n")}
+
+	// Standaard uit, ook met compose.arr.yaml: up zoals altijd.
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	off := newMPNode(t, files)
+	off.set(up)
+	off.set(map[string]*string{"src/infra/single/compose.arr.yaml": on("")})
+	if out, err := off.run("up"); err != nil {
+		t.Fatalf("up: %v\n%s", err, out)
+	}
+	if l := off.log(); strings.Contains(l, "arr-koppel") || strings.Contains(l, "qbittorrent") || strings.Contains(l, "config --services") ||
+		!strings.Contains(l, " up --no-build --remove-orphans\n") || strings.Contains(off.composeFiles(), "arr") {
+		t.Errorf("ARR uit: %s", l)
+	}
+	if _, err := os.Stat(filepath.Join(off.dir, "cfp/torrents")); err == nil {
+		t.Error("ARR uit maakte de map van de downloads")
+	}
+
+	tpl, c = mpContext(t, map[string]any{"arr": true})
+	files, _ = npmFiles(t, tpl, c)
+	if !strings.Contains(files["/etc/clusterforge/platform.env"], "\nARR=aan\n") {
+		t.Errorf("platform.env: %s", files["/etc/clusterforge/platform.env"])
+	}
+	n := newMPNode(t, files)
+	n.set(up)
+
+	// Aan, maar een versie zonder compose.arr.yaml: up zoals altijd.
+	if out, err := n.run("up"); err != nil {
+		t.Fatalf("up: %v\n%s", err, out)
+	}
+	if l := n.log(); strings.Contains(l, "arr-koppel") || !strings.Contains(l, " up --no-build --remove-orphans\n") {
+		t.Errorf("zonder compose.arr.yaml: %s", l)
+	}
+
+	// Aan, met compose.arr.yaml: eerst de app, dan arr-koppel, dan de twee.
+	n.set(map[string]*string{"src/infra/single/compose.arr.yaml": on("")})
+	out, err := n.run("up")
+	if err != nil {
+		t.Fatalf("up: %v\n%s", err, out)
+	}
+	l := n.log()
+	app := strings.Index(l, " up --no-build --remove-orphans platform office media\n")
+	koppel := strings.Index(l, " exec -T platform python -m app.cli arr-koppel\n")
+	arr := strings.Index(l, " up -d --no-deps qbittorrent prowlarr\n")
+	if app < 0 || koppel < 0 || arr < koppel || !strings.Contains(out, "Prowlarr op http://192.168.10.150:9696") {
+		t.Errorf("volgorde: app %d, koppel %d, arr %d\n%s\n%s", app, koppel, arr, l, out)
+	}
+	if got, want := n.composeFiles(), "compose.yaml compose.office.yaml compose.media.yaml platform-cluster.yaml compose.arr.yaml platform-arr.yaml"; got != want {
+		t.Errorf("bestanden:\n got %s\nwant %s", got, want)
+	}
+	torrents := filepath.Join(n.dir, "cfp/torrents")
+	if fi, err := os.Stat(torrents); err != nil || fi.Mode().Perm() != 0o750 || !strings.Contains(l, "chown 10001:10001 "+torrents+"\n") {
+		t.Errorf("map van de downloads: %v %v\n%s", fi, err, l)
+	}
+	if _, err := os.Stat(filepath.Join(n.dir, "data/import/torrents")); err != nil {
+		t.Errorf("mountpunt in de importmap: %v", err)
+	}
+
+	// Koppelen lukt niet (of de app antwoordt niet): de twee starten niet.
+	for name, state := range map[string]map[string]*string{
+		"koppelen lukt niet": {"cli-arr-koppel": nil},
+		"app antwoordt niet": {"healthy": nil},
+	} {
+		n.set(up)
+		n.set(state)
+		out, err := n.run("up")
+		if err != nil || strings.Contains(n.log(), "qbittorrent prowlarr") || !strings.Contains(out, "qBittorrent en Prowlarr starten niet") {
+			t.Errorf("%s: %v\n%s\n%s", name, err, out, n.log())
+		}
+	}
+
+	// Een symlink als map van de downloads: niet starten.
+	n.set(up)
+	must(t, os.RemoveAll(torrents))
+	must(t, os.Symlink(n.dir, torrents))
+	if out, err := n.run("up"); err == nil || !strings.Contains(out, "is een symlink") || strings.Contains(n.log(), "compose") {
+		t.Errorf("symlink: %v\n%s", err, out)
+	}
+
+	// down stopt ze, ook als ARR intussen uit staat.
+	for _, node := range []*mpNode{n, off} {
+		node.set(map[string]*string{"arr-running": on("")})
+		if out, err := node.run("down"); err != nil {
+			t.Fatalf("down: %v\n%s", err, out)
+		}
+		if l := node.log(); !strings.Contains(l, " stop\n") || !strings.Contains(l, "docker stop qbit1\n") || !strings.Contains(l, "docker stop prowl1\n") {
+			t.Errorf("down: %s", l)
+		}
 	}
 }
 
