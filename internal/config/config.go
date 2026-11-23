@@ -84,6 +84,10 @@ type Config struct {
 	// back-upcontroles draaien, op de klok van de tijdzone van de server
 	// (CF_TEST_WINDOW, standaard "zo 03:00-05:00"; de tijdzone komt uit TZ).
 	TestWindow planner.Window
+	// ResetCommand is het commando dat de loginpagina toont onder "Kan niet
+	// inloggen?", met {user} voor de gebruikersnaam. Leeg = de standaard
+	// voor Docker Compose en voor het ClusterForge-cluster.
+	ResetCommand string
 	// JournalLogins bewaart SSH-logins in het journaal
 	// (CF_JOURNAL_SSH_LOGINS, standaard aan).
 	JournalLogins bool
@@ -104,6 +108,7 @@ func FromEnv() (Config, error) {
 		DriftInterval:      15 * time.Minute,
 		SandboxBootTimeout: 10 * time.Minute,
 		SandboxStorage:     strings.TrimSpace(os.Getenv("CF_SANDBOX_STORAGE")),
+		ResetCommand:       strings.TrimSpace(os.Getenv("CF_RESET_COMMAND")),
 		LogLevel:           envOr("CF_LOG_LEVEL", "info"),
 		NATSListen:         envOr("CF_NATS_LISTEN", ":4222"),
 		NATSAdvertise:      os.Getenv("CF_NATS_ADVERTISE"),

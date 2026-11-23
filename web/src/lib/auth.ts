@@ -22,7 +22,14 @@ export function useMe() {
   return useQuery({ queryKey: meQueryKey, queryFn: fetchMe, staleTime: 60_000 });
 }
 
-// useRequireMe stuurt naar /login als er geen sessie is.
+// setupPending: na een reset via de CLI moet de gebruiker eerst een nieuw
+// wachtwoord en een nieuwe TOTP instellen; dat gebeurt op /login.
+export function setupPending(me: Me): boolean {
+  return me.user.must_change_password || me.user.must_setup_totp;
+}
+
+// useRequireMe stuurt naar /login als er geen sessie is, of als het account
+// na een reset nog ingesteld moet worden.
 export function useRequireMe() {
   const router = useRouter();
   const q = useMe();
@@ -31,6 +38,8 @@ export function useRequireMe() {
       // Na het inloggen terug naar de pagina waar je was.
       const here = window.location.pathname + window.location.search;
       router.replace(here === "/" ? "/login" : `/login?terug=${encodeURIComponent(here)}`);
+    } else if (q.data && setupPending(q.data)) {
+      router.replace("/login");
     }
   }, [q.isSuccess, q.data, router]);
   return q;

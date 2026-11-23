@@ -117,6 +117,11 @@ func run(args []string) error {
 			return usage()
 		}
 		return adminCreate(args[2:])
+	case "user":
+		if len(args) < 2 || args[1] != "reset" {
+			return usage()
+		}
+		return userReset(args[2:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -126,7 +131,7 @@ func run(args []string) error {
 }
 
 func usage() error {
-	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|healthcheck|version>`)
+	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|user reset|healthcheck|version>`)
 }
 
 func newLogger(level string) *slog.Logger {
@@ -677,6 +682,67 @@ func adminCreate(args []string) error {
 		return err
 	}
 	fmt.Printf("gebruiker %s aangemaakt met rol %s\n", u.Username, u.Role)
+	return nil
+}
+
+// userReset herstelt een account waar de gebruiker niet meer in kan: TOTP
+// uit, een tijdelijk wachtwoord dat één keer werkt, en bij de volgende login
+// verplicht een nieuw wachtwoord en een nieuwe TOTP.
+func userReset(args []string) error {
+	fs := flag.NewFlagSet("user reset", flag.ContinueOnError)
+	ttl := fs.Duration("geldig", auth.TempPasswordTTL, "hoe lang het tijdelijke wachtwoord werkt (hoogstens 24h)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "gebruik: clusterforge-server user reset [-geldig 1h] <gebruikersnaam>")
+		fs.PrintDefaults()
+	}
+	// De naam mag voor of na de vlaggen staan.
+	var name string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if name == "" && fs.NArg() > 0 {
+		name = fs.Arg(0)
+	}
+	if name == "" {
+		fs.Usage()
+		return errors.New("geef de gebruikersnaam")
+	}
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg.LogLevel)
+	ctx := context.Background()
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := store.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	q := store.New(pool)
+	authSvc, err := auth.NewService(q, events.NewWriter(q, log), cfg.SessionTTL)
+	if err != nil {
+		return err
+	}
+	res, err := authSvc.ResetUser(ctx, name, *ttl)
+	if errors.Is(err, auth.ErrUnknownUser) {
+		return fmt.Errorf("gebruiker %q bestaat niet", name)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Account %s is gereset.\n\n", res.User.Username)
+	fmt.Printf("  Tijdelijk wachtwoord: %s\n", res.TempPassword)
+	fmt.Printf("  Geldig tot:           %s (werkt één keer)\n\n", res.ExpiresAt.Local().Format("2006-01-02 15:04 MST"))
+	fmt.Println("Tweestapsverificatie staat uit en alle sessies zijn beëindigd.")
+	fmt.Println("Bij de volgende login moet de gebruiker een nieuw wachtwoord en een nieuwe TOTP instellen.")
+	fmt.Println("De reset staat in het logboek (user.reset).")
 	return nil
 }
 

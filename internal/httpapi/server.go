@@ -137,6 +137,8 @@ type Server struct {
 	// hangen.
 	loginTimeout   time.Duration
 	sessionTimeout time.Duration
+	// recoveryLimiter remt "Kan niet inloggen?".
+	recoveryLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
 	enrollLimiter *ipLimiter
 	// throttle remt events die een aanvaller gratis kan laten schrijven.
@@ -302,18 +304,20 @@ func New(d Deps) *Server {
 		loginTimeout:   20 * time.Second,
 		sessionTimeout: 10 * time.Second,
 		enrollLimiter:  newIPLimiter(6*time.Second, 20),
-		throttle:       events.NewThrottle(ev),
-		assistant:      d.Assistant,
-		risk:           d.Risk,
-		topo:           d.Topo,
-		docs:           d.Docs,
-		reports:        d.Reports,
-		kube:           d.Kube,
-		databases:      d.Databases,
-		cronjobs:       d.Cronjobs,
-		heal:           d.Heal,
-		components:     d.Components,
-		kubeNodes:      d.KubeNodes,
+		// 5 aanvragen direct, daarna één per 20 seconden per IP-adres.
+		recoveryLimiter: newIPLimiter(20*time.Second, 5),
+		throttle:        events.NewThrottle(ev),
+		assistant:       d.Assistant,
+		risk:            d.Risk,
+		topo:            d.Topo,
+		docs:            d.Docs,
+		reports:         d.Reports,
+		kube:            d.Kube,
+		databases:       d.Databases,
+		cronjobs:        d.Cronjobs,
+		heal:            d.Heal,
+		components:      d.Components,
+		kubeNodes:       d.KubeNodes,
 	}
 	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools(), s.healTools())
 	s.lessons = kubelessons.New(s.kube, s.q)

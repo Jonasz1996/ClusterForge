@@ -7,9 +7,35 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const clearMustSetupTOTP = `-- name: ClearMustSetupTOTP :exec
+UPDATE users SET must_setup_totp = false, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) ClearMustSetupTOTP(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearMustSetupTOTP, id)
+	return err
+}
+
+const completeForcedPassword = `-- name: CompleteForcedPassword :exec
+UPDATE users SET password_hash = $2, must_change_password = false,
+    temp_password_expires_at = NULL, temp_password_used_at = NULL, updated_at = now()
+WHERE id = $1
+`
+
+type CompleteForcedPasswordParams struct {
+	ID           uuid.UUID
+	PasswordHash string
+}
+
+func (q *Queries) CompleteForcedPassword(ctx context.Context, arg CompleteForcedPasswordParams) error {
+	_, err := q.db.Exec(ctx, completeForcedPassword, arg.ID, arg.PasswordHash)
+	return err
+}
 
 const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users
@@ -25,7 +51,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, password_hash, role)
 VALUES ($1, $2, $3)
-RETURNING id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning
+RETURNING id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning, temp_password_expires_at, temp_password_used_at, must_change_password, must_setup_totp
 `
 
 type CreateUserParams struct {
@@ -49,8 +75,24 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.KubeLearning,
+		&i.TempPasswordExpiresAt,
+		&i.TempPasswordUsedAt,
+		&i.MustChangePassword,
+		&i.MustSetupTotp,
 	)
 	return i, err
+}
+
+const deleteAllUserSessions = `-- name: DeleteAllUserSessions :execrows
+DELETE FROM sessions WHERE user_id = $1
+`
+
+func (q *Queries) DeleteAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAllUserSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const disableTOTP = `-- name: DisableTOTP :exec
@@ -72,7 +114,7 @@ func (q *Queries) EnableTOTP(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning FROM users WHERE id = $1
+SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning, temp_password_expires_at, temp_password_used_at, must_change_password, must_setup_totp FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -90,12 +132,16 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.KubeLearning,
+		&i.TempPasswordExpiresAt,
+		&i.TempPasswordUsedAt,
+		&i.MustChangePassword,
+		&i.MustSetupTotp,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning FROM users WHERE lower(username) = lower($1)
+SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning, temp_password_expires_at, temp_password_used_at, must_change_password, must_setup_totp FROM users WHERE lower(username) = lower($1)
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, lower string) (User, error) {
@@ -113,6 +159,10 @@ func (q *Queries) GetUserByUsername(ctx context.Context, lower string) (User, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.KubeLearning,
+		&i.TempPasswordExpiresAt,
+		&i.TempPasswordUsedAt,
+		&i.MustChangePassword,
+		&i.MustSetupTotp,
 	)
 	return i, err
 }
@@ -145,6 +195,31 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetUserByCLI = `-- name: ResetUserByCLI :exec
+UPDATE users SET
+    password_hash = $2,
+    temp_password_expires_at = $3,
+    temp_password_used_at = NULL,
+    must_change_password = true,
+    must_setup_totp = true,
+    totp_secret = NULL, totp_enabled_at = NULL, totp_last_step = NULL,
+    updated_at = now()
+WHERE id = $1
+`
+
+type ResetUserByCLIParams struct {
+	ID                    uuid.UUID
+	PasswordHash          string
+	TempPasswordExpiresAt *time.Time
+}
+
+// Zet een tijdelijk wachtwoord, schakelt TOTP uit en dwingt bij de
+// volgende login een nieuw wachtwoord en een nieuwe TOTP af.
+func (q *Queries) ResetUserByCLI(ctx context.Context, arg ResetUserByCLIParams) error {
+	_, err := q.db.Exec(ctx, resetUserByCLI, arg.ID, arg.PasswordHash, arg.TempPasswordExpiresAt)
+	return err
 }
 
 const setPendingTOTPSecret = `-- name: SetPendingTOTPSecret :exec
@@ -189,6 +264,23 @@ type UseTOTPStepParams struct {
 // latere) al gebruikt is.
 func (q *Queries) UseTOTPStep(ctx context.Context, arg UseTOTPStepParams) (int64, error) {
 	result, err := q.db.Exec(ctx, useTOTPStep, arg.ID, arg.TotpLastStep)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const useTempPassword = `-- name: UseTempPassword :execrows
+UPDATE users SET temp_password_used_at = now()
+WHERE id = $1 AND must_change_password
+  AND temp_password_used_at IS NULL
+  AND temp_password_expires_at > now()
+`
+
+// Markeert het tijdelijke wachtwoord als gebruikt; 0 rijen betekent dat het
+// al gebruikt of verlopen is.
+func (q *Queries) UseTempPassword(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, useTempPassword, id)
 	if err != nil {
 		return 0, err
 	}

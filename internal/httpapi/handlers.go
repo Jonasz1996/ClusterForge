@@ -218,5 +218,8 @@ func toAPIUser(u store.User) gen.User {
 		TotpEnabled:  u.TotpEnabledAt != nil,
 		CreatedAt:    u.CreatedAt,
 		KubeLearning: u.KubeLearning,
+
+		MustChangePassword: u.MustChangePassword,
+		MustSetupTotp:      u.MustSetupTotp,
 	}
 }

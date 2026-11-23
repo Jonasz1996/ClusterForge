@@ -89,6 +89,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het commando waarmee een beheerder een account herstelt
+         * @description Openbaar. Het antwoord hangt alleen af van de ingevulde naam, nooit van of het account bestaat; de database wordt niet geraadpleegd.
+         */
+        post: operations["accountRecoveryHelp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/reset/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen) */
+        post: operations["completeResetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/sessions": {
         parameters: {
             query?: never;
@@ -10864,6 +10901,25 @@ export interface components {
             created_at: string;
             /** @description De leermodus in het dashboard Kubernetes staat aan */
             kube_learning: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden */
+            must_change_password: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden */
+            must_setup_totp: boolean;
+        };
+        RecoveryRequest: {
+            username: string;
+        };
+        RecoveryHelp: {
+            commands: components["schemas"]["RecoveryCommand"][];
+            /** @description Hoe lang het tijdelijke wachtwoord geldig is */
+            ttl_minutes: number;
+        };
+        RecoveryCommand: {
+            label: string;
+            command: string;
+        };
+        ResetPasswordRequest: {
+            new_password: string;
         };
         Me: {
             user: components["schemas"]["User"];
@@ -16512,6 +16568,58 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    accountRecoveryHelp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryHelp"];
+                };
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    completeResetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Ingesteld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listMySessions: {

@@ -303,6 +303,21 @@ curl -fsSL http://192.168.10.153:8080/install/agent.sh | sudo sh -s -- --server 
 
 (Met https laat je `--allow-http` weg.) De kaart "Agents bijwerken" bij Nodes zegt welke nodes dat nog nodig hebben, met het commando voor jouw server. Daarna hoef je dit niet meer, en ook het golden image niet na elke update opnieuw te maken: een VM uit een ouder image meldt zich aan en wordt daarna vanzelf bijgewerkt. Alleen een image met een agent onder protocol 23 maak je nog één keer opnieuw met `--replace`.
 
+## Account herstellen (wachtwoord of authenticator kwijt)
+
+Op de loginpagina staat **Kan niet inloggen?**. Wie daar zijn gebruikersnaam invult, krijgt het commando te zien dat de systeembeheerder moet uitvoeren. Die pagina zegt nooit of het account bestaat en is beperkt tot een paar aanvragen per minuut per IP-adres.
+
+```bash
+cd /opt/clusterforge/deploy
+docker compose exec server clusterforge-server user reset jonas
+# ClusterForge-cluster (HA), op een van de nodes:
+docker exec cf-clusterforge-server clusterforge-server user reset jonas
+```
+
+Dat zet de tweestapsverificatie van die gebruiker uit, beëindigt al zijn sessies en toont een tijdelijk wachtwoord. Dat werkt één keer en verloopt na een uur (`-geldig 30m` voor korter, hoogstens `24h`). Na het inloggen moet de gebruiker eerst een nieuw wachtwoord en daarna een nieuwe TOTP instellen; tot dan werkt de rest van ClusterForge niet. Elke reset staat in het logboek als `user.reset`.
+
+Toont de loginpagina een ander commando beter (bv. via ssh), zet dan `CF_RESET_COMMAND` met `{user}` voor de gebruikersnaam, bv. `CF_RESET_COMMAND="ssh root@cf01 docker exec cf-clusterforge-server clusterforge-server user reset {user}"`.
+
 ## Problemen
 
 | Symptoom | Oorzaak |

@@ -2142,17 +2142,21 @@ type UpdatePolicy struct {
 }
 
 type User struct {
-	ID            uuid.UUID
-	Username      string
-	PasswordHash  string
-	Role          UserRole
-	TotpSecret    *string
-	TotpEnabledAt *time.Time
-	TotpLastStep  *int64
-	DisabledAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	KubeLearning  bool
+	ID                    uuid.UUID
+	Username              string
+	PasswordHash          string
+	Role                  UserRole
+	TotpSecret            *string
+	TotpEnabledAt         *time.Time
+	TotpLastStep          *int64
+	DisabledAt            *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	KubeLearning          bool
+	TempPasswordExpiresAt *time.Time
+	TempPasswordUsedAt    *time.Time
+	MustChangePassword    bool
+	MustSetupTotp         bool
 }
 
 type Vip struct {

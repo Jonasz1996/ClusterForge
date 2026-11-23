@@ -121,6 +121,17 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 		s.loginFailed(ctx, &user, in, "disabled")
 		return Session{}, ErrInvalidCredentials
 	}
+	if user.MustChangePassword {
+		// Een tijdelijk wachtwoord uit `user reset`: één keer, en niet na
+		// de vervaldatum.
+		if err := s.useTempPassword(ctx, user); err != nil {
+			if errors.Is(err, errTempPasswordStale) {
+				s.loginFailed(ctx, &user, in, "temp_password_stale")
+				return Session{}, ErrInvalidCredentials
+			}
+			return Session{}, err
+		}
+	}
 	if user.TotpEnabledAt != nil {
 		if in.TOTPCode == "" {
 			return Session{}, ErrTOTPRequired
@@ -333,9 +344,16 @@ func (s *Service) EnableTOTP(ctx context.Context, p Principal, code string) erro
 	if err := s.q.EnableTOTP(ctx, user.ID); err != nil {
 		return err
 	}
+	var payload map[string]any
+	if user.MustSetupTotp {
+		if err := s.q.ClearMustSetupTOTP(ctx, user.ID); err != nil {
+			return err
+		}
+		payload = map[string]any{"na_reset": true}
+	}
 	return s.ev.Write(ctx, nil, events.Event{
 		Actor: events.User(user.ID), SubjectType: "user", SubjectID: user.ID.String(),
-		Action: "auth.totp_enabled",
+		Action: "auth.totp_enabled", Payload: payload,
 	})
 }
 
