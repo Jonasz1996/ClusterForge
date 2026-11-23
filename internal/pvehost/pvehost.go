@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -327,6 +329,39 @@ type Request struct {
 	// ServerURL is bij bootstrap het adres waarmee de CT ClusterForge
 	// bereikt.
 	ServerURL string
+	// NATS is bij bootstrap het NATS-adres van de agents (tls://host:4222);
+	// de CT moet dat en ServerURL bereiken vóór de installatie (fase 48).
+	NATS string
+}
+
+// ReachList zijn de host:poort-adressen die een CT moet bereiken: het adres
+// van ClusterForge en NATS.
+func ReachList(serverURL, nats string) []string {
+	var out []string
+	add := func(raw string, def string) {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Hostname() == "" {
+			return
+		}
+		port := u.Port()
+		if port == "" {
+			port = def
+		}
+		if port == "" {
+			return
+		}
+		a := net.JoinHostPort(u.Hostname(), port)
+		if !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	def := "443"
+	if strings.HasPrefix(serverURL, "http://") {
+		def = "80"
+	}
+	add(serverURL, def)
+	add(nats, "4222")
+	return out
 }
 
 type params struct {
@@ -387,6 +422,7 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request) (s
 			if op.Bootstrap, err = s.bootstrapSpec(ctx, actor, req.ServerURL, g, nil); err != nil {
 				return store.Job{}, err
 			}
+			op.Bootstrap.Reach = ReachList(req.ServerURL, req.NATS)
 		}
 	}
 	if err := op.Validate(); err != nil {
