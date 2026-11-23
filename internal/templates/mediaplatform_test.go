@@ -303,6 +303,58 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 	}
 }
 
+// TestMediaPlatformBackup: de back-up van de database laat de rijen van de
+// tabellen van backup-wipe-tables weg, of die van de vaste lijst als de
+// versie het commando niet kent of het platform hier niet draait.
+func TestMediaPlatformBackup(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	fixed := []string{"face_person", "face", "face_scan", "face_owner", "blob_embed"}
+	for _, tc := range []struct {
+		name  string
+		state map[string]*string
+		want  []string
+		exec  bool
+	}{
+		{"versie met het commando", map[string]*string{"active-cf-platform": on(""), "cli-backup-wipe-tables": on("face\nblob_embed\nfoo;drop\n")},
+			[]string{"face", "blob_embed"}, true},
+		{"versie zonder het commando", map[string]*string{"active-cf-platform": on(""), "cli-backup-wipe-tables": nil}, fixed, true},
+		{"commando zegt niets bruikbaars", map[string]*string{"active-cf-platform": on(""), "cli-backup-wipe-tables": on("*\n")}, fixed, true},
+		{"platform draait hier niet", map[string]*string{"active-cf-platform": nil, "cli-backup-wipe-tables": on("face\n")}, fixed, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n.set(tc.state)
+			out, err := n.run("db-backup")
+			if err != nil {
+				t.Fatalf("db-backup: %v\n%s", err, out)
+			}
+			var argv string
+			for _, l := range strings.Split(n.log(), "\n") {
+				if strings.HasPrefix(l, "pg_dump ") {
+					argv, _, _ = strings.Cut(l, " PGPASSWORD=")
+				}
+			}
+			var excl []string
+			for _, f := range strings.Fields(argv) {
+				if v, ok := strings.CutPrefix(f, "--exclude-table-data="); ok {
+					excl = append(excl, v)
+				}
+			}
+			if strings.Join(excl, " ") != strings.Join(tc.want, " ") || strings.Contains(argv, "Wachtwoord-123") ||
+				!strings.Contains(argv, "-h 192.168.10.144 -p 5432 -U platform -d platform") {
+				t.Errorf("pg_dump %s (weggelaten: %v)", argv, excl)
+			}
+			if got := strings.Contains(n.log(), "app.cli backup-wipe-tables"); got != tc.exec {
+				t.Errorf("backup-wipe-tables gedraaid: %v", got)
+			}
+		})
+	}
+	if dumps, _ := filepath.Glob(filepath.Join(n.dir, "backups", "platform-*-onbekend.dump")); len(dumps) == 0 {
+		t.Error("geen back-up")
+	}
+}
+
 func sha256hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])

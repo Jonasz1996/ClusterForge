@@ -128,6 +128,21 @@ overstap() {
 # Een back-up van de database van het platform (pg_dump -Fc via het VIP van de
 # database), vóór elke herstart met een nieuwe versie: de app voert bij de
 # start zijn migraties zelf uit. De vijf nieuwste blijven staan.
+#
+# Zonder de rijen van de gezichten en de vectoren van beeld (de tabellen van
+# app.cli backup-wipe-tables, vanaf 0.8.2): die horen nooit in een kopie.
+# Kent de versie het commando niet, of draait het platform hier niet, dan de
+# vaste lijst van het platform (api/app/backup.py, WIPE).
+WIPE_TABLES="face_person face face_scan face_owner blob_embed"
+wipe_tables() {
+  list=""
+  if systemctl is-active --quiet cf-platform; then
+    list=$(compose exec -T platform python -m app.cli backup-wipe-tables </dev/null 2>/dev/null) || list=""
+    list=$(printf '%s\n' "$list" | grep -Ex '[a-z_][a-z0-9_]{0,62}')
+  fi
+  [ -n "$list" ] || list=$(echo "$WIPE_TABLES" | tr ' ' '\n')
+  printf '%s\n' "$list"
+}
 db_backup() {
   url=$(env_get PLATFORM_DATABASE_URL)
   rest=${url#*://}; cred=${rest%%@*}; hostdb=${rest#*@}
@@ -138,8 +153,11 @@ db_backup() {
   mkdir -p "$BACKUPS" && chmod 0700 "$BACKUPS"
   rev=$(cat /var/lib/clusterforge/platform-image.rev 2>/dev/null | cut -c1-12)
   out=$BACKUPS/platform-$(date +%Y%m%d-%H%M%S)-${rev:-onbekend}.dump
-  say "Back-up van de database $db naar $out"
-  PGPASSWORD=$pass pg_dump -Fc -h "$host" -p "$port" -U "$user" -d "$db" -f "$out.deel" &&
+  tables=$(wipe_tables)
+  set --
+  for t in $tables; do set -- "$@" "--exclude-table-data=$t"; done
+  say "Back-up van de database $db naar $out (zonder de rijen van $(printf '%s' "$tables" | tr '\n' ' '))"
+  PGPASSWORD=$pass pg_dump -Fc -h "$host" -p "$port" -U "$user" -d "$db" "$@" -f "$out.deel" &&
     [ -s "$out.deel" ] && mv "$out.deel" "$out" || { rm -f "$out.deel"; fail "back-up mislukt"; }
   ls -lh "$out"
   # shellcheck disable=SC2012
