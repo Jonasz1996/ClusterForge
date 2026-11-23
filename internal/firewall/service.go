@@ -54,6 +54,8 @@ type Service struct {
 
 	tick      sync.Mutex
 	lastPrune time.Time
+	autoMu    sync.Mutex
+	autoRuns  map[uuid.UUID][]time.Time
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus Bus, log *slog.Logger) *Service {
@@ -379,10 +381,53 @@ func (s *Service) Refresh(ctx context.Context, id uuid.UUID) (Node, error) {
 type applyParams struct {
 	NodeID   uuid.UUID `json:"node_id"`
 	Hostname string    `json:"hostname"`
+	// Why is de aanleiding (testlijst 3, N20): wie of wat de taak startte.
+	Why string `json:"why,omitempty"`
 }
 
 // Apply start de taak die het plan toepast.
 func (s *Service) Apply(ctx context.Context, actor events.Actor, id uuid.UUID) (uuid.UUID, error) {
+	return s.ApplyBecause(ctx, actor, id, "")
+}
+
+// diffWhy zegt in gewone taal wat er op een node zou veranderen.
+func diffWhy(n Node) string {
+	if n.Status != nil && !n.Status.Active {
+		return "ufw staat uit"
+	}
+	if n.Diff == nil {
+		return "plan gewijzigd"
+	}
+	var parts []string
+	first := func(rs []protocol.FirewallRule) string {
+		if len(rs) == 0 {
+			return ""
+		}
+		b, _ := json.Marshal(rs[0])
+		return " (" + strings.TrimSpace(string(b)) + ")"
+	}
+	if k := len(n.Diff.Add); k > 0 {
+		parts = append(parts, fmt.Sprintf("%d nieuwe regels%s", k, first(n.Diff.Add)))
+	}
+	if k := len(n.Diff.Remove); k > 0 {
+		parts = append(parts, fmt.Sprintf("%d regels weg%s", k, first(n.Diff.Remove)))
+	}
+	if k := len(n.Diff.Adopt); k > 0 {
+		parts = append(parts, fmt.Sprintf("%d bestaande regels overnemen", k))
+	}
+	if len(parts) == 0 {
+		return "plan gewijzigd"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// nothingToDo: ufw staat aan en het plan staat er al.
+func nothingToDo(n Node) bool {
+	return n.Status != nil && n.Status.Active && n.Diff != nil && len(n.Diff.Add) == 0 && len(n.Diff.Remove) == 0 && len(n.Diff.Adopt) == 0
+}
+
+// ApplyBecause is Apply met de aanleiding erbij.
+func (s *Service) ApplyBecause(ctx context.Context, actor events.Actor, id uuid.UUID, why string) (uuid.UUID, error) {
 	n, err := s.Node(ctx, id)
 	if err != nil {
 		return uuid.Nil, err
@@ -398,7 +443,7 @@ func (s *Service) Apply(ctx context.Context, actor events.Actor, id uuid.UUID) (
 		return uuid.Nil, &FieldError{"op " + n.Hostname + " loopt al een firewalltaak"}
 	}
 	j, err := s.runner.Enqueue(ctx, jobs.Spec{Kind: Kind, Title: "Firewall toepassen op " + n.Hostname, NodeID: &n.NodeID, ClusterID: n.ClusterID,
-		Actor: actor, Params: applyParams{NodeID: n.NodeID, Hostname: n.Hostname}})
+		Actor: actor, Params: applyParams{NodeID: n.NodeID, Hostname: n.Hostname, Why: why}})
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -453,6 +498,9 @@ func (s *Service) apply(ctx context.Context, j *jobs.Job) error {
 			return errors.New("geen plan")
 		}
 		plan = *n.Plan
+		if p.Why != "" {
+			st.Logf("Aanleiding: %s", p.Why)
+		}
 		if !n.Status.Installed {
 			st.Logf("ufw staat niet op %s en wordt geïnstalleerd", p.Hostname)
 		} else if !n.Status.Active {
@@ -673,6 +721,34 @@ func (s *Service) Loop(ctx context.Context) {
 	}
 }
 
+// autoLoop telt de automatische taken per node: meer dan drie in een uur
+// is een lus; dan stopt het automatisch toepassen voor die node een uur en
+// staat de reden bij de node.
+func (s *Service) autoLoop(id uuid.UUID, now time.Time) bool {
+	s.autoMu.Lock()
+	defer s.autoMu.Unlock()
+	if s.autoRuns == nil {
+		s.autoRuns = map[uuid.UUID][]time.Time{}
+	}
+	var keep []time.Time
+	for _, t := range s.autoRuns[id] {
+		if now.Sub(t) < time.Hour {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) >= 3 {
+		s.autoRuns[id] = keep
+		if len(keep) == 3 {
+			s.autoRuns[id] = append(keep, now)
+			_, _ = s.pool.Exec(context.Background(), `UPDATE firewall_nodes SET apply_error = $2, apply_failed_at = now() WHERE node_id = $1`, id,
+				"het plan blijft veranderen: drie keer automatisch toegepast in een uur; automatisch toepassen staat een uur stil voor deze node (kijk de aanleiding in de laatste taken na)")
+		}
+		return true
+	}
+	s.autoRuns[id] = append(keep, now)
+	return false
+}
+
 // Tick is één ronde van de poller.
 func (s *Service) Tick(ctx context.Context) error {
 	s.tick.Lock()
@@ -710,7 +786,19 @@ func (s *Service) Tick(ctx context.Context) error {
 		}
 		if n.Mode == "managed" && set.AutoApply && n.Pending() && !n.ApplyRunning && n.Status != nil && n.Status.Pending == nil &&
 			(n.ApplyFailedAt == nil || now.Sub(*n.ApplyFailedAt) >= RetryFailed) {
-			if _, err := s.Apply(ctx, events.System(), n.NodeID); err != nil {
+			// Testlijst 3, N20: staat alles er al (alleen de hash verschilt),
+			// dan geen taak maar de hash bijwerken; anders liep "Firewall
+			// toepassen" om de 1 à 2 minuten opnieuw, altijd geslaagd.
+			if nothingToDo(n) {
+				if _, err := s.pool.Exec(ctx, `UPDATE firewall_nodes SET applied_hash = $2 WHERE node_id = $1`, n.NodeID, n.Plan.Hash); err != nil {
+					return err
+				}
+				continue
+			}
+			if s.autoLoop(n.NodeID, now) {
+				continue
+			}
+			if _, err := s.ApplyBecause(ctx, events.System(), n.NodeID, "automatisch toepassen (Firewall → Instellingen): "+diffWhy(n)); err != nil {
 				s.log.Warn("firewall automatisch toepassen mislukt", "node", n.Hostname, "err", err)
 			}
 		}

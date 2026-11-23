@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +76,7 @@ type Service struct {
 	// akTried: wanneer het automatisch aanvullen een host laatst probeerde.
 	akTried map[int]time.Time
 	kick    chan struct{}
+	probing atomic.Bool
 	// Now is de klok; tests zetten hem vast.
 	Now func() time.Time
 	// SettleTime is hoe lang de taak na een wijziging wacht voor de
@@ -362,37 +364,62 @@ func (s *Service) Kick() {
 
 // Loop leest elke vijf minuten de diensten, NPM en Authentik.
 func (s *Service) Loop(ctx context.Context) {
-	t := time.NewTicker(refreshEvery)
-	defer t.Stop()
+	quick := 0
 	for {
-		s.Refresh(ctx)
+		failed := s.refresh(ctx)
+		// Testlijst 3, N6: na een herstart van de server zijn de agents er
+		// soms nog niet; dan na 30 s opnieuw in plaats van 5 minuten een oude
+		// fout te tonen.
+		wait := refreshEvery
+		if failed && quick < 10 {
+			quick++
+			wait = 30 * time.Second
+		} else if !failed {
+			quick = 0
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
 		case <-s.kick:
+			t.Stop()
 		}
 	}
 }
 
 // Refresh leest alles één keer.
-func (s *Service) Refresh(ctx context.Context) {
-	s.refreshServices(ctx)
+func (s *Service) Refresh(ctx context.Context) { s.refresh(ctx) }
+
+// refresh leest alles één keer en zegt of NPM of Authentik niet te lezen was.
+func (s *Service) refresh(ctx context.Context) (failed bool) {
+	failed = s.refreshServices(ctx)
 	st, err := s.Settings(ctx)
 	if err != nil {
 		s.log.Warn("publicatie: instellingen lezen", "err", err)
-		return
+		return true
 	}
 	if st.NPMLinked() {
 		data, err := s.readNPM(ctx, st)
 		s.saveRead(ctx, "npm", data, err)
+		failed = failed || err != nil
+		// Testlijst 3: de doelen zelf bekijken, in de achtergrond.
+		if s.probing.CompareAndSwap(false, true) {
+			go func() {
+				defer s.probing.Store(false)
+				s.ProbeTargets(ctx, st)
+			}()
+		}
 	}
 	if st.AuthentikLinked() {
 		data, err := s.readAuthentik(ctx, st)
 		s.saveRead(ctx, "authentik", data, err)
+		failed = failed || err != nil
 	}
 	s.autoRepairAK(ctx, st)
 	s.autoPublish(ctx, st)
+	return failed
 }
 
 func (s *Service) saveRead(ctx context.Context, kind string, data any, rerr error) {

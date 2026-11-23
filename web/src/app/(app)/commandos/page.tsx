@@ -10,6 +10,7 @@ import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfir
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import { useIsAdmin } from "@/lib/inventory";
+import { readOnlyScript } from "@/lib/readonly";
 import {
   useCommand,
   useCommands,
@@ -321,7 +322,9 @@ function RunDialog({ detail, once, onClose }: { detail?: CommandDetail; once?: O
   const skipped = mode === "cluster" ? inCluster.filter((n) => !n.online || !n.supported) : [];
   const chosen: UpdateNode[] =
     mode === "cluster" ? inCluster.filter((n) => n.online && n.supported) : nodes.filter((n) => picked.includes(n.node_id));
-  const prodSlugs = [...new Set(chosen.filter((n) => n.cluster_environment === "prod").map((n) => n.cluster_slug))];
+  // Testlijst 3, N11: een leescommando vraagt op prod geen bevestiging.
+  const readOnly = readOnlyScript(once ? once.script : (detail?.script ?? ""));
+  const prodSlugs = readOnly ? [] : [...new Set(chosen.filter((n) => n.cluster_environment === "prod").map((n) => n.cluster_slug))];
   const prodSlug = prodSlugs.length === 1 ? prodSlugs[0] : undefined;
   const blocked =
     chosen.length === 0 || chosen.some((n) => !n.online || !n.supported) || prodSlugs.length > 1 || (!!prodSlug && !prodConfirmed(prodSlug, confirm, totp));

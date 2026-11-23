@@ -1,6 +1,8 @@
 package publish
 
 import (
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -123,4 +125,29 @@ func levenshtein(a, b string) int {
 		prev = cur
 	}
 	return prev[len(rb)]
+}
+
+// typoOnly: de gewenste namen verschillen van die in NPM alleen door een
+// tikfout in het domein (de naam is intussen rechtgezet).
+func typoOnly(desired any, have []string, domain string) bool {
+	want := sortedNames(desired)
+	if len(want) == 0 || len(want) != len(have) {
+		return false
+	}
+	got := make([]string, 0, len(have))
+	for _, h := range have {
+		got = append(got, strings.ToLower(h))
+	}
+	sort.Strings(got)
+	fixed := make([]string, 0, len(want))
+	typo := false
+	for _, w := range want {
+		w = strings.ToLower(w)
+		if _, f, ok := domainTypo(w, domain); ok {
+			w, typo = f, true
+		}
+		fixed = append(fixed, w)
+	}
+	sort.Strings(fixed)
+	return typo && slices.Equal(fixed, got)
 }

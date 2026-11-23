@@ -101,7 +101,13 @@ export type PublishHost = {
   themed?: boolean;
   css?: string;
   css_set?: string;
+  // Testlijst 3: wat het doel zelf antwoordde, en "opruimen?" als het dood is.
+  target_probe?: { status?: number; title?: string; error?: string; at: string };
+  target_alive?: boolean;
+  cleanup?: boolean;
 };
+
+export type PublishDeadNet = { prefix: string; hosts: number[]; names: string[] };
 
 export type PublishSuggestion = {
   forward_scheme: string;
@@ -204,6 +210,7 @@ export type PublishOverview = {
   certs?: PublishCert[];
   outpost?: string;
   protocol: number;
+  dead_nets?: PublishDeadNet[];
 };
 
 export type PublishActionKind =
@@ -219,6 +226,7 @@ export type PublishActionKind =
   | "theme_many"
   | "ak_repair"
   | "move_address"
+  | "delete_dead"
   | "revert";
 
 export type PublishAction = {
@@ -238,6 +246,7 @@ export type PublishAction = {
   authentik_group?: string;
   confirm?: string;
   hosts?: number[];
+  net?: string;
   old_domain?: string;
   new_domain?: string;
   keep_old?: boolean;

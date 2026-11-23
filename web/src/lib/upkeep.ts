@@ -134,7 +134,7 @@ export function useSetUpkeepPolicy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: { scope: string; mode: string; policy: UpkeepPolicy }) =>
-      call<UpkeepOverview>("PUT", `/upkeep/scopes/${encodeURIComponent(b.scope)}`, { mode: b.mode, policy: b.policy }),
+      call<UpkeepOverview>("PUT", `/upkeep/scopes/${encodeURIComponent(b.scope).replace(/%3A/gi, ":")}`, { mode: b.mode, policy: b.policy }),
     onSuccess: (data) => qc.setQueryData(["upkeep"], data),
   });
 }
@@ -143,7 +143,7 @@ export function useStartUpkeep() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: { scope: string; preview: boolean }) =>
-      call<{ job_id: string }>("POST", `/upkeep/scopes/${encodeURIComponent(b.scope)}/start`, { preview: b.preview }),
+      call<{ job_id: string }>("POST", `/upkeep/scopes/${encodeURIComponent(b.scope).replace(/%3A/gi, ":")}/start`, { preview: b.preview }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upkeep"] });
       qc.invalidateQueries({ queryKey: ["upkeep-history"] });

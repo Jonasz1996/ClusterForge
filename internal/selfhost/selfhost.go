@@ -882,7 +882,7 @@ func (s *Service) updateCompose(ctx context.Context, j *jobs.Job, p updateParams
 		return err
 	}
 	return j.Step(ctx, "Nieuwe versie nakijken", func(ctx context.Context, st *jobs.Step) error {
-		st.Logf("ClusterForge draait versie %s (image %s).", s.Version, or(s.Image, "onbekend"))
+		st.Logf("ClusterForge draait versie %s (image %s).", s.Version, s.CurrentImage())
 		return nil
 	})
 }
@@ -935,7 +935,7 @@ func (s *Service) updateCluster(ctx context.Context, j *jobs.Job, p updateParams
 		}
 	}
 	return j.Step(ctx, "Nieuwe versie nakijken", func(ctx context.Context, st *jobs.Step) error {
-		st.Logf("ClusterForge draait versie %s (image %s).", s.Version, or(s.Image, "onbekend"))
+		st.Logf("ClusterForge draait versie %s (image %s).", s.Version, s.CurrentImage())
 		return nil
 	})
 }

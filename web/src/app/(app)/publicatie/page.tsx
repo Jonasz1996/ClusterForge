@@ -173,7 +173,9 @@ export default function PublishServicesPage() {
                     {n.ready ? (
                       <span className="text-slate-500">{n.ready}</span>
                     ) : n.error ? (
-                      <Badge tone="red">{n.error}</Badge>
+                      <Badge tone="red">
+                        {n.error} ({ago(n.checked_at)})
+                      </Badge>
                     ) : (
                       <span className="text-slate-500">
                         {n.services} diensten · {ago(n.checked_at)}

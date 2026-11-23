@@ -18,12 +18,13 @@ import (
 
 // refreshServices laat elke node met een nieuwe agent zijn diensten in kaart
 // brengen, vier tegelijk.
-func (s *Service) refreshServices(ctx context.Context) {
+func (s *Service) refreshServices(ctx context.Context) (offline bool) {
 	nodes, err := s.nodes(ctx)
 	if err != nil {
 		s.log.Warn("publicatie: nodes lezen", "err", err)
-		return
+		return false
 	}
+	var offMu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
 	for _, n := range nodes {
@@ -42,6 +43,11 @@ func (s *Service) refreshServices(ctx context.Context) {
 			switch {
 			case err != nil:
 				msg = err.Error()
+				if strings.Contains(msg, "niet verbonden") {
+					offMu.Lock()
+					offline = true
+					offMu.Unlock()
+				}
 			case res.Error != "":
 				msg = res.Error
 			}
@@ -57,6 +63,7 @@ func (s *Service) refreshServices(ctx context.Context) {
 		}(n)
 	}
 	wg.Wait()
+	return offline
 }
 
 // Service is een dienst zoals de dienstenkaart hem toont: één poort, op één
@@ -263,7 +270,14 @@ func buildServices(nodes []nodeRow, clusters []clusterRow, found map[uuid.UUID]n
 		if r.Target == "" && len(g.nodes) > 0 {
 			r.Target = g.nodes[0].PrimaryIP
 		}
-		r.Label = SuggestLabel(r.Container, r.Unit, r.ClusterName, r.Name)
+		// Testlijst 3, N16: een dienst zonder container heet naar zijn
+		// cluster of de node (ultra7pluspbs), niet naar het proces
+		// (proxmox-backup-proxy).
+		host := ""
+		if len(g.nodes) > 0 {
+			host = g.nodes[0].Hostname
+		}
+		r.Label = SuggestLabel(r.Container, r.ClusterName, host, r.Unit, r.Name)
 		r.AuthentikDefault = d.Authentik && !skipAuthentik(d, r.Container, r.Image, r.Unit, r.ClusterName, r.Title, r.Label)
 		r.Published = []PublishedRef{}
 		if why := internalReason(r); why != "" {
