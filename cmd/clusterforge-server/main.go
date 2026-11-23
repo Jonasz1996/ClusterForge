@@ -287,6 +287,7 @@ func serve() error {
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
 	// Docker zoals Portainer (fase 28): lezen en wijzigen via de agent.
 	dkr := dockerhost.NewService(pool, ev, log, runner, bus)
+	upd.Containers = dkr.Running
 	pvh.Sync = pve
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
 	pvh.Box = box
