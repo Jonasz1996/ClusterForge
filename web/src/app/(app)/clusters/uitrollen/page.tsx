@@ -15,6 +15,8 @@ import { environments, useIsAdmin, useNodes, type Environment } from "@/lib/inve
 import { usePveHosts } from "@/lib/pvehosts";
 import { useProxmoxConnections, useProxmoxResources, useSyncProxmox, type ProxmoxResources, type ProxmoxStorage } from "@/lib/proxmox";
 import { agentServerURL } from "@/lib/agentEndpoints";
+import { useFailedDeploy, type DeployRequest } from "@/lib/deployFailed";
+import { jobActive, useJob } from "@/lib/proxmox";
 
 export default function DeployPage() {
   return (
@@ -175,6 +177,60 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
   };
 }
 
+// fromRequest vult het formulier met een eerdere aanvraag (fase 48, 4.2:
+// opnieuw na een mislukte uitrol). Geheimen staan er niet in.
+function fromRequest(r: DeployRequest): Form {
+  const str = (v: unknown) => (v === undefined || v === null ? "" : String(v));
+  const params: Record<string, string> = {};
+  for (const [k, v] of Object.entries(r.params ?? {})) {
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") params[k] = String(v);
+  }
+  const f: Form = {
+    ...emptyForm,
+    template: r.template,
+    name: r.cluster.name,
+    slug: r.cluster.slug,
+    slugTouched: true,
+    environment: (r.cluster.environment as Environment) || "lab",
+    params,
+    serverUrl: r.server_url ? r.server_url : null,
+  };
+  if (r.existing_nodes) {
+    return { ...f, where: "existing", existing: Object.fromEntries(r.existing_nodes.map((n) => [n.node_id, n.role])) };
+  }
+  const t = r.target;
+  if (!t) return f;
+  const placement: Record<string, Placement> = {};
+  for (const p of t.placement ?? []) {
+    placement[placementKey(p.role, p.index)] = {
+      host: p.host ?? "",
+      storage: p.storage ?? "",
+      vmid: p.vmid ? String(p.vmid) : "",
+      address: p.address ?? "",
+      cpu: p.cpu ? String(p.cpu) : "",
+      memory: p.memory_mib ? String(p.memory_mib) : "",
+      disk: p.disk_gib ? String(p.disk_gib) : "",
+    };
+  }
+  return {
+    ...f,
+    where: t.create === "ct" ? "newct" : t.image_type === "lxc" ? "ct" : "vm",
+    proxmoxId: t.proxmox_id ?? "",
+    imageVmid: t.image_vmid ? String(t.image_vmid) : "",
+    storage: t.storage ?? "",
+    bridge: t.bridge || "vmbr0",
+    vlan: str(t.vlan),
+    network: t.network === "dhcp" ? "dhcp" : "static",
+    firstIp: t.first_ip ?? "",
+    gateway: t.gateway ?? "",
+    dns: (t.dns ?? []).join(", "),
+    sshKeys: t.ssh_keys ?? "",
+    ostemplate: t.ostemplate ?? "",
+    privileged: !!t.privileged,
+    placement,
+  };
+}
+
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -193,6 +249,18 @@ function DeployInner() {
   const [form, setForm] = useState<Form>(emptyForm);
   const [error, setError] = useState<ApiError | null>(null);
   const deploy = useDeploy();
+
+  // Opnieuw na een mislukte uitrol: de wizard met dezelfde instellingen, en
+  // wachten tot het opruimen klaar is (fase 48, 4.2).
+  const van = search.get("van") ?? "";
+  const failed = useFailedDeploy(van, isAdmin);
+  const cleanJob = useJob(search.get("opruimen") ?? "");
+  const [filledFrom, setFilledFrom] = useState("");
+  if (failed.data && filledFrom !== van) {
+    setFilledFrom(van);
+    setForm(fromRequest(failed.data.request));
+  }
+  const cleaning = !!cleanJob.data && cleanJob.data.status !== "succeeded";
 
   // Wat niet gekozen is, krijgt een startwaarde: de template uit de URL, de
   // eerste Proxmox-koppeling, de eerste golden image en het adres van deze
@@ -303,6 +371,20 @@ function DeployInner() {
           </Link>
         }
       />
+      {failed.data && (
+        <Alert kind="info">
+          Dezelfde instellingen als de mislukte uitrol van {failed.data.cluster_name}; pas aan wat nodig is.
+          {failed.data.secrets.length > 0 && <> Geheimen staan er niet in: vul {failed.data.secrets.join(", ")} opnieuw in.</>}
+        </Alert>
+      )}
+      {cleanJob.data && cleaning && (
+        <Alert kind={jobActive(cleanJob.data.status) ? "info" : "error"}>
+          {jobActive(cleanJob.data.status) ? "De mislukte uitrol wordt opgeruimd; uitrollen kan zodra dat klaar is. " : "Het opruimen is niet gelukt. "}
+          <Link href={`/taken/detail?id=${cleanJob.data.id}`} className="underline">
+            Bekijk de taak
+          </Link>
+        </Alert>
+      )}
       {error && !error.field && <Alert>{error.message}</Alert>}
       {error?.field && <Alert>Controleer het gemarkeerde veld: {error.message}</Alert>}
 
@@ -728,7 +810,7 @@ function DeployInner() {
         <Button type="button" variant="secondary" onClick={() => router.push("/clusters")}>
           Annuleren
         </Button>
-        <Button type="submit" disabled={deploy.isPending || !ready}>
+        <Button type="submit" disabled={deploy.isPending || !ready || cleaning}>
           {deploy.isPending ? "Bezig…" : "Uitrollen"}
         </Button>
       </div>

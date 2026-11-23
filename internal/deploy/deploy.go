@@ -104,6 +104,8 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	}
 	runner.Register(Kind, s.run)
 	runner.Retryable(Kind)
+	runner.Register(CleanupKind, s.cleanup)
+	runner.Retryable(CleanupKind)
 	return s
 }
 

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
 import { jobDuration, JobStatusBadge } from "@/components/jobs/JobList";
+import { FailedDeploy } from "@/components/jobs/FailedDeploy";
 import { ResumeUpdate } from "@/components/jobs/ResumeUpdate";
 import { Steps } from "@/components/jobs/Steps";
 import { QueryState } from "@/components/inventory/bits";
@@ -79,6 +80,9 @@ function JobDetailInner() {
             </p>
           )}
           {retry.error && <Alert>{retry.error.message}</Alert>}
+          {isAdmin && job.data.kind === "cluster.deploy" && (job.data.status === "failed" || job.data.status === "canceled") && (
+            <FailedDeploy job={job.data} />
+          )}
           {isAdmin && job.data.kind === "updates.run" && job.data.cluster_id && (job.data.status === "failed" || job.data.status === "canceled") && (
             <ResumeUpdate job={job.data} />
           )}

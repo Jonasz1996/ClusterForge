@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -312,7 +313,9 @@ func toAPIJob(j store.Job, requestedBy *string) gen.Job {
 		Id: j.ID, Kind: j.Kind, Title: j.Title, Status: gen.JobStatus(j.Status), Error: j.Error,
 		ClusterId: nullableOf(j.ClusterID), NodeId: nullableOf(j.NodeID), ProxmoxId: nullableOf(j.ProxmoxID),
 		RequestedBy: nullableOf(requestedBy), Attempts: int(j.Attempts), CancelRequested: j.CancelRequested,
-		Retryable: retryableKinds[j.Kind] && (j.Status == store.JobStatusFailed || j.Status == store.JobStatusCanceled),
+		// Een uitrol waarvan het cluster opgeruimd is, kan niet meer opnieuw.
+		Retryable: retryableKinds[j.Kind] && (j.Status == store.JobStatusFailed || j.Status == store.JobStatusCanceled) &&
+			(j.Kind != deploy.Kind || j.ClusterID != nil),
 		CreatedAt: j.CreatedAt, StartedAt: nullableOf(j.StartedAt), FinishedAt: nullableOf(j.FinishedAt),
 	}
 }

@@ -371,6 +371,8 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Post("/replacements/{id}/hosts", s.moveReplacementHosts)
 		api.With(s.requireSession).Post("/replacements/{id}/cleanup", s.cleanupReplacement)
 		api.With(s.requireSession).Get("/vip-advice", s.vipAdvice)
+		api.With(s.requireSession).Get("/deploy/failed/{id}", s.getFailedDeploy)
+		api.With(s.requireSession).Post("/deploy/failed/{id}/cleanup", s.cleanupFailedDeploy)
 		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
