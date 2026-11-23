@@ -70,7 +70,8 @@ func TestRenderMediaPlatform(t *testing.T) {
 		"/usr/local/lib/clusterforge/platform-ctl.sh": {"docker image inspect -f '{{.Id}}' cf-platform:local", "-f /etc/clusterforge/platform-cluster.yaml",
 			"docker compose -p cf-platform", "VIP='192.168.10.150'", "overstap proef|echt", "db-copy \"$url\" --leegmaken",
 			"REPLICATIE='001'", "db_backup\n    systemctl restart cf-platform", "\"app\":\"media-platform\"", "--format '{{.Names}} {{.Status}}'",
-			"sleutels-klaar) sleutels_klaar ;;", "python -m app.cli sleutels-check </dev/null"},
+			"sleutels-klaar) sleutels_klaar ;;", "python -m app.cli sleutels-check </dev/null",
+			"docker info --format '{{.MemoryLimit}} {{.CPUCfsQuota}}'"},
 		"/etc/systemd/system/cf-platform.service":       {"ConditionPathExists=/srv/platform-data/.cf-platform-active"},
 		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-replication=001"},
 		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
@@ -352,6 +353,80 @@ func TestMediaPlatformBackup(t *testing.T) {
 	}
 	if dumps, _ := filepath.Glob(filepath.Join(n.dir, "backups", "platform-*-onbekend.dump")); len(dumps) == 0 {
 		t.Error("geen back-up")
+	}
+}
+
+// composeFiles zijn de -f-bestanden (alleen de naam) van de laatste docker
+// compose in de log van de node.
+func (n *mpNode) composeFiles() string {
+	var files []string
+	for _, l := range strings.Split(n.log(), "\n") {
+		if !strings.HasPrefix(l, "docker compose ") {
+			continue
+		}
+		files = files[:0]
+		f := strings.Fields(l)
+		for i := 0; i+1 < len(f); i++ {
+			if f[i] == "-f" {
+				files = append(files, filepath.Base(f[i+1]))
+			}
+		}
+	}
+	return strings.Join(files, " ")
+}
+
+// TestMediaPlatformCompose: de grenzen van media, office en analyse alleen
+// als Docker ze aankan en de versie ze heeft (zoals install.sh), de analyse
+// alleen met ANALYSE=aan en compose.analyse.yaml.
+func TestMediaPlatformCompose(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	src := filepath.Join(n.dir, "src/infra/single")
+	base := "compose.yaml compose.office.yaml compose.media.yaml"
+	limits := map[string]string{"compose.office-limits.yaml": "", "compose.media-limits.yaml": "", "compose.analyse-limits.yaml": ""}
+	for _, tc := range []struct {
+		name  string
+		state map[string]*string
+		want  string
+	}{
+		{"0.8.0 zonder grenzen", map[string]*string{"docker-info": on("true true\n")}, base + " platform-cluster.yaml"},
+		{"0.8.1, Docker zonder grenzen", map[string]*string{"src/infra/single/compose.analyse.yaml": on(""), "docker-info": on("false true\n")},
+			base + " compose.analyse.yaml platform-analyse.yaml platform-cluster.yaml"},
+		{"0.8.2 met grenzen", map[string]*string{"docker-info": on("true true\n")},
+			base + " compose.office-limits.yaml compose.media-limits.yaml compose.analyse.yaml compose.analyse-limits.yaml platform-analyse.yaml platform-cluster.yaml"},
+		{"0.8.2, docker info faalt", map[string]*string{"docker-info": nil},
+			base + " compose.analyse.yaml platform-analyse.yaml platform-cluster.yaml"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.HasPrefix(tc.name, "0.8.2") {
+				for name, content := range limits {
+					must(t, os.WriteFile(filepath.Join(src, name), []byte(content), 0o644))
+				}
+			}
+			n.set(tc.state)
+			if out, err := n.run("compose", "config"); err != nil {
+				t.Fatalf("compose: %v %s", err, out)
+			}
+			if got := n.composeFiles(); got != tc.want {
+				t.Errorf("bestanden:\n got %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+	// Analyse uit: geen bestanden van de analyse, ook niet zijn grenzen.
+	tpl, c = mpContext(t, map[string]any{"analyse": false})
+	files, _ = npmFiles(t, tpl, c)
+	n = newMPNode(t, files)
+	src = filepath.Join(n.dir, "src/infra/single")
+	for name := range limits {
+		must(t, os.WriteFile(filepath.Join(src, name), nil, 0o644))
+	}
+	n.set(map[string]*string{"src/infra/single/compose.analyse.yaml": on(""), "docker-info": on("true true\n")})
+	if out, err := n.run("compose", "ps"); err != nil {
+		t.Fatalf("compose: %v %s", err, out)
+	}
+	if got, want := n.composeFiles(), base+" compose.office-limits.yaml compose.media-limits.yaml platform-cluster.yaml"; got != want {
+		t.Errorf("analyse uit:\n got %s\nwant %s", got, want)
 	}
 }
 

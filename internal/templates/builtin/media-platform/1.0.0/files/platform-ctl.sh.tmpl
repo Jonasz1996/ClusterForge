@@ -46,11 +46,27 @@ SLEUTELS=$(env_get SLEUTELS_ROOT); SLEUTELS=${SLEUTELS:-/var/lib/cf-platform/sle
 BEELD_MAP=siglip2-b32-256
 # Draait deze versie met de analyse (gezichten en zoeken op beeld)?
 analyse_on() { [ "$(env_get ANALYSE)" = aan ] && [ -f "$SRC/compose.analyse.yaml" ]; }
+# Kan Docker hier geheugen- en cpu-grenzen zetten? Zonder die cgroups (een
+# LXC) start een container met grenzen niet; dan zonder (regel van install.sh).
+limits_ok() {
+  [ "$(docker info --format '{{"{{"}}.MemoryLimit{{"}}"}} {{"{{"}}.CPUCfsQuota{{"}}"}}' 2>/dev/null)" = "true true" ]
+}
 compose() {
   set -- -f /etc/clusterforge/platform-cluster.yaml "$@"
+  limits=""; limits_ok && limits=1
   if analyse_on; then
-    set -- -f "$SRC/compose.analyse.yaml" -f /etc/clusterforge/platform-analyse.yaml "$@"
+    set -- -f /etc/clusterforge/platform-analyse.yaml "$@"
+    if [ -n "$limits" ] && [ -f "$SRC/compose.analyse-limits.yaml" ]; then
+      set -- -f "$SRC/compose.analyse-limits.yaml" "$@"
+    fi
+    set -- -f "$SRC/compose.analyse.yaml" "$@"
   fi
+  # De grenzen van office en media (vanaf de versies die ze hebben).
+  for lim in media office; do
+    if [ -n "$limits" ] && [ -f "$SRC/compose.$lim-limits.yaml" ]; then
+      set -- -f "$SRC/compose.$lim-limits.yaml" "$@"
+    fi
+  done
   docker compose -p cf-platform --project-directory "$SRC" --env-file "$ENV" \
     -f "$SRC/compose.yaml" -f "$SRC/compose.office.yaml" -f "$SRC/compose.media.yaml" "$@"
 }
