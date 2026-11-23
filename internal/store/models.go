@@ -1770,6 +1770,33 @@ type PublishAuthEvent struct {
 	Reason   string
 }
 
+type PublishAutoItem struct {
+	ServiceKey  string
+	Domain      string
+	ClusterID   *uuid.UUID
+	ClusterName string
+	State       string
+	JobID       *uuid.UUID
+	NpmHostID   *int32
+	Cleanup     bool
+	Tries       int32
+	Error       string
+	Backup      []byte
+	TriedAt     *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type PublishAutoRule struct {
+	ID         uuid.UUID
+	ClusterID  *uuid.UUID
+	ServiceKey *string
+	Enabled    bool
+	Cleanup    bool
+	UpdatedBy  *uuid.UUID
+	UpdatedAt  time.Time
+}
+
 type PublishConnection struct {
 	NodeID      uuid.UUID
 	At          time.Time
@@ -1887,6 +1914,24 @@ type RecoveryReport struct {
 	Month       pgtype.Date
 	Report      []byte
 	GeneratedAt time.Time
+}
+
+type Replacement struct {
+	ID          uuid.UUID
+	ClusterID   uuid.UUID
+	OldNodeID   *uuid.UUID
+	OldHostname string
+	OldAddress  netip.Addr
+	Vip         *netip.Addr
+	Reason      string
+	KeepDays    int32
+	State       string
+	JobID       *uuid.UUID
+	CleanupJob  *uuid.UUID
+	Note        string
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type RiskAcceptance struct {
