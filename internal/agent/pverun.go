@@ -301,7 +301,7 @@ func (r *RunExecutor) pveTemplate(ctx context.Context, t *protocol.PVETemplateSp
 		}
 		want := t.Storage + ":vztmpl/" + name
 		for line := range strings.Lines(string(list)) {
-			if f := strings.Fields(line); len(f) > 0 && f[0] == want {
+			if slices.Contains(strings.Fields(line), want) {
 				return true
 			}
 		}
@@ -313,14 +313,22 @@ func (r *RunExecutor) pveTemplate(ctx context.Context, t *protocol.PVETemplateSp
 		var local []string
 		if list, _, err := r.capture(ctx, "pveam", "list", t.Storage); err == nil {
 			for line := range strings.Lines(string(list)) {
-				f := strings.Fields(line)
-				if len(f) == 0 {
-					continue
-				}
-				if name, ok := strings.CutPrefix(f[0], t.Storage+":vztmpl/"); ok && matchTemplate(name, t.Match) {
-					local = append(local, name)
+				for _, x := range strings.Fields(line) {
+					if name, ok := strings.CutPrefix(x, t.Storage+":vztmpl/"); ok && matchTemplate(name, t.Match) {
+						local = append(local, name)
+						break
+					}
 				}
 			}
+		}
+		// Een template die al op de host staat gaat voor (testlijst 2.4):
+		// geen download, geen afhankelijkheid van internet of pveam available.
+		if len(local) > 0 {
+			slices.SortFunc(local, compareVersions)
+			file = local[len(local)-1]
+			_, _ = fmt.Fprintf(out, "al gedownload: %s\n", file)
+			st.PVE = &protocol.PVERunResult{Volid: t.Storage + ":vztmpl/" + file, Existed: true}
+			return 0, nil
 		}
 		_, _ = fmt.Fprintf(out, "$ pveam update\n")
 		if code, err := r.cmd(ctx, "", []string{"pveam", "update"}, nil, out); err != nil || code != 0 {
@@ -336,7 +344,6 @@ func (r *RunExecutor) pveTemplate(ctx context.Context, t *protocol.PVETemplateSp
 				names = append(names, a.File)
 			}
 		}
-		names = append(names, local...)
 		if len(names) == 0 {
 			return -1, fmt.Errorf("geen containertemplate %s…_%s in pveam available; download er zelf een of kies een andere", t.Match, runtime.GOARCH)
 		}
