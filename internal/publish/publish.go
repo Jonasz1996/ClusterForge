@@ -392,6 +392,7 @@ func (s *Service) Refresh(ctx context.Context) {
 		s.saveRead(ctx, "authentik", data, err)
 	}
 	s.autoRepairAK(ctx, st)
+	s.autoPublish(ctx, st)
 }
 
 func (s *Service) saveRead(ctx context.Context, kind string, data any, rerr error) {

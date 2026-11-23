@@ -16026,6 +16026,11 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetPublishAutoBackupParams defines parameters for GetPublishAutoBackup.
+type GetPublishAutoBackupParams struct {
+	ServiceKey string `form:"service_key" json:"service_key"`
+}
+
 // GetPublishLoginsParams defines parameters for GetPublishLogins.
 type GetPublishLoginsParams struct {
 	Window *GetPublishLoginsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -16562,6 +16567,12 @@ type StartPublishJSONRequestBody = PveObject
 
 // AdoptPublishHostsJSONRequestBody defines body for AdoptPublishHosts for application/json ContentType.
 type AdoptPublishHostsJSONRequestBody = PveObject
+
+// RetryPublishAutoJSONRequestBody defines body for RetryPublishAuto for application/json ContentType.
+type RetryPublishAutoJSONRequestBody = PveObject
+
+// SavePublishAutoRuleJSONRequestBody defines body for SavePublishAutoRule for application/json ContentType.
+type SavePublishAutoRuleJSONRequestBody = PveObject
 
 // PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
 type PlanPublishJSONRequestBody = PveObject
@@ -17750,6 +17761,18 @@ type ServerInterface interface {
 	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
 	// (POST /publish/adopt)
 	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// GetPublishAuto Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+	// (GET /publish/auto)
+	GetPublishAuto(w http.ResponseWriter, r *http.Request)
+	// GetPublishAutoBackup De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+	// (GET /publish/auto/backup)
+	GetPublishAutoBackup(w http.ResponseWriter, r *http.Request, params GetPublishAutoBackupParams)
+	// RetryPublishAuto Een mislukte automatische publicatie opnieuw laten proberen (admin)
+	// (POST /publish/auto/retry)
+	RetryPublishAuto(w http.ResponseWriter, r *http.Request)
+	// SavePublishAutoRule Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+	// (PUT /publish/auto/rules)
+	SavePublishAutoRule(w http.ResponseWriter, r *http.Request)
 	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
 	// (POST /publish/hosts/{hostId}/accept)
 	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
@@ -20219,6 +20242,30 @@ func (_ Unimplemented) StartPublish(w http.ResponseWriter, r *http.Request) {
 // AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
 // (POST /publish/adopt)
 func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishAuto Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+// (GET /publish/auto)
+func (_ Unimplemented) GetPublishAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishAutoBackup De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+// (GET /publish/auto/backup)
+func (_ Unimplemented) GetPublishAutoBackup(w http.ResponseWriter, r *http.Request, params GetPublishAutoBackupParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RetryPublishAuto Een mislukte automatische publicatie opnieuw laten proberen (admin)
+// (POST /publish/auto/retry)
+func (_ Unimplemented) RetryPublishAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishAutoRule Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+// (PUT /publish/auto/rules)
+func (_ Unimplemented) SavePublishAutoRule(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -31137,6 +31184,81 @@ func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishAuto operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishAutoBackup operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishAutoBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishAutoBackupParams
+
+	// ------------- Required query parameter "service_key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "service_key", r.URL.Query(), &params.ServiceKey, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "service_key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "service_key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishAutoBackup(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryPublishAuto operation middleware
+func (siw *ServerInterfaceWrapper) RetryPublishAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryPublishAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishAutoRule operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishAutoRule(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishAutoRule(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AcceptPublishDrift operation middleware
 func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -35021,6 +35143,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/hosts/{hostId}/release", wrapper.ReleasePublishHost)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/auto", wrapper.GetPublishAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/auto/rules", wrapper.SavePublishAutoRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/auto/retry", wrapper.RetryPublishAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/auto/backup", wrapper.GetPublishAutoBackup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ActionModal } from "@/components/publish/ActionModal";
+import { AutoPublish } from "@/components/publish/AutoPublish";
 import { HostEditor } from "@/components/publish/HostEditor";
 import { ThemeEditor } from "@/components/publish/ThemeEditor";
 import { AKBadge, Empty, StatusBar, ago } from "@/components/publish/bits";
@@ -54,6 +55,7 @@ export default function PublishServicesPage() {
       {ov && (
         <>
           <StatusBar ov={ov} admin={admin} />
+          {ov.npm.linked && <AutoPublish ov={ov} admin={admin} />}
           <Card title={`Diensten · ${rows.length}`}>
             <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
               <Input placeholder="Zoeken" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
