@@ -59,6 +59,7 @@ import {
 } from "@/lib/inventory";
 import { useJobs } from "@/lib/proxmox";
 import { RecentChangesCard } from "@/components/whatbroke/WhatBroke";
+import { ReplaceCard } from "@/components/replace/ReplaceCard";
 import { ClusterGrade, ClusterRiskCard } from "@/components/risk/Risk";
 
 export default function ClusterDetailPage() {
@@ -196,6 +197,11 @@ function ClusterDetailInner() {
             <Tile wide>
               <VipsCard c={cluster.data} isAdmin={isAdmin} />
             </Tile>
+            {cluster.data.vips.length > 0 && (
+              <Tile wide>
+                <ReplaceCard c={cluster.data} isAdmin={isAdmin} />
+              </Tile>
+            )}
             <Tile>
               <ClusterDatabaseCard c={cluster.data} isAdmin={isAdmin} />
             </Tile>

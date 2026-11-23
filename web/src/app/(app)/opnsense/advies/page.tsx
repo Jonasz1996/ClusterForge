@@ -29,6 +29,7 @@ const groups: { kind: OpnAdviceItem["kind"]; title: string; tone: "green" | "blu
   { kind: "shadow", title: "Regels die nooit raken", tone: "amber" },
   { kind: "dup", title: "Dubbele regels", tone: "amber" },
   { kind: "unused", title: "Geen treffer in 30 dagen", tone: "slate" },
+  { kind: "vip", title: "Naar het VIP (na uitrol, overname of verhuizing)", tone: "blue" },
 ];
 
 function Advice({ c }: { c: OpnCluster }) {
@@ -94,7 +95,7 @@ function Advice({ c }: { c: OpnCluster }) {
                       <div className="min-w-0 flex-1">
                         <div>
                           <Badge tone={g.tone}>
-                            {it.op === "add" ? "nieuwe regel" : it.op === "del" ? "weg" : it.op === "set" ? "uitzetten" : "let op"}
+                            {it.op === "add" ? "nieuwe regel" : it.op === "del" ? "weg" : it.kind === "vip" ? "doel wijzigen" : it.op === "set" ? "uitzetten" : "let op"}
                           </Badge>{" "}
                           {it.title}
                         </div>

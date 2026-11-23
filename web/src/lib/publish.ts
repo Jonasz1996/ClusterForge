@@ -217,7 +217,8 @@ export type PublishActionKind =
   | "restore"
   | "rename"
   | "theme_many"
-  | "ak_repair";
+  | "ak_repair"
+  | "move_address";
 
 export type PublishAction = {
   action: PublishActionKind;

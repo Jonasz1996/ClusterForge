@@ -153,6 +153,7 @@ type VIPAdvice struct {
 	FirewallID string     `json:"firewall_id"`
 	Cluster    string     `json:"cluster"`
 	Confirm    string     `json:"confirm"`
+	Prod       bool       `json:"prod"`
 	Items      []AutoItem `json:"items"`
 }
 
@@ -173,7 +174,7 @@ func (s *Service) VIPAdviceFor(ctx context.Context, vips []string) ([]VIPAdvice,
 		if err != nil {
 			continue
 		}
-		a := VIPAdvice{FirewallID: fw.NodeID.String(), Cluster: c.Name, Confirm: v.Confirm, Items: []AutoItem{}}
+		a := VIPAdvice{FirewallID: fw.NodeID.String(), Cluster: c.Name, Confirm: v.Confirm, Prod: c.Environment == "prod", Items: []AutoItem{}}
 		for _, it := range v.Items {
 			if it.Kind == "vip" && !it.Ignored && slices.ContainsFunc(vips, func(vip string) bool { return strings.Contains(it.Title, " "+vip) }) {
 				a.Items = append(a.Items, it)
