@@ -64,7 +64,7 @@ var classes = map[string]Class{
 	"cluster.heal_started": ClassChange, "cluster.heal_done": ClassChange, "cluster.heal_failed": ClassInfo,
 	"cluster.heal_auto_changed": ClassChange, "cluster.heal_auto_paused": ClassInfo,
 	"node.heal_started": ClassChange, "node.heal_done": ClassChange, "node.heal_failed": ClassInfo,
-	"node.created": ClassInfo, "node.updated": ClassChange, "node.deleted": ClassInfo,
+	"node.created": ClassInfo, "node.updated": ClassChange, "node.pentest_changed": ClassChange, "node.deleted": ClassInfo,
 	"vip.created": ClassChange, "vip.updated": ClassChange, "vip.deleted": ClassChange,
 
 	"node.lifecycle_changed": ClassChange,
