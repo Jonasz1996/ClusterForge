@@ -55,6 +55,17 @@ func (s *Service) planMoveAddress(ctx context.Context, st Settings, npm *NPMRead
 		ph := PlannedHost{HostID: h.ID, Domain: name, Scheme: schemeOf(h), ServicePort: h.ForwardPort,
 			Body: map[string]any{"forward_host": newAddr}, Old: map[string]any{"forward_host": h.ForwardHost}}
 		p.Lines = append(p.Lines, fmt.Sprintf("%s: %s://%s:%d → %s:%d", name, h.ForwardScheme, oldAddr, h.ForwardPort, newAddr, h.ForwardPort))
+		// Testlijst 3, N4: een host zonder certificaat krijgt het passende
+		// (wildcard)certificaat; via Cloudflare gaf https anders 525.
+		if h.CertID() == 0 {
+			if c := pickCert(npm.Certs, name, s.Now()); c != nil {
+				ph.Body["certificate_id"], ph.Body["ssl_forced"] = c.ID, true
+				ph.Old["certificate_id"], ph.Old["ssl_forced"] = 0, bool(h.SSLForced)
+				p.Lines = append(p.Lines, fmt.Sprintf("%s: certificaat %s erbij, SSL afdwingen", name, certLabel(*c)))
+			} else {
+				p.Warnings = append(p.Warnings, name+": heeft geen certificaat en er is geen passend certificaat in NPM; https werkt pas na een certificaat (bewerken → SSL)")
+			}
+		}
 		if _, ok := managed[h.ID]; !ok {
 			p.Warnings = append(p.Warnings, name+": nog niet beheerd; ClusterForge neemt hem over na de wijziging")
 		}

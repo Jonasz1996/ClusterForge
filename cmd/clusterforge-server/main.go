@@ -241,6 +241,7 @@ func serve() error {
 	// Fase 45: ClusterForge werkt zichzelf bij vanuit de webinterface en
 	// verhuist naar een eigen cluster (template clusterforge).
 	self := selfhost.NewService(pool, ev, log, runner, bus, bus, box, acf)
+	self.Web = bus
 	self.Version, self.Image, self.Cluster, self.Advertise = version, os.Getenv("CF_IMAGE"), os.Getenv("CF_SELF_CLUSTER"), cfg.NATSAdvertise
 	self.MasterKey, self.VMURL = cfg.MasterKey, cfg.VictoriaMetricsURL
 	self.LoadSettings()

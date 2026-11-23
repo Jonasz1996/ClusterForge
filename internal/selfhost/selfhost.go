@@ -105,8 +105,15 @@ type Commander interface {
 	Command(ctx context.Context, nodeID uuid.UUID, cmd protocol.Command) (protocol.Result, error)
 }
 
+// WebChecker laat een agent een adres opvragen (testlijst 3, N12).
+type WebChecker interface {
+	Web(ctx context.Context, nodeID uuid.UUID, req protocol.WebRequest) (protocol.WebResponse, error)
+}
+
 // Service doet het bijwerken en verhuizen.
 type Service struct {
+	// Web: nil slaat de poortcontrole per agent over.
+	Web WebChecker
 	pool   *pgxpool.Pool
 	q      *store.Queries
 	ev     *events.Writer
@@ -977,11 +984,176 @@ func (s *Service) move(ctx context.Context, j *jobs.Job) error {
 		return err
 	}
 	actor := actorOf(j)
+	// Testlijst 3, N17: de dump is genomen terwijl deze taak liep. Op het
+	// cluster (de nieuwe server) staat hij dus nog op "bezig"; daar niets
+	// opnieuw doen, alleen netjes afsluiten.
+	if s.onTarget(ctx, p) {
+		return s.finishMoved(ctx, j)
+	}
 	err := s.doMove(ctx, j, p)
 	if err != nil {
 		s.event(ctx, actor, "clusterforge.move_failed", map[string]any{"cluster_id": p.Cluster, "error": err.Error(), "job_id": j.ID})
 	}
 	return err
+}
+
+// onTarget: deze server draait al op het cluster waar de verhuizing heen
+// ging.
+func (s *Service) onTarget(ctx context.Context, p moveParams) bool {
+	if s.Cluster == "" {
+		return false
+	}
+	id, err := s.ownCluster(ctx)
+	return err == nil && id == p.Cluster
+}
+
+// finishMoved sluit de verhuistaak af op de nieuwe server: de stap die liep
+// toen de dump genomen werd, is gelukt (deze server draait op die dump); de
+// stappen daarna liepen op de oude server.
+func (s *Service) finishMoved(ctx context.Context, j *jobs.Job) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE job_steps SET status = 'succeeded', finished_at = coalesce(finished_at, now()),
+		log = log || $2::text[] WHERE job_id = $1 AND status IN ('running', 'queued')`, j.ID,
+		[]string{"Deze stap liep nog toen de dump genomen werd; de dump is goed aangekomen: deze server draait erop."}); err != nil {
+		return err
+	}
+	return j.Step(ctx, "Afgerond op het cluster", func(ctx context.Context, st *jobs.Step) error {
+		st.Logf("De verhuizing is gelukt: deze server draait op het cluster met de database van de oude server.")
+		st.Logf("Overnemen, agents omzetten en de oude server stoppen liepen op de oude server; hun log stond daar.")
+		return nil
+	})
+}
+
+// isTimeout: het adres antwoordt niet eens met een weigering (firewall).
+func isTimeout(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "timeout") || strings.Contains(m, "timed out") || strings.Contains(m, "deadline")
+}
+
+// portCheck laat elke verbonden agent de poorten van het VIP opvragen
+// (testlijst 3, N12: na de verhuizing haalde Domotica-PI zijn update niet
+// via 8080, alleen 4222 was nagekeken). Vooraf draait er nog niets op het
+// VIP: een weigering is dan goed (de firewall laat door), alleen een
+// time-out wijst op een firewall. Achteraf moet 8080 echt antwoorden.
+func (s *Service) portCheck(ctx context.Context, st *jobs.Step, vip string, after bool) []string {
+	if s.Web == nil || vip == "" {
+		return nil
+	}
+	agents, err := s.agents(ctx)
+	if err != nil {
+		return nil
+	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	var bad []string
+	for _, a := range agents {
+		if isScanner(a) || !a.Online || a.Protocol < protocol.WebSince {
+			continue
+		}
+		wg.Add(1)
+		go func(a agentRow) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			var miss []string
+			for _, u := range []string{"http://" + net.JoinHostPort(vip, "8080") + "/healthz", "https://" + net.JoinHostPort(vip, "4222") + "/"} {
+				cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				res, err := s.Web.Web(cctx, a.NodeID, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: &protocol.WebCheck{URL: u}})
+				cancel()
+				msg := ""
+				switch {
+				case err != nil:
+					msg = err.Error()
+				case res.Check != nil:
+					msg = res.Check.Error
+				}
+				port := "8080"
+				if strings.Contains(u, ":4222") {
+					port = "4222"
+				}
+				switch {
+				case isTimeout(msg):
+					miss = append(miss, port)
+				case after && port == "8080" && msg != "":
+					miss = append(miss, port)
+				}
+			}
+			if len(miss) > 0 {
+				mu.Lock()
+				bad = append(bad, fmt.Sprintf("%s (%s)", a.Hostname, strings.Join(miss, ", ")))
+				mu.Unlock()
+			}
+		}(a)
+	}
+	wg.Wait()
+	slices.Sort(bad)
+	if len(bad) > 0 {
+		st.Logf("LET OP: deze nodes bereiken %s niet op poort 4222 en/of 8080 (firewall? in OPNsense beide naar %s toelaten): %s", vip, vip, strings.Join(bad, "; "))
+	} else {
+		st.Logf("Alle verbonden agents bereiken %s op 4222 en 8080.", vip)
+	}
+	return bad
+}
+
+// stopOld stopt de oude server. Een agent die tijdens de verhuizing
+// herstartte, kwam met zijn oude agent.json terug bij deze (oude) server
+// (testlijst 3, N3): die krijgt eerst alsnog het nieuwe adres, en het
+// stoppen wacht tot de agent van de host weer verbonden is.
+func (s *Service) stopOld(ctx context.Context, j *jobs.Job, st *jobs.Step, host uuid.UUID, server, nats string, sent []uuid.UUID) error {
+	deadline := s.Now().Add(10 * time.Minute)
+	redirected := map[uuid.UUID]bool{}
+	for {
+		agents, err := s.agents(ctx)
+		if err != nil {
+			return err
+		}
+		hostOnline := false
+		for _, a := range agents {
+			if a.NodeID == host && a.Online {
+				hostOnline = true
+			}
+			if isScanner(a) || !a.Online || a.Protocol < protocol.ReconfigureSince || slices.Contains(sent, a.NodeID) || redirected[a.NodeID] ||
+				a.NodeID == host || a.NatsURL == nats {
+				continue
+			}
+			cmd := protocol.Command{
+				ID: "move-again-" + j.ID.String() + "-" + a.NodeID.String(), Action: protocol.CmdAgentReconfigure,
+				Deadline: s.Now().Add(protocol.ReconfigureTimeout), Reason: j.Title,
+				Reconfigure: &protocol.AgentReconfigure{ServerURL: server, NatsURL: nats},
+			}
+			cctx, cancel := context.WithTimeout(ctx, protocol.ReconfigureTimeout+30*time.Second)
+			res, err := s.bus.Command(cctx, a.NodeID, cmd)
+			cancel()
+			switch {
+			case err != nil:
+				st.Logf("%s kwam terug bij de oude server; omzetten mislukt: %v", a.Hostname, err)
+			case !res.OK:
+				st.Logf("%s kwam terug bij de oude server; omzetten mislukt: %s", a.Hostname, res.Error)
+			default:
+				st.Logf("%s kwam terug bij de oude server (herstart tijdens de verhuizing?) en is alsnog omgezet", a.Hostname)
+				redirected[a.NodeID] = true
+			}
+		}
+		if hostOnline {
+			err := s.runOn(ctx, st, host, "cf-stop-"+j.ID.String(), "oude server stoppen", StopScript(), 5*time.Minute)
+			if err == nil {
+				return nil
+			}
+			if !strings.Contains(err.Error(), "niet verbonden") || s.Now().After(deadline) {
+				return err
+			}
+		}
+		if s.Now().After(deadline) {
+			return errors.New("de agent van de oude server is na 10 minuten nog niet verbonden; de oude server draait nog. Stop hem met de hand (op de host: systemctl stop clusterforge of docker compose down in /opt/clusterforge/deploy), anders draaien er twee servers")
+		}
+		st.Logf("de agent van de oude server is (nog) niet verbonden; over 20 s opnieuw")
+		_ = st.Flush(ctx)
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-time.After(20 * time.Second):
+		}
+	}
 }
 
 func (s *Service) doMove(ctx context.Context, j *jobs.Job, p moveParams) error {
@@ -1031,6 +1203,9 @@ func (s *Service) doMove(ctx context.Context, j *jobs.Job, p moveParams) error {
 		}
 		rs = rolesState{VIP: vip, Rest: rest}
 		st.Logf("VIP-node: %s; andere nodes: %d", vip.Hostname, len(rest))
+		var addr string
+		_ = s.pool.QueryRow(ctx, `SELECT coalesce((SELECT host(address) FROM vips WHERE cluster_id = $1 ORDER BY created_at LIMIT 1), '')`, p.Cluster).Scan(&addr)
+		s.portCheck(ctx, st, addr, false)
 		return st.SetState(ctx, rs)
 	}); err != nil {
 		return err
@@ -1102,11 +1277,15 @@ func (s *Service) doMove(ctx context.Context, j *jobs.Job, p moveParams) error {
 	if len(rc.Failed) > 0 && !p.Force {
 		return fmt.Errorf("niet alle agents staan op het cluster (%s); de oude server blijft draaien. Zet ze om bij Instellingen → Adres voor agents, of start opnieuw met \"toch verhuizen\"", strings.Join(rc.Failed, ", "))
 	}
+	_ = j.Step(ctx, "Controle: agents bereiken 4222 en 8080 op "+vip, func(ctx context.Context, st *jobs.Step) error {
+		s.portCheck(ctx, st, vip, true)
+		return nil
+	})
 	if err := j.Step(ctx, "Oude server stoppen", func(ctx context.Context, st *jobs.Step) error {
 		s.event(ctx, actorOf(j), "clusterforge.moved", map[string]any{"cluster_id": p.Cluster, "vip": vip, "job_id": j.ID})
 		st.Logf("ClusterForge draait nu op %s. Log daar opnieuw in.", server)
-		st.Logf("Nog te doen, als voorstel bij het cluster (Vervangen en het VIP): de firewallregel voor 4222 en 8080 naar %s, en de NPM-host van ClusterForge naar %s:8080.", vip, vip)
-		return s.runOn(ctx, st, p.Host, "cf-stop-"+j.ID.String(), "oude server stoppen", StopScript(), 5*time.Minute)
+		st.Logf("Nog te doen, als voorstel bij het cluster (Vervangen en het VIP): de firewallregel voor 4222 en 8080 naar %s, en de NPM-host van ClusterForge naar %s:8080 met het wildcard-certificaat.", vip, vip)
+		return s.stopOld(ctx, j, st, p.Host, server, nats, rc.Sent)
 	}); err != nil {
 		return err
 	}
