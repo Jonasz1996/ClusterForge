@@ -83,9 +83,9 @@ func planVIPAdvice(nat, filter []haveObj, moves map[string]vipMove) []AutoItem {
 		name := orDefault(r.F["descr"], orDefault(r.F["description"], r.UUID[:8]))
 		port := orDefault(r.F["local-port"], r.F["destination_port"])
 		out = append(out, AutoItem{Key: "vipnat:" + r.UUID, Kind: "vip", Op: "set", Manual: true,
-			Title: fmt.Sprintf("port forward %s naar het VIP %s", name, m.VIP),
+			Title:  fmt.Sprintf("port forward %s naar het VIP %s", name, m.VIP),
 			Detail: fmt.Sprintf("Wijst nu naar %s%s. %s. Voorbeeld: doel %s → %s.", target, portText(port), m.Why, target, m.VIP),
-			call:  &protocol.OPNCall{Path: "firewall/d_nat/setRule/" + r.UUID, Body: map[string]any{"rule": map[string]any{"target": m.VIP}}}})
+			call:   &protocol.OPNCall{Path: "firewall/d_nat/setRule/" + r.UUID, Body: map[string]any{"rule": map[string]any{"target": m.VIP}}}})
 	}
 	// Welke poorten hebben al een pass-regel naar het VIP.
 	have := map[string]bool{}
@@ -186,4 +186,3 @@ func (s *Service) VIPAdviceFor(ctx context.Context, vips []string) ([]VIPAdvice,
 	}
 	return out, nil
 }
-

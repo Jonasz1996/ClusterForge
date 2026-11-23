@@ -485,4 +485,3 @@ func (s *Service) event(ctx context.Context, actor events.Actor, action string, 
 		s.log.Warn("event schrijven mislukt", "action", action, "err", err)
 	}
 }
-
