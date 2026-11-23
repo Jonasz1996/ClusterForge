@@ -976,10 +976,36 @@ versie_schrijven() {
   chgrp homepage "$ETC/versie" 2>/dev/null
   chmod 0640 "$ETC/versie"
 }
+# laatste_commit: de commit van een branch op GitHub nu (leeg bij een
+# commit, tag of als GitHub niet antwoordt). Testlijst 3, N10: een cluster
+# op "main" volgt main, niet de commit van de laatste build.
+laatste_commit() {
+  timeout 15 git ls-remote "$REPO" "refs/heads/$VERSION" 2>/dev/null | cut -f1 | head -n 1
+}
 gebouwd() {
   [ "$(cut -d' ' -f1 "$STATE/gebouwd" 2>/dev/null)" = "$VERSION" ] &&
     [ "$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ] &&
-    [ -x "$VENV/bin/python" ] && [ -s "$CODE/frontend/dist/index.html" ] && [ -s "$ETC/versie" ]
+    [ -x "$VENV/bin/python" ] && [ -s "$CODE/frontend/dist/index.html" ] && [ -s "$ETC/versie" ] || return 1
+  laatst=$(laatste_commit)
+  [ -z "$laatst" ] || [ "$laatst" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ]
+}
+# draait_versie: na een herstart moet de api gezond zijn en de gebouwde
+# commit tonen (testlijst 3, N8/N9). Faalt het, dan stopt de rollende uitrol
+# op deze node met de laatste logregels erbij.
+draait_versie() {
+  sysctl_ is-enabled --quiet "$API" 2>/dev/null || return 0
+  [ -s "$CF/secret.key" ] || return 0
+  want=$(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null)
+  for _ in $(seq 1 60); do
+    if healthy && grep -q "^commit=$want" "$ETC/versie" 2>/dev/null; then
+      echo "draait commit $want en is gezond"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "de homepage draait niet gezond op commit $want na 2 minuten; laatste regels van $API:" >&2
+  journalctl -u "$API" -n 15 --no-pager -o cat 2>/dev/null >&2
+  return 1
 }
 
 # Met een actieve ufw (default deny): etcd, Patroni, PostgreSQL, SSH (de
@@ -1039,7 +1065,7 @@ status() {
   fi
   if [ -s "$CF/secret.key" ]; then echo "sleutel:     overgenomen ($(keyhash))"; else echo "sleutel:     nog geen (wacht op de overname)"; fi
   echo "TimescaleDB: $(ts_want || true)"
-  echo "versie:      $VERSION ($(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet gebouwd))"
+  echo "versie:      $VERSION (gebouwd: $(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet), op GitHub nu: $(laatste_commit || true))"
   # shellcheck disable=SC2012
   echo "back-up:     $(ls -1t "$BACKUPS"/homepage-*.dump 2>/dev/null | head -n 1)"
   return 0
@@ -1087,10 +1113,11 @@ case "${1:-}" in
   restart-if-changed)
     sysctl_ try-restart "$API" "$SYSLOG"
     worker_mag && sysctl_ try-restart "$WORKER"
-    exit 0
+    draait_versie
     ;;
+  draait-versie) draait_versie ;;
   *)
-    echo "gebruik: $0 voorstart|migreren|worker|check|master|vip-weg|volg|worker-mag|syslog-mag|backup-mag|status|voorbereiden|voorbereid|overnemen|afronden|terug|bouwen|gebouwd|timescaledb|timescaledb-ok|nginx|nginx-ok|mappen|mappen-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
+    echo "gebruik: $0 voorstart|migreren|worker|check|master|vip-weg|volg|worker-mag|syslog-mag|backup-mag|status|voorbereiden|voorbereid|overnemen|afronden|terug|bouwen|gebouwd|timescaledb|timescaledb-ok|nginx|nginx-ok|mappen|mappen-ok|firewall|firewall-ok|unchanged|restart-if-changed|draait-versie" >&2
     exit 2
     ;;
 esac
