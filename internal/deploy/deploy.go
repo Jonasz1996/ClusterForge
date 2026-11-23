@@ -1045,3 +1045,14 @@ func (s *Service) planExisting(ctx context.Context, tpl *templates.Template, p *
 	}
 	return nil
 }
+
+// noteClonedFrom legt vast waaruit ClusterForge de gast maakte (testlijst 3,
+// N18). node_type blijft unknown: een gast die ClusterForge uitrolt is
+// productie tot een mens hem als wegwerpkloon aanduidt. Een fout hier stopt
+// de uitrol niet.
+func (s *Service) noteClonedFrom(ctx context.Context, st *jobs.Step, id uuid.UUID, from string) {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO node_pentest (node_id, cloned_from) VALUES ($1, $2)
+		ON CONFLICT (node_id) DO UPDATE SET cloned_from = EXCLUDED.cloned_from`, id, from); err != nil {
+		st.Logf("herkomst niet vastgelegd: %v", err)
+	}
+}

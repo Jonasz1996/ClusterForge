@@ -184,6 +184,8 @@ export type PublishOverview = {
     error?: string;
     checked_at?: string;
     services: number;
+    npm_standby?: boolean;
+    npm_copied_at?: string;
   }[];
   npm: PublishReadState;
   authentik: PublishReadState;

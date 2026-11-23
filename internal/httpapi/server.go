@@ -378,6 +378,9 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Post("/clusters/{clusterId}/params/reveal", s.revealParam)
 		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
+		api.With(s.requireSession).Get("/auto-changes", s.autoChanges)
+		api.With(s.requireSession).Get("/nodes/{nodeId}/pentest", s.pentestGet)
+		api.With(s.requireSession).Put("/nodes/{nodeId}/pentest", s.pentestSet)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
 		api.With(s.requireSession).Put("/upkeep/scopes/{scope}", s.upkeepSetPolicy)
 		api.With(s.requireSession).Post("/upkeep/scopes/{scope}/start", s.upkeepStart)
@@ -400,6 +403,8 @@ func (s *Server) Handler() http.Handler {
 		api.Post("/nmap", s.importNmap)
 		api.Get("/runs", s.importRuns)
 		api.Get("/runs/{runId}", s.importRun)
+		api.Get("/nodes", s.importNodes)
+		api.Post("/findings", s.importFindings)
 	})
 	r.Route(dashboardBase, func(api chi.Router) {
 		api.Use(middleware.NoCache)

@@ -151,6 +151,10 @@ type NodeState struct {
 	Error       string     `json:"error,omitempty"`
 	CheckedAt   *time.Time `json:"checked_at,omitempty"`
 	Services    int        `json:"services"`
+	// Standby: NPM-node zonder het VIP; NPM staat daar bewust uit en neemt
+	// de laatste kopie over bij een failover (testlijst 3, N19).
+	Standby  bool       `json:"npm_standby,omitempty"`
+	CopiedAt *time.Time `json:"npm_copied_at,omitempty"`
 }
 
 // ReadState zegt wanneer en van waar NPM of Authentik laatst gelezen is.
@@ -278,6 +282,14 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 			ns.Error, ns.Services = f.err, len(f.services)
 			at := f.at
 			ns.CheckedAt = &at
+		}
+		if st.NPMClusterID != nil && n.ClusterID != nil && *n.ClusterID == *st.NPMClusterID && len(n.VIPs) == 0 {
+			ns.Standby = true
+			var at *time.Time
+			if err := s.pool.QueryRow(ctx, `SELECT max(r.ended_at) FROM cron_runs r JOIN cron_jobs j ON j.id = r.job_id
+				WHERE j.cluster_id = $1 AND j.name = 'NPM-configuratie' AND r.node_id = $2 AND r.result = 'ok'`, *st.NPMClusterID, n.ID).Scan(&at); err == nil {
+				ns.CopiedAt = at
+			}
 		}
 		ov.Nodes = append(ov.Nodes, ns)
 	}

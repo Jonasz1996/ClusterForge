@@ -20,6 +20,7 @@ import { AgentUpgradeRow } from "@/components/inventory/AgentUpgrades";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
+import { NodePentestCard } from "@/components/pentest/NodePentestCard";
 import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import { NodeChangesCard } from "@/components/journal/Changes";
 import { NodeCronCard } from "@/components/cron/Cron";
@@ -281,6 +282,11 @@ function NodeDetailInner() {
             {isAdmin && node.data.agent && (
               <Tile>
                 <NodeConnectionsCard nodeId={id} />
+              </Tile>
+            )}
+            {isAdmin && (
+              <Tile>
+                <NodePentestCard nodeId={id} />
               </Tile>
             )}
             {!runtime.data?.facts && !(isAdmin && node.data.agent) && (
