@@ -113,7 +113,7 @@ type WebChecker interface {
 // Service doet het bijwerken en verhuizen.
 type Service struct {
 	// Web: nil slaat de poortcontrole per agent over.
-	Web WebChecker
+	Web    WebChecker
 	pool   *pgxpool.Pool
 	q      *store.Queries
 	ev     *events.Writer
