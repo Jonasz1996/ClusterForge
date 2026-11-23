@@ -956,13 +956,6 @@ func (s *Service) ownCluster(ctx context.Context) (uuid.UUID, error) {
 	return id, err
 }
 
-func or(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
-}
-
 // --- verhuizen -------------------------------------------------------------
 
 type exportState struct {
