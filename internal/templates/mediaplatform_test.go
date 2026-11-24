@@ -399,6 +399,10 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 		}, "is geen gewone map", 1, false},
 		{"versie zonder sleutels-check", map[string]*string{"cli-sleutels-check": nil}, nil, "niets gekopieerd of gewist", 1, true},
 		{"sleutel ontbreekt", map[string]*string{"cli-sleutels-check.rc": on("1")}, nil, "niets gekopieerd of gewist", 1, true},
+		// Een fout van sleutels-check met de code van overslaan blijft een
+		// fout: de node met het VIP stuurt, dus niet overgeslagen.
+		{"sleutels-check stopt met de code van overslaan", map[string]*string{"cli-sleutels-check.rc": on(fmt.Sprint(protocol.SyncBeforeSkip))}, nil,
+			"niets gekopieerd of gewist", 1, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			must(t, os.RemoveAll(filepath.Join(n.dir, "cfp")))

@@ -596,7 +596,7 @@ SELECT DISTINCT ON (r.job_id, r.node_id) r.job_id, r.node_id, n.hostname, r.resu
 FROM cron_runs r
 JOIN cron_jobs j ON j.id = r.job_id
 JOIN nodes n ON n.id = r.node_id
-WHERE r.result IN ('ok', 'failed', 'timeout')
+WHERE r.result IN ('ok', 'failed', 'timeout') OR (r.result = 'skipped' AND r.exit_code IS NOT NULL)
 ORDER BY r.job_id, r.node_id, r.started_at DESC
 `
 
@@ -613,8 +613,12 @@ type ListIncidentCronJobsRow struct {
 	Enabled   bool
 }
 
-// De laatste afgeronde run per beheerde job en node, voor de incidenten;
-// een overgeslagen of gestopte run telt niet.
+// De laatste afgeronde run per beheerde job en node, voor de incidenten. Een
+// gestopte run telt niet, en een run die oversloeg omdat de vorige nog liep
+// (zonder exitcode) ook niet. Een sync die oversloeg omdat deze node niet
+// stuurt (met exitcode, protocol.SyncBeforeSkip) telt wel: zo blijft een
+// oude fout van die node, van vóór een failover of van een agent die dat
+// nog niet kende, niet open.
 func (q *Queries) ListIncidentCronJobs(ctx context.Context) ([]ListIncidentCronJobsRow, error) {
 	rows, err := q.db.Query(ctx, listIncidentCronJobs)
 	if err != nil {
