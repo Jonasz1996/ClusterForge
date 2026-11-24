@@ -17,6 +17,9 @@
 #   platform-ctl.sh replicatie [--check]
 #                                    bestaande volumes (zonder collectie) naar de
 #                                    replicatie van ClusterForge
+#   platform-ctl.sh mapregels [--check]
+#                                    de regels per map van SeaweedFS voor de kopieën
+#                                    per bibliotheek (blobs-r1/ tot blobs-r3/)
 #   platform-ctl.sh sleutels-klaar   mag de sync de sleutels van gezichten van hier
 #                                    kopiëren en elders wissen? (voor de sync)
 #   platform-ctl.sh compose …        docker compose met de bestanden van het cluster
@@ -483,11 +486,13 @@ arr_stop() {
 # al van de master. --check: staan alle volumes al op de gewenste waarde, of
 # is deze node niet de leider?
 #
-# Alleen de volumes zonder collectie (de standaardcollectie). Een collectie
-# heeft haar eigen regel: films en series staan in collectie media op 2
-# kopieën (fs.configure op /blobs-media/, PLATFORM_BLOB_SPLIT); die blijven
-# zoals ze zijn. Daarom per volume (-volumeId), niet met -collectionPattern:
-# wat een leeg patroon betekent, verschilt per versie van SeaweedFS.
+# Alleen de volumes zonder collectie (de standaardcollectie, blobs/). Een
+# collectie heeft haar eigen regel: de kopieën per bibliotheek (platform
+# 0.8.3) staan in de collecties r1, r2 en r3 op 1, 2 en 3 kopieën (mapregels
+# hieronder), en een oude collectie media van fase 11 (blobs-media/) houdt
+# de hare; die blijven zoals ze zijn. Daarom per volume (-volumeId), niet met
+# -collectionPattern: wat een leeg patroon betekent, verschilt per versie van
+# SeaweedFS.
 REPLICATIE='{{ .params.replication }}'
 weed_leader() {
   curl -fsS --max-time 5 http://127.0.0.1:9333/cluster/status 2>/dev/null | grep -q '"IsLeader": *true'
@@ -534,6 +539,73 @@ replicatie() {
     echo unlock; } | /usr/local/bin/weed shell -master=127.0.0.1:9333
   left=$(volumes_other | wc -l)
   echo "Nog $left volumes niet op $REPLICATIE"
+}
+
+# --- regels per map van SeaweedFS (kopieën per bibliotheek) -----------------
+# Platform 0.8.3 zet met PLATFORM_BLOB_SPLIT=true inhoud met een ander aantal
+# kopieën dan de standaard in blobs-r1/, blobs-r2/ en blobs-r3/ (naast
+# blobs/). Een regel per map in de filer (fs.configure, geldt voor het hele
+# cluster) geeft elke map een eigen collectie en replicatie; de mount
+# gebruikt -filer.path=/, dus $DATA/blobs-r2 is /blobs-r2/ in de filer.
+# mapregels schrijft een regel alleen als hij ontbreekt of een andere
+# collectie of replicatie heeft, onder het slot van weed shell. Dat slot
+# wacht op wie het heeft (replicatie --nu kan uren duren), dus alles met een
+# timeout. Met PLATFORM_BLOB_SPLIT uit doet het niets en haalt het niets weg;
+# een regel voor /blobs-media/ (fase 11) laat het altijd zoals hij is.
+# --check: staan ze er alle drie goed (of staat het uit)?
+MAPREGELS='/blobs-r1/ r1 000
+/blobs-r2/ r2 001
+/blobs-r3/ r3 002'
+split_on() { [ "$(env_get PLATFORM_BLOB_SPLIT)" = true ]; }
+weed_shell() { timeout "$1" /usr/local/bin/weed shell -master=127.0.0.1:9333; }
+# De regels van de filer als "map collectie replicatie" (- voor leeg), uit de
+# JSON van fs.configure zonder -locationPrefix (alleen lezen, zonder slot).
+# De velden heten locationPrefix, collection en replication; het aantal
+# spaties na de dubbele punt wisselt (protojson). Faalt als weed shell faalt
+# of geen configuratie gaf. mapregels_lees <timeout>
+mapregels_lees() {
+  out=$(printf 'fs.configure\n' | weed_shell "$1" 2>/dev/null) || return 1
+  case $out in *'"locations"'*) ;; *) return 1 ;; esac
+  printf '%s\n' "$out" | tr -d '\n' | sed 's/{/\n{/g' |
+    awk 'function f(k,  v) {
+        if (!match($0, "\"" k "\":[ \t]*\"[^\"]*\"")) return "-"
+        v = substr($0, RSTART, RLENGTH); sub(/^[^:]*:[ \t]*"/, "", v); sub(/"$/, "", v)
+        return v == "" ? "-" : v }
+      /"locationPrefix"/ { print f("locationPrefix"), f("collection"), f("replication") }'
+}
+# De regels van MAPREGELS die ontbreken of anders zijn. mapregels_mis <timeout>
+mapregels_mis() {
+  have=$(mapregels_lees "$1") || return 1
+  printf '%s\n' "$MAPREGELS" | while read -r p c r; do
+    printf '%s\n' "$have" | grep -qxF "$p $c $r" || echo "$p $c $r"
+  done
+}
+mapregels() {
+  if ! split_on; then
+    [ "${1:-}" = --check ] || echo "Regels per map: kopieën per bibliotheek staan uit (PLATFORM_BLOB_SPLIT); niets gezet of weggehaald"
+    return 0
+  fi
+  mis=$(mapregels_mis 30) || {
+    echo "Let op: kon de regels per map van SeaweedFS niet lezen (weed shell, fs.configure)" >&2; return 1; }
+  if [ -z "$mis" ]; then
+    [ "${1:-}" = --check ] || echo "Regels per map: /blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed"
+    return 0
+  fi
+  [ "${1:-}" = --check ] && return 1
+  say "Regels per map zetten: $(printf '%s\n' "$mis" | awk '{ printf "%s%s (collectie %s, replicatie %s)", (NR > 1 ? ", " : ""), $1, $2, $3 }')"
+  { echo lock
+    printf '%s\n' "$mis" | while read -r p c r; do
+      echo "fs.configure -locationPrefix=$p -collection=$c -replication=$r -apply"
+    done
+    echo unlock; } | weed_shell 90 >/dev/null
+  # Nakijken wat er nu staat: weed shell geeft niet bij elke fout een code.
+  mis=$(mapregels_mis 30) || {
+    echo "Let op: kon de regels per map van SeaweedFS na het zetten niet lezen" >&2; return 1; }
+  if [ -n "$mis" ]; then
+    echo "Let op: de regels per map van SeaweedFS staan nog niet goed: $(printf '%s\n' "$mis" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $1 }')" >&2
+    return 1
+  fi
+  echo "Regels per map: /blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed"
 }
 
 # --- stand voor ClusterForge ------------------------------------------------
@@ -603,6 +675,15 @@ status() {
         chk analyse "Analyse (gezichten, zoeken op beeld)" "$([ "$h" = healthy ] && echo 1 || echo 0)" amber "${h:-niet gestart}"
       fi
     fi
+    # De regels per map gelden voor het hele cluster: alleen hier nakijken.
+    if split_on; then
+      if mis=$(mapregels_mis 20); then
+        chk mapregels "Regels per map (kopieën per bibliotheek)" "$([ -z "$mis" ] && echo 1 || echo 0)" amber \
+          "$([ -z "$mis" ] && echo "blobs-r1, -r2 en -r3 staan goed" || echo "ontbreken of anders: $(printf '%s\n' "$mis" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $1 }'); platform-ctl.sh mapregels")"
+      else
+        chk mapregels "Regels per map (kopieën per bibliotheek)" 0 amber "niet te lezen (weed shell, fs.configure)"
+      fi
+    fi
   fi
   mkdir -p "$STATUS_DIR"
   tmp=$STATUS_DIR/.media-platform.json
@@ -625,6 +706,12 @@ case "${1:-}" in
     if arr_on; then arr_dirs || exit 1; fi
     # Plaatsnamen: niet fataal; zonder bronnen werkt de rest gewoon.
     geo --check >/dev/null 2>&1 || timeout 300 "$0" geo || true
+    # De regels per map van SeaweedFS (kopieën per bibliotheek), vóór de
+    # eerste ronde van het platform: niet fataal, en hoogstens drie minuten.
+    if split_on; then
+      timeout 180 "$0" mapregels ||
+        echo "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch, maar blobs-r1/ tot blobs-r3/ krijgen de standaard (platform-ctl.sh mapregels)" >&2
+    fi
     fingerprint > "$HASH"
     limits_note
     if arr_on; then
@@ -686,6 +773,7 @@ case "${1:-}" in
   geo) shift; geo "$@" ;;
   beeld) beeld ;;
   replicatie) shift; replicatie "$@" ;;
+  mapregels) shift; mapregels "$@" ;;
   sleutels-klaar) sleutels_klaar ;;
   compose) shift; compose "$@" ;;
   overstap)
@@ -693,7 +781,7 @@ case "${1:-}" in
     overstap "$@"
     ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|sleutels-klaar|compose|overstap" >&2
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|mapregels|sleutels-klaar|compose|overstap" >&2
     exit 2
     ;;
 esac

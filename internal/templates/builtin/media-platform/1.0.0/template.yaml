@@ -50,18 +50,23 @@ params:
     label: Replicatie van SeaweedFS
     help: >-
       001 is twee kopieën op verschillende nodes (B2 van het platform), 002
-      drie. Een map met een eigen regel in SeaweedFS (zoals films en series)
-      houdt die.
+      drie. Dit is de standaard van het cluster (blobs/, voor het platform
+      PLATFORM_BLOB_DEFAULT_COPIES: 2 of 3). Een map met een eigen regel in
+      SeaweedFS (de kopieën per bibliotheek, blobs-r1/ tot blobs-r3/) houdt
+      die.
     default: "001"
     pattern: '00[12]'
   - name: blob_split
     type: bool
-    label: Films en series apart (blobs-media)
+    label: Kopieën per bibliotheek (platform 0.8.3)
     help: >-
-      Het platform zet inhoud waar alleen films en series naar wijzen in
-      blobs-media/ (fase 11, PLATFORM_BLOB_SPLIT). Met een regel voor die map
-      in SeaweedFS (fs.configure, collectie media, bv. 001) staan ze op minder
-      kopieën; al de rest blijft op de replicatie hierboven.
+      Op /beheer (Media, Bibliotheken) kies je per bibliotheek 1, 2 of 3
+      kopieën in het cluster, bv. Films op 2; het platform zet die inhoud in
+      blobs-r1/, blobs-r2/ of blobs-r3/ (PLATFORM_BLOB_SPLIT). Aan zet ook de
+      regels voor die mappen in SeaweedFS (fs.configure, collecties r1 tot
+      r3), bij elke start op de node met het VIP. Uit verhuist niets en haalt
+      geen regels weg. Een versie vóór 0.8.3 zet met aan films en series in
+      blobs-media/ (fase 11).
     default: false
   - name: seaweedfs_image
     type: string

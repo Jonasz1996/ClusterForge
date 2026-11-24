@@ -11,8 +11,10 @@ services:
       PLATFORM_MODE: cluster
       PLATFORM_DATABASE_URL: ${PLATFORM_DATABASE_URL:?}
       PLATFORM_CLUSTER_NODES: ${PLATFORM_CLUSTER_NODES:?}
-      # Films en series in blobs-media/ (fase 11; platform.env, standaard uit).
+      # Kopieën per bibliotheek (0.8.3; platform.env, standaard uit), met het
+      # aantal kopieën van de standaard (blobs/).
       PLATFORM_BLOB_SPLIT: ${PLATFORM_BLOB_SPLIT:-false}
+      PLATFORM_BLOB_DEFAULT_COPIES: ${PLATFORM_BLOB_DEFAULT_COPIES:-3}
   office:
     restart: "no"
   media:

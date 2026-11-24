@@ -70,19 +70,20 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"PLATFORM_CLUSTER_NODES=media-01=192.168.10.146,media-02=192.168.10.147,media-03=192.168.10.148\n",
 			"OFFICE_JWT_SECRET=officegeheim1\n", "ANALYSE=aan\n", "BEELD=aan\n", "PLAATSEN=aan\n",
 			"MODELLEN_ROOT=/opt/cf-platform/modellen\n", "SLEUTELS_ROOT=/var/lib/cf-platform/sleutels/gezichten\n",
-			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n", "\nARR=uit\n", "\nPLATFORM_BLOB_SPLIT=false\n"},
+			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n", "\nARR=uit\n", "\nPLATFORM_BLOB_SPLIT=false\n",
+			"\nPLATFORM_BLOB_DEFAULT_COPIES=2\n"},
 		"/etc/clusterforge/platform-arr.yaml": {"qbittorrent:\n    restart: \"no\"\n    volumes:\n      - /var/lib/cf-platform/torrents:/downloads\n",
 			"prowlarr:\n    restart: \"no\"\n", "platform:\n    volumes:\n      - /var/lib/cf-platform/torrents:/data/import/torrents\n"},
 		"/etc/clusterforge/platform-analyse.yaml":      {"analyse:\n    image: cf-platform:local", "analyse-omzetten:", "PLATFORM_ANALYSE_POSTGRES: \"true\""},
 		"/etc/systemd/system/cf-platform-status.timer": {"OnUnitActiveSec=60"},
 		"/etc/clusterforge/platform-cluster.yaml": {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local",
-			"PLATFORM_BLOB_SPLIT: ${PLATFORM_BLOB_SPLIT:-false}\n"},
+			"PLATFORM_BLOB_SPLIT: ${PLATFORM_BLOB_SPLIT:-false}\n", "PLATFORM_BLOB_DEFAULT_COPIES: ${PLATFORM_BLOB_DEFAULT_COPIES:-3}\n"},
 		"/usr/local/lib/clusterforge/platform-src.sh": {"REF='claude/stappenplan-uitwerken-lu4uv3'", "SRC=/opt/cf-platform/src", "-p cf-platform"},
 		"/usr/local/lib/clusterforge/platform-ctl.sh": {"docker image inspect -f '{{.Id}}' cf-platform:local", "-f /etc/clusterforge/platform-cluster.yaml",
 			"docker compose -p cf-platform", "VIP='192.168.10.150'", "overstap proef|echt", "db-copy \"$url\" --leegmaken",
 			"REPLICATIE='001'", "db_backup\n    systemctl restart cf-platform", "\"app\":\"media-platform\"", "--format '{{.Names}} {{.Status}}'",
 			"sleutels-klaar) sleutels_klaar ;;", "python -m app.cli sleutels-check </dev/null",
-			"docker info --format '{{.MemoryLimit}} {{.CPUCfsQuota}}'"},
+			"docker info --format '{{.MemoryLimit}} {{.CPUCfsQuota}}'", "mapregels) shift; mapregels \"$@\" ;;"},
 		"/etc/systemd/system/cf-platform.service": {"ConditionPathExists=/srv/platform-data/.cf-platform-active", "\nBindsTo=keepalived.service\n",
 			"\nAfter=docker.service cf-platform-mount.service keepalived.service\n", "\nSuccessExitStatus=3\n"},
 		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-allowOthers -cacheDir=/var/cache/weed-mount'\n"},
@@ -156,12 +157,43 @@ func TestMediaPlatformSyncs(t *testing.T) {
 // commando niet) met cli-<commando>.rc, uid (stat -c %u van elke map),
 // docker-info, nproc, services (compose config --services), healthy (/health,
 // pas als compose up --no-build van de app liep: app-up), vol-status en leader
-// (de master van SeaweedFS), arr-running. Een paar laten een stap wachten of
+// (de master van SeaweedFS), fs-conf, weed-fails en weed-noapply (weed
+// shell, zie weedStub), arr-running. Een paar laten een stap wachten of
 // iets doen: app-blocks (compose up van de app loopt tot app-stop), app-crash
 // (compose up van de app stopt meteen met 1), koppel-blocks (arr-koppel
 // wacht op koppel-go), arrup-blocks (up -d van qBittorrent en Prowlarr wacht
 // op arrup-go), health-drops-vip en koppel-drops-vip (die stap neemt het VIP
 // weg). Elk nep-commando schrijft zijn argumenten in log.
+// weedStub is weed shell: het schrijft zijn invoer in weed-in en doet
+// fs.configure na op fs-conf (een regel per map: "map collectie replicatie",
+// - voor leeg), met de JSON van fs.configure zoals protojson die schrijft
+// (wisselend aantal spaties na de dubbele punt). Met weed-fails faalt het
+// zonder uitvoer (geen master of filer), met weed-noapply schrijft
+// -apply niets.
+const weedStub = `echo "weed $*" >> "$CF_TEST_DIR/log"
+if [ -f "$CF_TEST_DIR/weed-fails" ]; then cat >/dev/null; echo "error: no filer" >&2; exit 1; fi
+conf=$CF_TEST_DIR/fs-conf
+touch "$conf"
+tee -a "$CF_TEST_DIR/weed-in" | while read -r cmd args; do
+  [ "$cmd" = fs.configure ] || continue
+  if [ -n "$args" ]; then
+    p=-; c=-; r=-
+    for a in $args; do case $a in
+      -locationPrefix=*) p=${a#*=};; -collection=*) c=${a#*=};; -replication=*) r=${a#*=};; esac; done
+    if [ ! -f "$CF_TEST_DIR/weed-noapply" ]; then
+      grep -v "^$p " "$conf" > "$conf.new"; echo "$p $c $r" >> "$conf.new"; mv "$conf.new" "$conf"
+    fi
+  fi
+  printf '{\n  "version":  0,\n  "locations":  ['
+  sep=""
+  while read -r p c r; do
+    [ "$c" = - ] && c=""; [ "$r" = - ] && r=""
+    printf '%s\n    {\n      "locationPrefix":  "%s",\n      "collection": "%s",\n      "replication":  "%s",\n      "ttl":  "",\n      "diskType":  "",\n      "readOnly":  false\n    }' "$sep" "$p" "$c" "$r"
+    sep=,
+  done < "$conf"
+  printf '\n  ]\n}\n\n'
+done`
+
 type mpNode struct {
 	t           *testing.T
 	dir, script string
@@ -220,7 +252,7 @@ while case "$1" in --*) true;; *) false;; esac; do shift; done; exec "$@"`,
 */cluster/status*) [ -f "$CF_TEST_DIR/leader" ] && echo '{"IsLeader":true}';;
 *) exit 1;;
 esac`,
-		"weed": `echo "weed $*" >> "$CF_TEST_DIR/log"; cat >> "$CF_TEST_DIR/weed-in"`,
+		"weed": weedStub,
 		"pg_dump": `echo "pg_dump $* PGPASSWORD=$PGPASSWORD" >> "$CF_TEST_DIR/log"
 while [ $# -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done`,
 		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
@@ -833,12 +865,197 @@ func TestMediaPlatformArr(t *testing.T) {
 	}
 }
 
-// TestMediaPlatformBlobSplit: aan zet PLATFORM_BLOB_SPLIT=true in platform.env.
+// TestMediaPlatformBlobSplit: aan zet PLATFORM_BLOB_SPLIT=true in platform.env,
+// en PLATFORM_BLOB_DEFAULT_COPIES volgt de replicatie (001 is 2, 002 is 3).
 func TestMediaPlatformBlobSplit(t *testing.T) {
-	tpl, c := mpContext(t, map[string]any{"blob_split": true})
+	tpl, c := mpContext(t, map[string]any{"blob_split": true, "replication": "002"})
 	files, _ := npmFiles(t, tpl, c)
-	if env := files["/etc/clusterforge/platform.env"]; !strings.Contains(env, "\nPLATFORM_BLOB_SPLIT=true\n") || !strings.Contains(env, "\nARR=uit\n") {
+	env := files["/etc/clusterforge/platform.env"]
+	for _, w := range []string{"\nPLATFORM_BLOB_SPLIT=true\n", "\nPLATFORM_BLOB_DEFAULT_COPIES=3\n", "\nARR=uit\n"} {
+		if !strings.Contains(env, w) {
+			t.Errorf("platform.env mist %q:\n%s", w, env)
+		}
+	}
+	if strings.Count(env, "PLATFORM_BLOB_DEFAULT_COPIES=") != 1 {
 		t.Errorf("platform.env:\n%s", env)
+	}
+}
+
+// TestMediaPlatformFingerprintCopies: een ander aantal kopieën van de
+// standaard (platform.env) telt als een wijziging, zodat restart-if-changed
+// het platform herstart.
+func TestMediaPlatformFingerprintCopies(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	n.set(map[string]*string{"vip": on(""), "mounted": on(""), "active-cf-platform": on("")})
+	if out, err := n.run("up"); err != nil {
+		t.Fatalf("up: %v\n%s", err, out)
+	}
+	if out, err := n.run("unchanged"); err != nil {
+		t.Fatalf("unchanged na up: %v %s", err, out)
+	}
+	envPath := filepath.Join(n.dir, "etc/platform.env")
+	env, err := os.ReadFile(envPath)
+	must(t, err)
+	if !strings.Contains(string(env), "\nPLATFORM_BLOB_DEFAULT_COPIES=2\n") {
+		t.Fatalf("platform.env:\n%s", env)
+	}
+	must(t, os.WriteFile(envPath, []byte(strings.Replace(string(env), "PLATFORM_BLOB_DEFAULT_COPIES=2", "PLATFORM_BLOB_DEFAULT_COPIES=3", 1)), 0o600))
+	if _, err := n.run("unchanged"); err == nil {
+		t.Error("unchanged na een ander aantal kopieën")
+	}
+}
+
+// mpStatus is de stand die status --stil schreef, als id -> check.
+func (n *mpNode) mpStatus() map[string]map[string]any {
+	n.t.Helper()
+	if out, err := n.run("status", "--stil"); err != nil {
+		n.t.Fatalf("status: %v %s", err, out)
+	}
+	b, err := os.ReadFile(filepath.Join(n.dir, "varlib/app-status/media-platform.json"))
+	must(n.t, err)
+	var st struct {
+		Checks []map[string]any `json:"checks"`
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		n.t.Fatalf("status: %v\n%s", err, b)
+	}
+	checks := map[string]map[string]any{}
+	for _, c := range st.Checks {
+		checks[c["id"].(string)] = c
+	}
+	return checks
+}
+
+// TestMediaPlatformMapregels: met kopieën per bibliotheek aan zet
+// platform-ctl.sh de regels voor /blobs-r1/ tot /blobs-r3/ in SeaweedFS
+// (fs.configure, onder lock), alleen wat ontbreekt of anders is, en laat het
+// een regel voor /blobs-media/ staan. Uit doet het niets. up start ook als
+// het niet lukt; status meldt het (amber) op de node met het VIP.
+func TestMediaPlatformMapregels(t *testing.T) {
+	good := "/blobs-r1/ r1 000\n/blobs-r2/ r2 001\n/blobs-r3/ r3 002\n"
+	weedIn := func(n *mpNode) string {
+		b, _ := os.ReadFile(filepath.Join(n.dir, "weed-in"))
+		return string(b)
+	}
+
+	// Uit (standaard): geen weed shell, ook niet bij up en status.
+	tpl, c := mpContext(t, map[string]any{"replication": "002"})
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	must(t, os.WriteFile(filepath.Join(n.dir, "data/.cf-platform-active"), []byte("x"), 0o644))
+	n.set(map[string]*string{"vip": on(""), "mounted": on(""), "fs-conf": on("/blobs-media/ media 001\n")})
+	if out, err := n.run("mapregels"); err != nil || !strings.Contains(out, "staan uit") {
+		t.Errorf("mapregels uit: %v %s", err, out)
+	}
+	if out, err := n.run("mapregels", "--check"); err != nil {
+		t.Errorf("--check uit: %v %s", err, out)
+	}
+	if out, err := n.run("up"); err != nil {
+		t.Fatalf("up uit: %v %s", err, out)
+	}
+	if _, ok := n.mpStatus()["mapregels"]; ok {
+		t.Error("status met de regels per map terwijl het uit staat")
+	}
+	if strings.Contains(n.log(), "weed shell") || weedIn(n) != "" {
+		t.Errorf("weed shell terwijl het uit staat: %s %s", n.log(), weedIn(n))
+	}
+
+	// Aan: r1 ontbreekt, r2 staat op een andere replicatie, r3 klopt al.
+	tpl, c = mpContext(t, map[string]any{"replication": "002", "blob_split": true})
+	files, _ = npmFiles(t, tpl, c)
+	n = newMPNode(t, files)
+	must(t, os.WriteFile(filepath.Join(n.dir, "data/.cf-platform-active"), []byte("x"), 0o644))
+	fsConf := filepath.Join(n.dir, "fs-conf")
+	n.set(map[string]*string{"vip": on(""), "mounted": on(""),
+		"fs-conf": on("/blobs-media/ media 001\n/blobs-r2/ r2 002\n/blobs-r3/ r3 002\n")})
+	if _, err := n.run("mapregels", "--check"); err == nil {
+		t.Error("--check: r1 ontbreekt en r2 is anders")
+	}
+	st := n.mpStatus()["mapregels"]
+	if st == nil || st["ok"] != false || st["severity"] != "amber" ||
+		!strings.Contains(st["detail"].(string), "/blobs-r1/, /blobs-r2/; platform-ctl.sh mapregels") {
+		t.Errorf("status: %v", st)
+	}
+	if strings.Contains(weedIn(n), "lock") || strings.Contains(weedIn(n), "-apply") {
+		t.Errorf("--check en status schreven: %s", weedIn(n))
+	}
+	n.set(map[string]*string{"weed-in": nil})
+	out, err := n.run("mapregels")
+	if err != nil || !strings.Contains(out, "Regels per map zetten: /blobs-r1/ (collectie r1, replicatie 000), /blobs-r2/ (collectie r2, replicatie 001)") ||
+		!strings.Contains(out, "staan goed") {
+		t.Fatalf("mapregels: %v\n%s", err, out)
+	}
+	if want := "fs.configure\nlock\nfs.configure -locationPrefix=/blobs-r1/ -collection=r1 -replication=000 -apply\n" +
+		"fs.configure -locationPrefix=/blobs-r2/ -collection=r2 -replication=001 -apply\nunlock\nfs.configure\n"; weedIn(n) != want {
+		t.Errorf("weed shell:\n%s", weedIn(n))
+	}
+	if !strings.Contains(n.log(), "weed shell -master=127.0.0.1:9333") {
+		t.Errorf("weed: %s", n.log())
+	}
+	conf, _ := os.ReadFile(fsConf)
+	for _, w := range []string{"/blobs-media/ media 001\n", "/blobs-r1/ r1 000\n", "/blobs-r2/ r2 001\n", "/blobs-r3/ r3 002\n"} {
+		if !strings.Contains(string(conf), w) {
+			t.Errorf("fs-conf mist %q:\n%s", w, conf)
+		}
+	}
+	// Alles goed: niets meer te schrijven.
+	n.set(map[string]*string{"weed-in": nil})
+	if out, err := n.run("mapregels", "--check"); err != nil {
+		t.Errorf("--check na mapregels: %v %s", err, out)
+	}
+	if out, err := n.run("mapregels"); err != nil || !strings.Contains(out, "staan goed") {
+		t.Errorf("mapregels opnieuw: %v %s", err, out)
+	}
+	if weedIn(n) != "fs.configure\nfs.configure\n" {
+		t.Errorf("weed shell schreef opnieuw:\n%s", weedIn(n))
+	}
+	if st := n.mpStatus()["mapregels"]; st == nil || st["ok"] != true {
+		t.Errorf("status: %v", st)
+	}
+
+	// up zet ze vóór het platform start.
+	n.set(map[string]*string{"fs-conf": on(""), "weed-in": nil})
+	out, err = n.run("up")
+	if err != nil || !strings.Contains(out, "Regels per map zetten") {
+		t.Fatalf("up: %v\n%s", err, out)
+	}
+	if conf, _ := os.ReadFile(fsConf); string(conf) != good {
+		t.Errorf("fs-conf na up:\n%s", conf)
+	}
+	if l := n.log(); !strings.Contains(l, " up --no-build --remove-orphans\n") || strings.Index(l, "weed shell") > strings.Index(l, "docker compose") {
+		t.Errorf("up: %s", l)
+	}
+
+	// -apply schrijft niets: mapregels zegt het, up start toch.
+	n.set(map[string]*string{"fs-conf": on(""), "weed-noapply": on("")})
+	if out, err := n.run("mapregels"); err == nil || !strings.Contains(out, "staan nog niet goed: /blobs-r1/, /blobs-r2/, /blobs-r3/") {
+		t.Errorf("mapregels zonder apply: %v\n%s", err, out)
+	}
+	n.set(map[string]*string{"weed-noapply": nil})
+
+	// weed shell faalt (geen master of filer): een waarschuwing, en up start toch.
+	n.set(map[string]*string{"weed-fails": on("")})
+	if out, err := n.run("mapregels"); err == nil || !strings.Contains(out, "Let op: kon de regels per map van SeaweedFS niet lezen") {
+		t.Errorf("mapregels zonder weed: %v\n%s", err, out)
+	}
+	if _, err := n.run("mapregels", "--check"); err == nil {
+		t.Error("--check zonder weed")
+	}
+	out, err = n.run("up")
+	if err != nil || !strings.Contains(out, "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch") ||
+		!strings.Contains(n.log(), " up --no-build --remove-orphans\n") {
+		t.Errorf("up zonder weed: %v\n%s\n%s", err, out, n.log())
+	}
+	if st := n.mpStatus()["mapregels"]; st == nil || st["ok"] != false || st["severity"] != "amber" ||
+		!strings.Contains(st["detail"].(string), "niet te lezen") {
+		t.Errorf("status zonder weed: %v", st)
+	}
+	// Een node zonder het VIP meldt het niet (de regels gelden voor het cluster).
+	n.set(map[string]*string{"vip": nil})
+	if _, ok := n.mpStatus()["mapregels"]; ok {
+		t.Error("status op een node zonder VIP met de regels per map")
 	}
 }
 
@@ -868,8 +1085,9 @@ func volStatus(t *testing.T, pretty bool, nodes map[string][]any) string {
 }
 
 // TestMediaPlatformReplicatie: de replicatie van ClusterForge geldt alleen
-// voor de volumes zonder collectie; collectie media (films en series op 2
-// kopieën) blijft zoals ze is, en de controle wordt er niet rood van.
+// voor de volumes zonder collectie; de collecties van de kopieën per
+// bibliotheek (r1, r2) en de oude collectie media van fase 11 blijven zoals
+// ze zijn, en de controle wordt er niet rood van.
 func TestMediaPlatformReplicatie(t *testing.T) {
 	tpl, c := mpContext(t, map[string]any{"replication": "002"})
 	files, _ := npmFiles(t, tpl, c)
@@ -883,7 +1101,8 @@ func TestMediaPlatformReplicatie(t *testing.T) {
 	nodes := func(two int) map[string][]any {
 		return map[string][]any{
 			"192.168.10.146:8081": {vol{Id: 1, ReplicaPlacement: map[string]int{"node": 2}, Ttl: map[string]int{"Count": 0, "Unit": 0}},
-				vol{Id: 2, ReplicaPlacement: map[string]int{"node": two}}, vol{Id: 3, ReplicaPlacement: map[string]int{"node": 1}, Collection: "media"}},
+				vol{Id: 2, ReplicaPlacement: map[string]int{"node": two}}, vol{Id: 3, ReplicaPlacement: map[string]int{"node": 1}, Collection: "media"},
+				vol{Id: 6, ReplicaPlacement: map[string]int{"node": 1}, Collection: "r2"}, vol{Id: 7, ReplicaPlacement: map[string]int{}, Collection: "r1"}},
 			"192.168.10.147:8081": {media(3), plain(1, 2), plain(5, two), media(4)},
 			"192.168.10.148:8081": {plain(1, 2), media(4), plain(5, two)},
 		}

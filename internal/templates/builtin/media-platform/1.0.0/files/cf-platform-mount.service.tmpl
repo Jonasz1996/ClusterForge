@@ -10,7 +10,7 @@ After=cf-seaweedfs.service
 # komt pas als PostgreSQL er is, en dat zet ClusterForge na de uitrol. Zo
 # geldt de mount meteen als gestart en houdt hij de uitrol niet tegen.
 # Geen -replication: dat zou winnen van elke regel per map van de filer
-# (fs.configure, zoals blobs-media op 2 kopieën). Zonder kiest de filer: zijn
+# (fs.configure, zoals blobs-r2 op 2 kopieën). Zonder kiest de filer: zijn
 # regel voor de map, anders zijn standaard (de replicatie van ClusterForge).
 ExecStart=/bin/sh -c 'until curl -fsS -o /dev/null http://127.0.0.1:8888/; do sleep 5; done; exec /usr/local/bin/weed mount -filer=127.0.0.1:8888 -filer.path=/ -dir=/srv/platform-data -allowOthers -cacheDir=/var/cache/weed-mount'
 ExecStopPost=-/bin/fusermount3 -uz /srv/platform-data
