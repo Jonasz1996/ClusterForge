@@ -707,9 +707,12 @@ case "${1:-}" in
     geo --check >/dev/null 2>&1 || timeout 300 "$0" geo || true
     # De regels per map van SeaweedFS (kopieën per bibliotheek), vóór de
     # eerste ronde van het platform: niet fataal, en hoogstens drie minuten.
-    if split_on; then
-      timeout 180 "$0" mapregels ||
-        echo "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch, maar blobs-r1/ tot blobs-r3/ krijgen de standaard (platform-ctl.sh mapregels)" >&2
+    # Lukt het niet, dan start het platform zonder te verhuizen: een kopie
+    # in blobs-r2/ zonder regel kreeg de standaard en wordt later niet
+    # opnieuw geschreven. De omgeving wint van --env-file in compose.
+    if split_on && ! timeout 180 "$0" mapregels; then
+      echo "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch, maar verhuist niets naar blobs-r1/ tot blobs-r3/ tot de regels er zijn (platform-ctl.sh mapregels, dan systemctl restart cf-platform)" >&2
+      export PLATFORM_BLOB_SPLIT=false
     fi
     fingerprint > "$HASH"
     limits_note

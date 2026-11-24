@@ -257,7 +257,7 @@ esac`,
 		"weed": weedStub,
 		"pg_dump": `echo "pg_dump $* PGPASSWORD=$PGPASSWORD" >> "$CF_TEST_DIR/log"
 while [ $# -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done`,
-		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
+		"docker": `echo "docker $*${PLATFORM_BLOB_SPLIT:+ [PLATFORM_BLOB_SPLIT=$PLATFORM_BLOB_SPLIT]}" >> "$CF_TEST_DIR/log"
 w() { i=0; while [ ! -f "$CF_TEST_DIR/$1" ] && [ $i -lt 400 ]; do ` + realSleep + ` 0.025; i=$((i + 1)); done; }
 case "$1" in
 info) cat "$CF_TEST_DIR/docker-info" 2>/dev/null;;
@@ -1072,8 +1072,9 @@ func TestMediaPlatformMapregels(t *testing.T) {
 		t.Error("--check zonder weed")
 	}
 	out, err = n.run("up")
-	if err != nil || !strings.Contains(out, "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch") ||
-		!strings.Contains(n.log(), " up --no-build --remove-orphans\n") {
+	// Zonder regels start het platform, maar zonder te verhuizen
+	if err != nil || !strings.Contains(out, "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch, maar verhuist niets") ||
+		!strings.Contains(n.log(), " up --no-build --remove-orphans [PLATFORM_BLOB_SPLIT=false]\n") {
 		t.Errorf("up zonder weed: %v\n%s\n%s", err, out, n.log())
 	}
 	if st := n.mpStatus()["mapregels"]; st == nil || st["ok"] != false || st["severity"] != "amber" ||
