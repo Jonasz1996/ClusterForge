@@ -406,6 +406,11 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Put("/resources/settings", s.resourcesSettingsPut)
 		api.With(s.requireSession).Get("/nodes/{nodeId}/pentest", s.pentestGet)
 		api.With(s.requireSession).Put("/nodes/{nodeId}/pentest", s.pentestSet)
+		// Pentest-inventaris voor de orchestrator, achter een los alleen-lezen
+		// API-token (cfa_) i.p.v. de sessiecookie of de cfi_-importsleutel.
+		// Least-privilege: enkel lezen (requireAPIToken dwingt GET-only af),
+		// apart in te trekken, los van de import/schrijfsleutel.
+		api.With(s.requireAPIToken).Get("/pentest/nodes", s.pentestNodesAPI)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
 		api.With(s.requireSession).Put("/upkeep/scopes/{scope}", s.upkeepSetPolicy)
 		api.With(s.requireSession).Post("/upkeep/scopes/{scope}/start", s.upkeepStart)
