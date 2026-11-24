@@ -169,12 +169,14 @@ func TestMediaPlatformSyncs(t *testing.T) {
 // - voor leeg), met de JSON van fs.configure zoals protojson die schrijft
 // (wisselend aantal spaties na de dubbele punt). Met weed-fails faalt het
 // zonder uitvoer (geen master of filer), met weed-noapply schrijft
-// -apply niets.
+// -apply niets. Met weed-locked heeft een ander het slot (replicatie --nu):
+// lock komt dan niet terug, dus wat erna komt gebeurt niet.
 const weedStub = `echo "weed $*" >> "$CF_TEST_DIR/log"
 if [ -f "$CF_TEST_DIR/weed-fails" ]; then cat >/dev/null; echo "error: no filer" >&2; exit 1; fi
 conf=$CF_TEST_DIR/fs-conf
 touch "$conf"
 tee -a "$CF_TEST_DIR/weed-in" | while read -r cmd args; do
+  [ "$cmd" = lock ] && [ -f "$CF_TEST_DIR/weed-locked" ] && exit 1
   [ "$cmd" = fs.configure ] || continue
   if [ -n "$args" ]; then
     p=-; c=-; r=-
@@ -879,6 +881,20 @@ func TestMediaPlatformBlobSplit(t *testing.T) {
 	if strings.Count(env, "PLATFORM_BLOB_DEFAULT_COPIES=") != 1 {
 		t.Errorf("platform.env:\n%s", env)
 	}
+	// Fase 11 tot 0.8.2 negeert PLATFORM_BLOB_SPLIT niet: films en series gaan
+	// naar blobs-media/, en die regel zet ClusterForge niet. Dat zegt de uitleg.
+	if !strings.Contains(env, "fase 11 tot 0.8.2 kent alleen PLATFORM_BLOB_SPLIT") {
+		t.Errorf("platform.env zegt niet wat fase 11 tot 0.8.2 doet:\n%s", env)
+	}
+	help := ""
+	for _, p := range tpl.Params {
+		if p.Name == "blob_split" {
+			help = p.Help
+		}
+	}
+	if !strings.Contains(help, "blobs-media/") || !strings.Contains(help, "zet ClusterForge niet") {
+		t.Errorf("uitleg van blob_split zegt niet dat de regel voor blobs-media/ ontbreekt: %q", help)
+	}
 }
 
 // TestMediaPlatformFingerprintCopies: een ander aantal kopieën van de
@@ -930,8 +946,8 @@ func (n *mpNode) mpStatus() map[string]map[string]any {
 
 // TestMediaPlatformMapregels: met kopieën per bibliotheek aan zet
 // platform-ctl.sh de regels voor /blobs-r1/ tot /blobs-r3/ in SeaweedFS
-// (fs.configure, onder lock), alleen wat ontbreekt of anders is, en laat het
-// een regel voor /blobs-media/ staan. Uit doet het niets. up start ook als
+// (fs.configure, zonder lock: dat wacht op replicatie --nu), alleen wat
+// ontbreekt of anders is, en laat het een regel voor /blobs-media/ staan. Uit doet het niets. up start ook als
 // het niet lukt; status meldt het (amber) op de node met het VIP.
 func TestMediaPlatformMapregels(t *testing.T) {
 	good := "/blobs-r1/ r1 000\n/blobs-r2/ r2 001\n/blobs-r3/ r3 002\n"
@@ -987,8 +1003,8 @@ func TestMediaPlatformMapregels(t *testing.T) {
 		!strings.Contains(out, "staan goed") {
 		t.Fatalf("mapregels: %v\n%s", err, out)
 	}
-	if want := "fs.configure\nlock\nfs.configure -locationPrefix=/blobs-r1/ -collection=r1 -replication=000 -apply\n" +
-		"fs.configure -locationPrefix=/blobs-r2/ -collection=r2 -replication=001 -apply\nunlock\nfs.configure\n"; weedIn(n) != want {
+	if want := "fs.configure\nfs.configure -locationPrefix=/blobs-r1/ -collection=r1 -replication=000 -apply\n" +
+		"fs.configure -locationPrefix=/blobs-r2/ -collection=r2 -replication=001 -apply\nfs.configure\n"; weedIn(n) != want {
 		t.Errorf("weed shell:\n%s", weedIn(n))
 	}
 	if !strings.Contains(n.log(), "weed shell -master=127.0.0.1:9333") {
@@ -1011,9 +1027,21 @@ func TestMediaPlatformMapregels(t *testing.T) {
 	if weedIn(n) != "fs.configure\nfs.configure\n" {
 		t.Errorf("weed shell schreef opnieuw:\n%s", weedIn(n))
 	}
-	if st := n.mpStatus()["mapregels"]; st == nil || st["ok"] != true {
+	if st := n.mpStatus()["mapregels"]; st == nil || st["ok"] != true ||
+		st["detail"] != "/blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed" {
 		t.Errorf("status: %v", st)
 	}
+
+	// replicatie --nu heeft het slot van weed shell (uren): mapregels wacht
+	// er niet op, fs.configure vraagt er niet om.
+	n.set(map[string]*string{"fs-conf": on("/blobs-r3/ r3 002\n"), "weed-locked": on(""), "weed-in": nil})
+	if out, err := n.run("mapregels"); err != nil || !strings.Contains(out, "staan goed") {
+		t.Errorf("mapregels terwijl een ander het slot heeft: %v\n%s", err, out)
+	}
+	if conf, _ := os.ReadFile(fsConf); string(conf) != "/blobs-r3/ r3 002\n/blobs-r1/ r1 000\n/blobs-r2/ r2 001\n" {
+		t.Errorf("fs-conf met het slot bij een ander:\n%s", conf)
+	}
+	n.set(map[string]*string{"weed-locked": nil})
 
 	// up zet ze vóór het platform start.
 	n.set(map[string]*string{"fs-conf": on(""), "weed-in": nil})

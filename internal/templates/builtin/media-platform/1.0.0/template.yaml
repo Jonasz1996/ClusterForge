@@ -65,8 +65,10 @@ params:
       blobs-r1/, blobs-r2/ of blobs-r3/ (PLATFORM_BLOB_SPLIT). Aan zet ook de
       regels voor die mappen in SeaweedFS (fs.configure, collecties r1 tot
       r3), bij elke start op de node met het VIP. Uit verhuist niets en haalt
-      geen regels weg. Een versie vóór 0.8.3 zet met aan films en series in
-      blobs-media/ (fase 11).
+      geen regels weg. Een versie vóór 0.8.3 (vanaf fase 11) zet met aan films
+      en series in blobs-media/; de regel voor die map (fs.configure, collectie
+      media) zet ClusterForge niet, en de controle van de regels per map kijkt
+      er niet naar: zet hem zelf, of zet dit pas aan vanaf 0.8.3.
     default: false
   - name: seaweedfs_image
     type: string

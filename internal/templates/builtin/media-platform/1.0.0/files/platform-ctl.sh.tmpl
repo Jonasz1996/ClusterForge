@@ -548,8 +548,9 @@ replicatie() {
 # cluster) geeft elke map een eigen collectie en replicatie; de mount
 # gebruikt -filer.path=/, dus $DATA/blobs-r2 is /blobs-r2/ in de filer.
 # mapregels schrijft een regel alleen als hij ontbreekt of een andere
-# collectie of replicatie heeft, onder het slot van weed shell. Dat slot
-# wacht op wie het heeft (replicatie --nu kan uren duren), dus alles met een
+# collectie of replicatie heeft, en leest daarna na wat er staat. Zonder het
+# slot van weed shell: fs.configure vraagt er niet om, en lock wacht op wie
+# het heeft (replicatie --nu kan uren duren). weed shell toch altijd met een
 # timeout. Met PLATFORM_BLOB_SPLIT uit doet het niets en haalt het niets weg;
 # een regel voor /blobs-media/ (fase 11) laat het altijd zoals hij is.
 # --check: staan ze er alle drie goed (of staat het uit)?
@@ -593,11 +594,9 @@ mapregels() {
   fi
   [ "${1:-}" = --check ] && return 1
   say "Regels per map zetten: $(printf '%s\n' "$mis" | awk '{ printf "%s%s (collectie %s, replicatie %s)", (NR > 1 ? ", " : ""), $1, $2, $3 }')"
-  { echo lock
-    printf '%s\n' "$mis" | while read -r p c r; do
-      echo "fs.configure -locationPrefix=$p -collection=$c -replication=$r -apply"
-    done
-    echo unlock; } | weed_shell 90 >/dev/null
+  printf '%s\n' "$mis" | while read -r p c r; do
+    echo "fs.configure -locationPrefix=$p -collection=$c -replication=$r -apply"
+  done | weed_shell 90 >/dev/null
   # Nakijken wat er nu staat: weed shell geeft niet bij elke fout een code.
   mis=$(mapregels_mis 30) || {
     echo "Let op: kon de regels per map van SeaweedFS na het zetten niet lezen" >&2; return 1; }
@@ -679,7 +678,7 @@ status() {
     if split_on; then
       if mis=$(mapregels_mis 20); then
         chk mapregels "Regels per map (kopieën per bibliotheek)" "$([ -z "$mis" ] && echo 1 || echo 0)" amber \
-          "$([ -z "$mis" ] && echo "blobs-r1, -r2 en -r3 staan goed" || echo "ontbreken of anders: $(printf '%s\n' "$mis" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $1 }'); platform-ctl.sh mapregels")"
+          "$([ -z "$mis" ] && echo "/blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed" || echo "ontbreken of anders: $(printf '%s\n' "$mis" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $1 }'); platform-ctl.sh mapregels")"
       else
         chk mapregels "Regels per map (kopieën per bibliotheek)" 0 amber "niet te lezen (weed shell, fs.configure)"
       fi
