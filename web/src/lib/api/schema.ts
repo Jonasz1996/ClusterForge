@@ -8479,6 +8479,8 @@ export interface components {
             /** @description Leeg = alle clusters */
             cluster_ids: string[];
             cluster_names: string[];
+            /** @description Leeg = alle lees-routes; anders alleen de genoemde capabilities */
+            scopes: ("pentest" | "dashboard")[];
             /** Format: date-time */
             expires_at: string | null;
             /** Format: date-time */
@@ -8492,6 +8494,8 @@ export interface components {
             name: string;
             /** @description Leeg of weg = alle clusters */
             cluster_ids?: string[];
+            /** @description Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege. */
+            scopes?: ("pentest" | "dashboard")[];
             /** @description 0 of weg = verloopt nooit */
             ttl_days?: number;
         };
