@@ -9241,7 +9241,7 @@ components:
         filter: { type: object, additionalProperties: true }
     ApiToken:
       type: object
-      required: [id, name, prefix, cluster_ids, cluster_names, expires_at, created_at, created_by, last_used_at, last_used_ip]
+      required: [id, name, prefix, cluster_ids, cluster_names, scopes, expires_at, created_at, created_by, last_used_at, last_used_ip]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -9253,6 +9253,10 @@ components:
         cluster_names:
           type: array
           items: { type: string }
+        scopes:
+          type: array
+          items: { type: string, enum: [pentest, dashboard] }
+          description: Leeg = alle lees-routes; anders alleen de genoemde capabilities
         expires_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
@@ -9267,6 +9271,14 @@ components:
           type: array
           items: { type: string, format: uuid }
           description: Leeg of weg = alle clusters
+        scopes:
+          type: array
+          items: { type: string, enum: [pentest, dashboard] }
+          description: >-
+            Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het
+            token alleen die capabilities lezen: 'pentest' = enkel de
+            pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de
+            dashboard-API. Least-privilege.
         ttl_days:
           type: integer
           minimum: 0

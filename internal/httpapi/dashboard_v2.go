@@ -37,6 +37,9 @@ const MaxTileFields = 8
 
 func (s *Server) dashboardV2Routes(r chi.Router) {
 	r.Use(s.requireAPIToken)
+	// Zelfde scope-regel als v1: 'dashboard' voor gescopte tokens, alles voor
+	// ongescopte (backward compatible).
+	r.Use(s.requireScope("dashboard", true))
 	r.Get("/", s.dashV2Overview)
 	r.Get("/apps", s.dashV2Apps)
 	r.Get("/apps/{app}", s.dashV2App)

@@ -409,8 +409,10 @@ func (s *Server) Handler() http.Handler {
 		// Pentest-inventaris voor de orchestrator, achter een los alleen-lezen
 		// API-token (cfa_) i.p.v. de sessiecookie of de cfi_-importsleutel.
 		// Least-privilege: enkel lezen (requireAPIToken dwingt GET-only af),
-		// apart in te trekken, los van de import/schrijfsleutel.
-		api.With(s.requireAPIToken).Get("/pentest/nodes", s.pentestNodesAPI)
+		// apart in te trekken, los van de import/schrijfsleutel. De scope
+		// 'pentest' is verplicht (allowUnscoped=false): zo kan geen enkel
+		// ongescoped of dashboard-token de inventaris lezen.
+		api.With(s.requireAPIToken, s.requireScope("pentest", false)).Get("/pentest/nodes", s.pentestNodesAPI)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
 		api.With(s.requireSession).Put("/upkeep/scopes/{scope}", s.upkeepSetPolicy)
 		api.With(s.requireSession).Post("/upkeep/scopes/{scope}/start", s.upkeepStart)

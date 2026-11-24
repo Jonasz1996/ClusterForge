@@ -421,6 +421,7 @@ type ApiToken struct {
 	CreatedBy  *uuid.UUID
 	LastUsedAt *time.Time
 	LastUsedIp string
+	Scopes     []string
 }
 
 type AssistantConversation struct {

@@ -135,6 +135,42 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for ApiTokenScopes.
+const (
+	ApiTokenScopesDashboard ApiTokenScopes = "dashboard"
+	ApiTokenScopesPentest   ApiTokenScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenScopes enum.
+func (e ApiTokenScopes) Valid() bool {
+	switch e {
+	case ApiTokenScopesDashboard:
+		return true
+	case ApiTokenScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiTokenInputScopes.
+const (
+	ApiTokenInputScopesDashboard ApiTokenInputScopes = "dashboard"
+	ApiTokenInputScopesPentest   ApiTokenInputScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenInputScopes enum.
+func (e ApiTokenInputScopes) Valid() bool {
+	switch e {
+	case ApiTokenInputScopesDashboard:
+		return true
+	case ApiTokenInputScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AppIssueTone.
 const (
 	AppIssueToneAmber AppIssueTone = "amber"
@@ -4877,7 +4913,13 @@ type ApiToken struct {
 
 	// Prefix Het begin van het token
 	Prefix string `json:"prefix"`
+
+	// Scopes Leeg = alle lees-routes; anders alleen de genoemde capabilities
+	Scopes []ApiTokenScopes `json:"scopes"`
 }
+
+// ApiTokenScopes defines model for ApiToken.Scopes.
+type ApiTokenScopes string
 
 // ApiTokenInput defines model for ApiTokenInput.
 type ApiTokenInput struct {
@@ -4885,9 +4927,15 @@ type ApiTokenInput struct {
 	ClusterIds *[]openapi_types.UUID `json:"cluster_ids,omitempty"`
 	Name       string                `json:"name"`
 
+	// Scopes Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege.
+	Scopes *[]ApiTokenInputScopes `json:"scopes,omitempty"`
+
 	// TtlDays 0 of weg = verloopt nooit
 	TtlDays *int `json:"ttl_days,omitempty"`
 }
+
+// ApiTokenInputScopes defines model for ApiTokenInput.Scopes.
+type ApiTokenInputScopes string
 
 // AppIssue defines model for AppIssue.
 type AppIssue struct {
