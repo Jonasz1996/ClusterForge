@@ -1,7 +1,8 @@
 #!/bin/sh
 # Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
 #
-#   platform-ctl.sh up | down        het platform starten of stoppen (cf-platform)
+#   platform-ctl.sh up | down        het platform starten (alleen met het VIP) of
+#                                    stoppen (cf-platform)
 #   platform-ctl.sh check            mag deze node het VIP hebben? (keepalived)
 #   platform-ctl.sh master|backup    keepalived: deze node kreeg of verloor het VIP
 #   platform-ctl.sh unchanged        draait het hier met de huidige code en instellingen?
@@ -14,10 +15,20 @@
 #                                    de modellen van gezichten en zoeken op beeld
 #   platform-ctl.sh geo [--check]    de bronnen van de plaatsnamen (gedeelde data)
 #   platform-ctl.sh replicatie [--check]
-#                                    bestaande volumes naar de replicatie van ClusterForge
+#                                    bestaande volumes (zonder collectie) naar de
+#                                    replicatie van ClusterForge
+#   platform-ctl.sh mapregels [--check]
+#                                    de regels per map van SeaweedFS voor de kopieën
+#                                    per bibliotheek (blobs-r1/ tot blobs-r3/)
+#   platform-ctl.sh sleutels-klaar   mag de sync de sleutels van gezichten van hier
+#                                    kopiëren en elders wissen? (voor de sync)
 #   platform-ctl.sh compose …        docker compose met de bestanden van het cluster
 #   platform-ctl.sh overstap proef|echt [datamap]
 #                                    van de single-node op deze machine naar het cluster
+#
+# Mediabeheer (fase 11, ARR=aan en een versie met compose.arr.yaml): up start
+# na de app ook qBittorrent en Prowlarr, down stopt ze; alleen op de node met
+# het VIP.
 #
 # Het cluster staat los van een single-node op dezelfde machine: eigen code
 # (/opt/cf-platform), image (cf-platform:local), project (cf-platform) en
@@ -44,13 +55,60 @@ SLEUTELS=$(env_get SLEUTELS_ROOT); SLEUTELS=${SLEUTELS:-/var/lib/cf-platform/sle
 BEELD_MAP=siglip2-b32-256
 # Draait deze versie met de analyse (gezichten en zoeken op beeld)?
 analyse_on() { [ "$(env_get ANALYSE)" = aan ] && [ -f "$SRC/compose.analyse.yaml" ]; }
+# Mediabeheer (fase 11): qBittorrent en Prowlarr, met ARR=aan en een versie
+# die compose.arr.yaml heeft. De downloads staan op deze node zelf.
+ARR_TORRENTS=/var/lib/cf-platform/torrents
+# arr_start mag starten zolang ARR_MAG er is (up zet het, down haalt het weg);
+# het starten zelf en het stoppen in down wachten op elkaar via ARR_LOCK.
+ARR_MAG=/run/cf-platform-arr.mag
+ARR_LOCK=/run/cf-platform-arr.lock
+arr_on() { [ "$(env_get ARR)" = aan ] && [ -f "$SRC/compose.arr.yaml" ]; }
+# Kan Docker hier geheugen- en cpu-grenzen zetten? Zonder die cgroups (een
+# LXC) start een container met grenzen niet; dan zonder (regel van install.sh).
+limits_ok() {
+  [ "$(docker info --format '{{"{{"}}.MemoryLimit{{"}}"}} {{"{{"}}.CPUCfsQuota{{"}}"}}' 2>/dev/null)" = "true true" ]
+}
+# Past een bestand met grenzen op deze node? Docker weigert een container met
+# meer cpus dan de node heeft (media vraagt er 3); dan blijft dat bestand weg.
+limits_fit() {
+  ncpu=$(nproc 2>/dev/null) || return 1
+  sed -n 's/^[[:space:]]*cpus:[[:space:]]*//p' "$1" | tr -d "\"'" |
+    awk -v n="$ncpu" '($1 + 0) > (n + 0) { bad = 1 } END { exit bad }'
+}
+limits_use() { [ -n "$limits" ] && [ -f "$1" ] && limits_fit "$1"; }
 compose() {
-  set -- -f /etc/clusterforge/platform-cluster.yaml "$@"
-  if analyse_on; then
-    set -- -f "$SRC/compose.analyse.yaml" -f /etc/clusterforge/platform-analyse.yaml "$@"
+  if arr_on; then
+    set -- -f "$SRC/compose.arr.yaml" -f /etc/clusterforge/platform-arr.yaml "$@"
   fi
+  set -- -f /etc/clusterforge/platform-cluster.yaml "$@"
+  limits=""; limits_ok && limits=1
+  if analyse_on; then
+    set -- -f /etc/clusterforge/platform-analyse.yaml "$@"
+    if limits_use "$SRC/compose.analyse-limits.yaml"; then
+      set -- -f "$SRC/compose.analyse-limits.yaml" "$@"
+    fi
+    set -- -f "$SRC/compose.analyse.yaml" "$@"
+  fi
+  # De grenzen van office en media (vanaf de versies die ze hebben).
+  for lim in media office; do
+    if limits_use "$SRC/compose.$lim-limits.yaml"; then
+      set -- -f "$SRC/compose.$lim-limits.yaml" "$@"
+    fi
+  done
   docker compose -p cf-platform --project-directory "$SRC" --env-file "$ENV" \
     -f "$SRC/compose.yaml" -f "$SRC/compose.office.yaml" -f "$SRC/compose.media.yaml" "$@"
+}
+# Voor up: zeggen welke grenzen niet op deze node passen.
+limits_note() {
+  limits_ok || return 0
+  set -- office media
+  if analyse_on; then set -- "$@" analyse; fi
+  for lim in "$@"; do
+    lf=$SRC/compose.$lim-limits.yaml
+    if [ -f "$lf" ] && ! limits_fit "$lf"; then
+      echo "Let op: ${lf##*/} vraagt meer cpu's dan deze node heeft ($(nproc)); $lim start zonder grenzen." >&2
+    fi
+  done
 }
 fingerprint() {
   { cat "$ENV" /etc/clusterforge/platform-cluster.yaml
@@ -58,6 +116,7 @@ fingerprint() {
       cat /etc/clusterforge/platform-analyse.yaml
       find "$MODELLEN" -path "$MODELLEN/.*" -prune -o -type f -printf '%P %s\n' 2>/dev/null | sort
     fi
+    if arr_on; then cat /etc/clusterforge/platform-arr.yaml; fi
     docker image inspect -f '{{"{{"}}.Id{{"}}"}}' cf-platform:local 2>/dev/null; } | sha256sum | cut -d' ' -f1
 }
 has_vip() { ip -o addr show | grep -q " $VIP/"; }
@@ -126,6 +185,21 @@ overstap() {
 # Een back-up van de database van het platform (pg_dump -Fc via het VIP van de
 # database), vóór elke herstart met een nieuwe versie: de app voert bij de
 # start zijn migraties zelf uit. De vijf nieuwste blijven staan.
+#
+# Zonder de rijen van de gezichten en de vectoren van beeld (de tabellen van
+# app.cli backup-wipe-tables, vanaf 0.8.2): die horen nooit in een kopie.
+# Kent de versie het commando niet, of draait het platform hier niet, dan de
+# vaste lijst van het platform (api/app/backup.py, WIPE).
+WIPE_TABLES="face_person face face_scan face_owner blob_embed"
+wipe_tables() {
+  list=""
+  if systemctl is-active --quiet cf-platform; then
+    list=$(compose exec -T platform python -m app.cli backup-wipe-tables </dev/null 2>/dev/null) || list=""
+    list=$(printf '%s\n' "$list" | grep -Ex '[a-z_][a-z0-9_]{0,62}')
+  fi
+  [ -n "$list" ] || list=$(echo "$WIPE_TABLES" | tr ' ' '\n')
+  printf '%s\n' "$list"
+}
 db_backup() {
   url=$(env_get PLATFORM_DATABASE_URL)
   rest=${url#*://}; cred=${rest%%@*}; hostdb=${rest#*@}
@@ -136,8 +210,11 @@ db_backup() {
   mkdir -p "$BACKUPS" && chmod 0700 "$BACKUPS"
   rev=$(cat /var/lib/clusterforge/platform-image.rev 2>/dev/null | cut -c1-12)
   out=$BACKUPS/platform-$(date +%Y%m%d-%H%M%S)-${rev:-onbekend}.dump
-  say "Back-up van de database $db naar $out"
-  PGPASSWORD=$pass pg_dump -Fc -h "$host" -p "$port" -U "$user" -d "$db" -f "$out.deel" &&
+  tables=$(wipe_tables)
+  set --
+  for t in $tables; do set -- "$@" "--exclude-table-data=$t"; done
+  say "Back-up van de database $db naar $out (zonder de rijen van $(printf '%s' "$tables" | tr '\n' ' '))"
+  PGPASSWORD=$pass pg_dump -Fc -h "$host" -p "$port" -U "$user" -d "$db" "$@" -f "$out.deel" &&
     [ -s "$out.deel" ] && mv "$out.deel" "$out" || { rm -f "$out.deel"; fail "back-up mislukt"; }
   ls -lh "$out"
   # shellcheck disable=SC2012
@@ -316,29 +393,131 @@ beeld() {
   fi
 }
 
+# --- sleutels van gezichten -------------------------------------------------
+# De sync platform-sleutels van ClusterForge zet de sleutels elke minuut van
+# de node met het VIP op de andere nodes, en wist daar wat hier niet (meer)
+# staat. Eerst deze controle (before van de sync); faalt ze, dan kopieert en
+# wist de sync niets. Alleen de node met het VIP, waar het platform draait,
+# met een echte sleutelmap (geen symlink) van uid 10001, en pas als het
+# platform zelf zegt dat elke sleutel die nodig is er staat en klopt
+# (app.cli sleutels-check, vanaf 0.8.2). Zo wist een lege of halve map na een
+# snelle failover nooit de sleutels elders. Een versie zonder sleutels-check
+# faalt hier: dan gebeurt er niets.
+#
+# ClusterForge draait de sync op elke node met een VIP van het cluster, ook op
+# de node met alleen het VIP van de database (de primary van PostgreSQL), en
+# kort na een failover of tijdens een stop draait het platform er niet. Daar
+# stuurt deze node niet: code 113 (SyncBeforeSkip van ClusterForge), niet 1.
+# ClusterForge telt die run als overgeslagen: niets gekopieerd of gewist, en
+# geen fout. 1 is een echte fout van de sleutels.
+stuurt_niet() { echo "Niets gekopieerd of gewist: $*" >&2; exit 113; }
+sleutels_klaar() {
+  has_vip || stuurt_niet "deze node heeft het VIP van het platform ($VIP) niet; alleen die node stuurt de sleutels (verwacht op de node met het VIP van de database)"
+  systemctl is-active --quiet cf-platform || stuurt_niet "het platform draait hier niet (cf-platform); de sleutels blijven zoals ze zijn (verwacht tijdens een start, stop of failover)"
+  for d in "${SLEUTELS%/*}" "$SLEUTELS"; do
+    [ ! -L "$d" ] && [ -d "$d" ] || fail "$d is geen gewone map; de sleutels blijven zoals ze zijn"
+  done
+  [ "$(stat -c %u -- "$SLEUTELS")" = 10001 ] || fail "$SLEUTELS is niet van uid 10001; de sleutels blijven zoals ze zijn"
+  compose exec -T platform python -m app.cli sleutels-check </dev/null ||
+    fail "sleutels-check van het platform is niet in orde (of deze versie kent het niet); niets gekopieerd of gewist"
+}
+
+# --- mediabeheer (fase 11) --------------------------------------------------
+# qBittorrent en Prowlarr draaien alleen op de node met het VIP, net als de
+# app, en nooit door Docker zelf herstart (platform-arr.yaml). Hun config
+# staat in DATA_ROOT/arr, op SeaweedFS; de downloads in $ARR_TORRENTS op
+# deze node: torrents schrijven veel kleine stukken door elkaar, en dat is
+# op de FUSE-mount traag. De app ziet die map als /data/import/torrents. Na
+# een failover mist qBittorrent op de nieuwe node de bestanden van een
+# lopende download (fout); de app haalt die dan weg en zoekt de titel
+# opnieuw. Wat al geïmporteerd is, staat op SeaweedFS.
+arr_dirs() {
+  [ -L "$ARR_TORRENTS" ] && fail "$ARR_TORRENTS is een symlink"
+  mkdir -p "$ARR_TORRENTS" && chown 10001:10001 "$ARR_TORRENTS" && chmod 0750 "$ARR_TORRENTS" || return 1
+  # Het mountpunt in de importmap, van het platform (uid 10001), niet van root.
+  [ -d "$DATA/import/torrents" ] || as_app mkdir -p "$DATA/import/torrents"
+}
+# Zodra de app antwoordt: arr-koppel zet de gebruiker van qBittorrent en de
+# sleutel van Prowlarr in hun config en in de app (vóór hun eerste start),
+# dan pas de twee containers. Op de achtergrond van up; elke stap kijkt of
+# het nog mag (arr_mag): up loopt nog, down is niet begonnen ($ARR_MAG) en
+# deze node heeft het VIP. Het starten houdt $ARR_LOCK vast; down wacht daarop
+# en stopt daarna wat er toch nog startte. Elke afloop meldt één regel
+# "Mediabeheer: …".
+arr_mag() { [ -f "$ARR_MAG" ] && kill -0 "$$" 2>/dev/null && has_vip; }
+ARR_STOPT="Mediabeheer: het platform stopt hier of deze node heeft het VIP niet meer"
+arr_start() {
+  i=0
+  until curl -fsS -o /dev/null --max-time 5 http://127.0.0.1:80/health; do
+    i=$((i + 1))
+    arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; return 1; }
+    if [ "$i" -gt 180 ]; then
+      echo "Mediabeheer: de app antwoordt niet; qBittorrent en Prowlarr starten niet" >&2
+      return 1
+    fi
+    sleep 5
+  done
+  arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; return 1; }
+  compose exec -T platform python -m app.cli arr-koppel </dev/null ||
+    { echo "Mediabeheer: koppelen lukte niet (app.cli arr-koppel); qBittorrent en Prowlarr starten niet" >&2; return 1; }
+  (
+    flock 9 || { echo "Mediabeheer: geen slot op $ARR_LOCK; qBittorrent en Prowlarr starten niet" >&2; exit 1; }
+    arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; exit 1; }
+    compose up -d --no-deps qbittorrent prowlarr </dev/null ||
+      { echo "Mediabeheer: qBittorrent of Prowlarr kon niet starten" >&2; exit 1; }
+    # Begon down of verdween het VIP terwijl ze startten: meteen weer weg.
+    arr_mag || { arr_stop; echo "$ARR_STOPT; qBittorrent en Prowlarr weer gestopt" >&2; exit 1; }
+    echo "Mediabeheer: qBittorrent en Prowlarr draaien (Prowlarr op http://$VIP:9696)"
+  ) 9>"$ARR_LOCK"
+}
+# qBittorrent en Prowlarr van dit cluster stoppen, ook als ARR intussen uit staat.
+arr_stop() {
+  for svc in qbittorrent prowlarr; do
+    ids=$(docker ps -q --filter label=com.docker.compose.project=cf-platform --filter "label=com.docker.compose.service=$svc")
+    # shellcheck disable=SC2086
+    [ -z "$ids" ] || docker stop $ids >/dev/null
+  done
+}
+
 # --- replicatie van SeaweedFS -----------------------------------------------
 # Verandert de replicatie in ClusterForge (Wijzigen, Replicatie), dan zet de
 # leider van de masters de bestaande volumes om en maakt hij de ontbrekende
 # kopieën (volume.fix.replication). Nieuwe volumes krijgen de nieuwe waarde
 # al van de master. --check: staan alle volumes al op de gewenste waarde, of
 # is deze node niet de leider?
+#
+# Alleen de volumes zonder collectie (de standaardcollectie, blobs/). Een
+# collectie heeft haar eigen regel: de kopieën per bibliotheek (platform
+# 0.8.3) staan in de collecties r1, r2 en r3 op 1, 2 en 3 kopieën (mapregels
+# hieronder), en een oude collectie media van fase 11 (blobs-media/) houdt
+# de hare; die blijven zoals ze zijn. Daarom per volume (-volumeId), niet met
+# -collectionPattern: wat een leeg patroon betekent, verschilt per versie van
+# SeaweedFS.
 REPLICATIE='{{ .params.replication }}'
 weed_leader() {
   curl -fsS --max-time 5 http://127.0.0.1:9333/cluster/status 2>/dev/null | grep -q '"IsLeader": *true'
 }
-volumes_placements() {
-  # De ReplicaPlacement van elk volume, als xyz, uit de volume server van elke node.
-  curl -fsS --max-time 20 http://127.0.0.1:9333/vol/status 2>/dev/null |
-    grep -o '"ReplicaPlacement": *{[^}]*}' |
-    awk '{ n = r = d = 0
-      if (match($0, /"(node|SameRackCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); n = v }
-      if (match($0, /"(rack|DiffRackCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); r = v }
-      if (match($0, /"(dc|DiffDataCenterCount)": *[0-9]+/)) { v = substr($0, RSTART, RLENGTH); sub(/.*: */, "", v); d = v }
-      print d r n }'
+volumes_default() {
+  # Elk volume zonder collectie als "id xyz" (xyz: zijn ReplicaPlacement), uit
+  # de volume server van elke node. Een volume is een object in een lijst; de
+  # objecten erin (ReplicaPlacement, Ttl) hebben geen lijsten, dus elk volume
+  # komt op een eigen regel, wat de volgorde van de velden ook is.
+  curl -fsS --max-time 20 http://127.0.0.1:9333/vol/status 2>/dev/null | tr -d '\n' |
+    sed 's/}[[:space:]]*,[[:space:]]*{/}\n{/g; s/\[[[:space:]]*{/[\n{/g' |
+    awk '/^[{]/ && /"Collection": *""/ && match($0, /"Id": *[0-9]+/) {
+      id = substr($0, RSTART, RLENGTH); sub(/.*: */, "", id)
+      if (!match($0, /"ReplicaPlacement": *[{][^}]*[}]/)) next
+      rp = substr($0, RSTART, RLENGTH); n = r = d = 0
+      if (match(rp, /"(node|SameRackCount)": *[0-9]+/)) { v = substr(rp, RSTART, RLENGTH); sub(/.*: */, "", v); n = v }
+      if (match(rp, /"(rack|DiffRackCount)": *[0-9]+/)) { v = substr(rp, RSTART, RLENGTH); sub(/.*: */, "", v); r = v }
+      if (match(rp, /"(dc|DiffDataCenterCount)": *[0-9]+/)) { v = substr(rp, RSTART, RLENGTH); sub(/.*: */, "", v); d = v }
+      print id, d r n }'
 }
+# De ids van de volumes zonder collectie die niet op $REPLICATIE staan.
+volumes_other() { volumes_default | awk -v want="$REPLICATIE" '$2 != want { print $1 }' | sort -un; }
 replicatie() {
   weed_leader || { [ "${1:-}" = --check ] && return 0; echo "Niet de leider van de masters; die zet de replicatie om."; return 0; }
-  other=$(volumes_placements | grep -vx "$REPLICATIE" | wc -l)
+  other=$(volumes_other | wc -l)
   if [ "${1:-}" = --check ]; then
     [ "$other" = 0 ] || systemctl is-active --quiet cf-platform-replicatie
     return $?
@@ -354,10 +533,78 @@ replicatie() {
     return 0
   fi
   say "$other volumes naar replicatie $REPLICATIE, dan de ontbrekende kopieën maken"
-  printf 'lock\nvolume.configure.replication -replication %s -collectionPattern *\nvolume.fix.replication\nunlock\n' "$REPLICATIE" |
-    /usr/local/bin/weed shell -master=127.0.0.1:9333
-  left=$(volumes_placements | grep -vx "$REPLICATIE" | wc -l)
+  { echo lock
+    for id in $(volumes_other); do echo "volume.configure.replication -volumeId $id -replication $REPLICATIE"; done
+    echo volume.fix.replication
+    echo unlock; } | /usr/local/bin/weed shell -master=127.0.0.1:9333
+  left=$(volumes_other | wc -l)
   echo "Nog $left volumes niet op $REPLICATIE"
+}
+
+# --- regels per map van SeaweedFS (kopieën per bibliotheek) -----------------
+# Platform 0.8.3 zet met PLATFORM_BLOB_SPLIT=true inhoud met een ander aantal
+# kopieën dan de standaard in blobs-r1/, blobs-r2/ en blobs-r3/ (naast
+# blobs/). Een regel per map in de filer (fs.configure, geldt voor het hele
+# cluster) geeft elke map een eigen collectie en replicatie; de mount
+# gebruikt -filer.path=/, dus $DATA/blobs-r2 is /blobs-r2/ in de filer.
+# mapregels schrijft een regel alleen als hij ontbreekt of een andere
+# collectie of replicatie heeft, en leest daarna na wat er staat. Zonder het
+# slot van weed shell: fs.configure vraagt er niet om, en lock wacht op wie
+# het heeft (replicatie --nu kan uren duren). weed shell toch altijd met een
+# timeout. Met PLATFORM_BLOB_SPLIT uit doet het niets en haalt het niets weg;
+# een regel voor /blobs-media/ (fase 11) laat het altijd zoals hij is.
+# --check: staan ze er alle drie goed (of staat het uit)?
+MAPREGELS='/blobs-r1/ r1 000
+/blobs-r2/ r2 001
+/blobs-r3/ r3 002'
+split_on() { [ "$(env_get PLATFORM_BLOB_SPLIT)" = true ]; }
+weed_shell() { timeout "$1" /usr/local/bin/weed shell -master=127.0.0.1:9333; }
+# De regels van de filer als "map collectie replicatie" (- voor leeg), uit de
+# JSON van fs.configure zonder -locationPrefix (alleen lezen, zonder slot).
+# De velden heten locationPrefix, collection en replication; het aantal
+# spaties na de dubbele punt wisselt (protojson). Faalt als weed shell faalt
+# of geen configuratie gaf. mapregels_lees <timeout>
+mapregels_lees() {
+  out=$(printf 'fs.configure\n' | weed_shell "$1" 2>/dev/null) || return 1
+  case $out in *'"locations"'*) ;; *) return 1 ;; esac
+  printf '%s\n' "$out" | tr -d '\n' | sed 's/{/\n{/g' |
+    awk 'function f(k,  v) {
+        if (!match($0, "\"" k "\":[ \t]*\"[^\"]*\"")) return "-"
+        v = substr($0, RSTART, RLENGTH); sub(/^[^:]*:[ \t]*"/, "", v); sub(/"$/, "", v)
+        return v == "" ? "-" : v }
+      /"locationPrefix"/ { print f("locationPrefix"), f("collection"), f("replication") }'
+}
+# De regels van MAPREGELS die ontbreken of anders zijn. mapregels_mis <timeout>
+mapregels_mis() {
+  have=$(mapregels_lees "$1") || return 1
+  printf '%s\n' "$MAPREGELS" | while read -r p c r; do
+    printf '%s\n' "$have" | grep -qxF "$p $c $r" || echo "$p $c $r"
+  done
+}
+mapregels() {
+  if ! split_on; then
+    [ "${1:-}" = --check ] || echo "Regels per map: kopieën per bibliotheek staan uit (PLATFORM_BLOB_SPLIT); niets gezet of weggehaald"
+    return 0
+  fi
+  mis=$(mapregels_mis 30) || {
+    echo "Let op: kon de regels per map van SeaweedFS niet lezen (weed shell, fs.configure)" >&2; return 1; }
+  if [ -z "$mis" ]; then
+    [ "${1:-}" = --check ] || echo "Regels per map: /blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed"
+    return 0
+  fi
+  [ "${1:-}" = --check ] && return 1
+  say "Regels per map zetten: $(printf '%s\n' "$mis" | awk '{ printf "%s%s (collectie %s, replicatie %s)", (NR > 1 ? ", " : ""), $1, $2, $3 }')"
+  printf '%s\n' "$mis" | while read -r p c r; do
+    echo "fs.configure -locationPrefix=$p -collection=$c -replication=$r -apply"
+  done | weed_shell 90 >/dev/null
+  # Nakijken wat er nu staat: weed shell geeft niet bij elke fout een code.
+  mis=$(mapregels_mis 30) || {
+    echo "Let op: kon de regels per map van SeaweedFS na het zetten niet lezen" >&2; return 1; }
+  if [ -n "$mis" ]; then
+    echo "Let op: de regels per map van SeaweedFS staan nog niet goed: $(printf '%s\n' "$mis" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $1 }')" >&2
+    return 1
+  fi
+  echo "Regels per map: /blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed"
 }
 
 # --- stand voor ClusterForge ------------------------------------------------
@@ -427,6 +674,15 @@ status() {
         chk analyse "Analyse (gezichten, zoeken op beeld)" "$([ "$h" = healthy ] && echo 1 || echo 0)" amber "${h:-niet gestart}"
       fi
     fi
+    # De regels per map gelden voor het hele cluster: alleen hier nakijken.
+    if split_on; then
+      if mis=$(mapregels_mis 20); then
+        chk mapregels "Regels per map (kopieën per bibliotheek)" "$([ -z "$mis" ] && echo 1 || echo 0)" amber \
+          "$([ -z "$mis" ] && echo "/blobs-r1/, /blobs-r2/ en /blobs-r3/ staan goed" || echo "ontbreken of anders: $(printf '%s\n' "$mis" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $1 }'); platform-ctl.sh mapregels")"
+      else
+        chk mapregels "Regels per map (kopieën per bibliotheek)" 0 amber "niet te lezen (weed shell, fs.configure)"
+      fi
+    fi
   fi
   mkdir -p "$STATUS_DIR"
   tmp=$STATUS_DIR/.media-platform.json
@@ -439,15 +695,47 @@ status() {
 
 case "${1:-}" in
   up)
+    # Alleen de node met het VIP draait het platform. Ook als systemd het
+    # elders start (een herstart van Docker of keepalived): dan niet starten.
+    # Code 3 telt in cf-platform.service als gewoon gestopt (SuccessExitStatus),
+    # zodat de unit niet op failed komt en deze node het VIP later nog kan nemen.
+    has_vip || { echo "Deze node heeft het VIP $VIP niet: het platform start hier niet." >&2; exit 3; }
     mountpoint -q "$DATA" || { echo "$DATA is niet gemount" >&2; exit 1; }
     if analyse_on; then analyse_dirs || exit 1; fi
+    if arr_on; then arr_dirs || exit 1; fi
     # Plaatsnamen: niet fataal; zonder bronnen werkt de rest gewoon.
     geo --check >/dev/null 2>&1 || timeout 300 "$0" geo || true
+    # De regels per map van SeaweedFS (kopieën per bibliotheek), vóór de
+    # eerste ronde van het platform: niet fataal, en hoogstens drie minuten.
+    # Lukt het niet, dan start het platform zonder te verhuizen: een kopie
+    # in blobs-r2/ zonder regel kreeg de standaard en wordt later niet
+    # opnieuw geschreven. De omgeving wint van --env-file in compose.
+    if split_on && ! timeout 180 "$0" mapregels; then
+      echo "Let op: de regels per map van SeaweedFS staan niet goed; het platform start toch, maar verhuist niets naar blobs-r1/ tot blobs-r3/ tot de regels er zijn (platform-ctl.sh mapregels, dan systemctl restart cf-platform)" >&2
+      export PLATFORM_BLOB_SPLIT=false
+    fi
     fingerprint > "$HASH"
-    compose up --no-build --remove-orphans
+    limits_note
+    if arr_on; then
+      # Eerst de app (op de voorgrond, zoals zonder mediabeheer); qBittorrent
+      # en Prowlarr pas na arr-koppel.
+      svcs=$(compose config --services | grep -vx -e qbittorrent -e prowlarr)
+      [ -n "$svcs" ] || { echo "compose config gaf geen diensten" >&2; exit 1; }
+      : > "$ARR_MAG"
+      arr_start &
+      # shellcheck disable=SC2086
+      compose up --no-build --remove-orphans $svcs
+    else
+      compose up --no-build --remove-orphans
+    fi
     ;;
   down)
+    # Eerst arr_start van up laten ophouden; startte het qBittorrent en
+    # Prowlarr net, dan wacht down daarop (het slot) en stopt ze daarna.
+    rm -f "$ARR_MAG"
     compose stop
+    ( flock -w 60 9 || echo "Mediabeheer: het slot bleef bezet; toch stoppen" >&2
+      arr_stop ) 9>"$ARR_LOCK"
     rm -f "$HASH"
     ;;
   check)
@@ -487,13 +775,15 @@ case "${1:-}" in
   geo) shift; geo "$@" ;;
   beeld) beeld ;;
   replicatie) shift; replicatie "$@" ;;
+  mapregels) shift; mapregels "$@" ;;
+  sleutels-klaar) sleutels_klaar ;;
   compose) shift; compose "$@" ;;
   overstap)
     shift
     overstap "$@"
     ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|compose|overstap" >&2
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|mapregels|sleutels-klaar|compose|overstap" >&2
     exit 2
     ;;
 esac

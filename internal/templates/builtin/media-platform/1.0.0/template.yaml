@@ -48,9 +48,28 @@ params:
   - name: replication
     type: string
     label: Replicatie van SeaweedFS
-    help: 001 is twee kopieën op verschillende nodes (B2 van het platform), 002 drie.
+    help: >-
+      001 is twee kopieën op verschillende nodes (B2 van het platform), 002
+      drie. Dit is de standaard van het cluster (blobs/, voor het platform
+      PLATFORM_BLOB_DEFAULT_COPIES: 2 of 3). Een map met een eigen regel in
+      SeaweedFS (de kopieën per bibliotheek, blobs-r1/ tot blobs-r3/) houdt
+      die.
     default: "001"
     pattern: '00[12]'
+  - name: blob_split
+    type: bool
+    label: Kopieën per bibliotheek (platform 0.8.3)
+    help: >-
+      Op /beheer (Media, Bibliotheken) kies je per bibliotheek 1, 2 of 3
+      kopieën in het cluster, bv. Films op 2; het platform zet die inhoud in
+      blobs-r1/, blobs-r2/ of blobs-r3/ (PLATFORM_BLOB_SPLIT). Aan zet ook de
+      regels voor die mappen in SeaweedFS (fs.configure, collecties r1 tot
+      r3), bij elke start op de node met het VIP. Uit verhuist niets en haalt
+      geen regels weg. Een versie vóór 0.8.3 (vanaf fase 11) zet met aan films
+      en series in blobs-media/; de regel voor die map (fs.configure, collectie
+      media) zet ClusterForge niet, en de controle van de regels per map kijkt
+      er niet naar: zet hem zelf, of zet dit pas aan vanaf 0.8.3.
+    default: false
   - name: seaweedfs_image
     type: string
     label: Image van SeaweedFS
@@ -66,9 +85,9 @@ params:
     type: string
     label: Versie
     help: >-
-      Branch, tag of commit van het platform. Een andere waarde bouwt de nieuwe
-      versie node voor node, en herstart het platform op de node met het VIP,
-      na een back-up van de database. Nooit install.sh op een clusternode.
+      Branch, tag of commit van het platform. Versie wijzigen bouwt niet;
+      gebruik het commando Platform bijwerken. Nooit install.sh op een
+      clusternode.
     default: main
     pattern: '[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*'
   - name: db_vip
@@ -103,6 +122,8 @@ params:
     help: >-
       De container analyse van het platform (vanaf 0.8.1). Elke node haalt de
       modellen zelf (±40 MB, met zoeken op beeld ±1,6 GB bij de eerste keer).
+      Tijdens het omzetten van zoeken op beeld ±4 GB vrij op de schijf; reken
+      op 12 tot 16 GB RAM per node.
     default: true
   - name: beeld
     type: bool
@@ -114,14 +135,37 @@ params:
     label: Plaatsnamen bij foto's
     help: De bronnen (±15 MB) komen één keer op de gedeelde bestanden.
     default: true
+  - name: arr
+    type: bool
+    label: Mediabeheer (qBittorrent en Prowlarr)
+    help: >-
+      Downloaden met qBittorrent en torrentsites via Prowlarr (fase 11, alleen
+      een versie met compose.arr.yaml). Ze draaien alleen op de node met het
+      VIP. De downloads staan op die node zelf (/var/lib/cf-platform/torrents):
+      na een failover mist qBittorrent de bestanden van een lopende download;
+      de app ziet die als mislukt en zoekt de titel opnieuw. Poorten 6881 (tcp
+      en udp, torrent) en 9696 (Prowlarr, alleen in het eigen netwerk).
+    default: false
   - name: secure_cookies
     type: bool
     label: Cookies alleen over https
     help: Aan zodra het platform van buiten via https bereikbaar is.
     default: false
+  - name: trusted_proxies
+    type: string
+    label: Reverse proxy ervoor
+    help: >-
+      De IP-adressen van een reverse proxy zoals Nginx Proxy Manager die het
+      certificaat doet, komma-gescheiden (bij een NPM-cluster ook de nodes zelf).
+      Leeg = geen proxy. Platform 0.8.2 en later.
+    default: ""
+    pattern: '([0-9A-Fa-f.:]+(,[0-9A-Fa-f.:]+)*)?'
   - name: cpu
     type: int
     label: vCPU per node
+    help: >-
+      Met de grenzen van het platform (vanaf 0.8.1, als Docker ze aankan) mag
+      media 3 vCPU gebruiken; met minder start media zonder grenzen.
     default: 4
     min: 2
     max: 32
@@ -250,6 +294,10 @@ roles:
       - file:
           path: /etc/clusterforge/platform-analyse.yaml
           template: platform-analyse.yaml.tmpl
+      # Mediabeheer (fase 11): alleen met ARR=aan (platform-ctl.sh).
+      - file:
+          path: /etc/clusterforge/platform-arr.yaml
+          template: platform-arr.yaml.tmpl
       # Gezichten en zoeken op beeld (0.8.1): de modellen op elke node zelf,
       # zodat het platform na een failover meteen alles heeft.
       - command:
@@ -301,13 +349,22 @@ roles:
 
 # De sleutels per eigenaar van gezichten (buiten de gedeelde data, zoals op
 # de single) van de VIP-node naar de andere nodes, en de back-ups van de
-# database.
+# database. De sleutels met wissen: een sleutel die op de VIP-node weg is
+# (gezichten uit), gaat ook elders weg. Daarom eerst sleutels-klaar: faalt
+# die (geen VIP, platform draait niet, map niet in orde, of sleutels-check
+# van het platform niet in orde of onbekend), dan kopieert en wist de sync
+# niets. ClusterForge draait de sync op elke node met een VIP van het
+# cluster, ook op die met alleen het VIP van de database: daar stopt
+# sleutels-klaar met 113 (deze node stuurt niet, SyncBeforeSkip) en telt
+# ClusterForge de run als overgeslagen, niet als mislukt; net zo kort na een
+# failover.
 syncs:
   - name: platform-sleutels
     schedule: "* * * * *"
+    before: /usr/local/lib/clusterforge/platform-ctl.sh sleutels-klaar
     source: /var/lib/cf-platform/sleutels/
     target: /var/lib/cf-platform/sleutels/
-    delete: false
+    delete: true
     alert: true
     timeout_seconds: 300
   - name: platform-backups
