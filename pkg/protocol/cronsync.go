@@ -33,8 +33,11 @@ const MaxSyncBefore = 1000
 // de app op een andere node draait. De agent kopieert en wist dan niets en
 // legt de run vast als CronSkipped, niet als mislukt: geen herhaling, geen
 // melding, geen incident. Elke andere code dan 0 is een fout. Een agent van
-// vóór deze code legt zo'n run nog als mislukt vast.
-const SyncBeforeSkip = 3
+// vóór deze code legt zo'n run nog als mislukt vast. Geen 3: veel commando's
+// die in een eigen voorbereiding staan, stoppen met 3 bij een echte fout
+// (systemctl is-active, rsync, curl, LSB status); 113 gebruikt geen gangbaar
+// commando en is geen signaal (128+n).
+const SyncBeforeSkip = 113
 
 // Soorten beheerde job.
 const (

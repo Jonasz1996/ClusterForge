@@ -364,7 +364,7 @@ func on(s string) *string { return &s }
 // TestMediaPlatformSleutelsKlaar: de controle vóór de sync met wissen laat
 // alleen door als alles klopt; anders kopieert en wist de sync niets. Een
 // node die niet stuurt (geen VIP van het platform, of het platform draait er
-// niet) stopt met protocol.SyncBeforeSkip (3: de agent telt de run als
+// niet) stopt met protocol.SyncBeforeSkip (113: de agent telt de run als
 // overgeslagen), een fout van de sleutels met 1.
 func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 	tpl, c := mpContext(t, nil)
