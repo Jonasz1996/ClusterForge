@@ -25,7 +25,7 @@ const defaultBase = "/api/dashboard/v1";
 // token zelf ziet de beheerder één keer, met een kant-en-klare services.yaml.
 export function ApiTokensCard({ isAdmin }: { isAdmin: boolean }) {
   const tokens = useApiTokens(isAdmin);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(() => hasPendingToken());
   const [origin] = useState(() => (typeof window === "undefined" ? "" : window.location.origin));
   const base = tokens.data?.base_path ?? defaultBase;
   return (
@@ -163,14 +163,42 @@ function TokenList({ items }: { items: ApiToken[] }) {
   );
 }
 
+// Testlijst 3, N22: een nieuw token blijft staan (ook na een andere pagina,
+// in dezelfde tab) tot je "Ik heb het gekopieerd" aanklikt.
+const pendingKey = "cf-api-token-pending";
+type Pending = { token: string; picked: string[] };
+
+function readPending(): Pending | null {
+  try {
+    const raw = window.sessionStorage.getItem(pendingKey);
+    return raw ? (JSON.parse(raw) as Pending) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePending(p: Pending | null) {
+  try {
+    if (p) window.sessionStorage.setItem(pendingKey, JSON.stringify(p));
+    else window.sessionStorage.removeItem(pendingKey);
+  } catch {
+    // Zonder opslag blijft het token alleen op deze pagina staan.
+  }
+}
+
+export function hasPendingToken(): boolean {
+  return typeof window !== "undefined" && readPending() !== null;
+}
+
 function CreateToken({ origin, base, onClose }: { origin: string; base: string; onClose: () => void }) {
   const clusters = useClusters();
   const create = useCreateApiToken();
+  const [pending] = useState(() => (typeof window === "undefined" ? null : readPending()));
   const [name, setName] = useState("homepage");
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>(pending?.picked ?? []);
   const [ttl, setTtl] = useState("0");
   const [error, setError] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(pending?.token ?? null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -178,6 +206,7 @@ function CreateToken({ origin, base, onClose }: { origin: string; base: string; 
     try {
       const res = await create.mutateAsync({ name, cluster_ids: picked, ttl_days: Number(ttl) });
       setToken(res.token);
+      writePending({ token: res.token, picked });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Er ging iets mis.");
     }
@@ -187,15 +216,23 @@ function CreateToken({ origin, base, onClose }: { origin: string; base: string; 
     const shown = (clusters.data ?? []).filter((c) => picked.length === 0 || picked.includes(c.id));
     return (
       <div className="space-y-3 rounded-md border border-slate-200 p-4 dark:border-slate-800">
-        <Alert kind="success">Token gemaakt. Kopieer het nu: ClusterForge toont het niet opnieuw.</Alert>
+        <Alert kind="success">
+          Token gemaakt. Kopieer het nu: het blijft hier staan (ook als je even naar een andere pagina gaat) tot je op &quot;Ik heb het
+          gekopieerd&quot; klikt. Daarna toont ClusterForge het niet opnieuw.
+        </Alert>
         <CopyBlock text={token} />
         <p className="text-slate-600 dark:text-slate-400">
           Voor homepage: plak dit in Dashboard bewerken → importeren (services.yaml). Elke cluster wordt een tegel; het token
           komt versleuteld bij de geheimen. Kies zelf welke velden je wilt (hoogstens 8 per tegel).
         </p>
         <CopyBlock text={homepageYaml(origin, base, token, shown, picked.length === 0)} />
-        <Button variant="secondary" onClick={onClose}>
-          Sluiten
+        <Button
+          onClick={() => {
+            writePending(null);
+            onClose();
+          }}
+        >
+          Ik heb het gekopieerd
         </Button>
       </div>
     );

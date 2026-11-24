@@ -110,3 +110,23 @@ export function useSelfMove() {
     },
   });
 }
+
+// ImportNode volgt internal/selfhost/metricsimport.go (fase 48, 4.5).
+export type ImportNode = {
+  address: string;
+  hostname?: string;
+  state: "bezig" | "klaar" | "mislukt";
+  started_at?: string;
+  ended_at?: string;
+  bytes?: number;
+  reason?: string;
+};
+
+export function useMetricsImport(enabled: boolean) {
+  return useQuery({
+    queryKey: ["self", "metrics-import"],
+    queryFn: () => call<{ nodes: ImportNode[] }>("GET", "/self/metrics-import"),
+    enabled,
+    refetchInterval: (q) => (q.state.data?.nodes.some((n) => n.state === "bezig") ? 10_000 : false),
+  });
+}

@@ -288,6 +288,16 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		})
 		o.Clusters = append(o.Clusters, *cv)
 	}
+	// De pagina gebruikt de luisterende poorten, containers en ufw-regels
+	// van elke node niet (die staan in het plan en het verschil); zonder is
+	// het antwoord veel kleiner en de tab Nodes sneller.
+	for i := range o.Nodes {
+		if st := o.Nodes[i].Status; st != nil {
+			slim := *st
+			slim.Listeners, slim.Containers, slim.Rules = []protocol.FirewallListener{}, nil, []protocol.FirewallRule{}
+			o.Nodes[i].Status = &slim
+		}
+	}
 	return o, nil
 }
 
@@ -386,7 +396,7 @@ func warnings(n Node, now time.Time) []Warning {
 	w := func(t string) { out = append(out, Warning{NodeID: n.NodeID, Hostname: n.Hostname, Text: t}) }
 	switch {
 	case !n.Supported:
-		w("agent te oud (protocol 30 nodig; Nodes → Agents bijwerken)")
+		w(n.Unsupported)
 		return out
 	case !n.Online:
 		w("offline")
@@ -450,11 +460,18 @@ func (s *Service) blockedPerPort(ctx context.Context) (map[uuid.UUID]map[string]
 
 // Hourly geeft het geblokkeerde verkeer per uur van de laatste 24 uur.
 func (s *Service) Hourly(ctx context.Context, nodeID, clusterID *uuid.UUID) ([]HourCount, error) {
-	rows, err := s.pool.Query(ctx, `SELECT h, coalesce(sum(b.count), 0)::bigint
+	// Eerst de laatste 24 uur optellen (index op hour), dan pas de uren
+	// erbij: een join per uur over heel de tabel was traag bij veel verkeer.
+	rows, err := s.pool.Query(ctx, `SELECT h, coalesce(x.c, 0)::bigint
 		FROM generate_series(date_trunc('hour', now()) - interval '23 hours', date_trunc('hour', now()), interval '1 hour') h
-		LEFT JOIN firewall_blocked b ON b.hour = h AND ($1::uuid IS NULL OR b.node_id = $1)
-			AND ($2::uuid IS NULL OR b.node_id IN (SELECT id FROM nodes WHERE cluster_id = $2))
-		GROUP BY h ORDER BY h`, nodeID, clusterID)
+		LEFT JOIN (
+			SELECT b.hour, sum(b.count) AS c FROM firewall_blocked b
+			WHERE b.hour >= date_trunc('hour', now()) - interval '23 hours'
+				AND ($1::uuid IS NULL OR b.node_id = $1)
+				AND ($2::uuid IS NULL OR b.node_id IN (SELECT id FROM nodes WHERE cluster_id = $2))
+			GROUP BY b.hour
+		) x ON x.hour = h
+		ORDER BY h`, nodeID, clusterID)
 	if err != nil {
 		return nil, err
 	}

@@ -64,7 +64,9 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
+	"github.com/Jonasz1996/clusterforge/internal/mailrelay"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/noderun"
 	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
@@ -72,6 +74,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/publish"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
+	"github.com/Jonasz1996/clusterforge/internal/replace"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
@@ -85,6 +88,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/truenas"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
+	"github.com/Jonasz1996/clusterforge/internal/upkeep"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixagent"
 	"github.com/Jonasz1996/clusterforge/internal/zabbixmon"
@@ -117,6 +121,11 @@ func run(args []string) error {
 			return usage()
 		}
 		return adminCreate(args[2:])
+	case "user":
+		if len(args) < 2 || args[1] != "reset" {
+			return usage()
+		}
+		return userReset(args[2:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -126,7 +135,7 @@ func run(args []string) error {
 }
 
 func usage() error {
-	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|healthcheck|version>`)
+	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|user reset|healthcheck|version>`)
 }
 
 func newLogger(level string) *slog.Logger {
@@ -238,6 +247,7 @@ func serve() error {
 	// Fase 45: ClusterForge werkt zichzelf bij vanuit de webinterface en
 	// verhuist naar een eigen cluster (template clusterforge).
 	self := selfhost.NewService(pool, ev, log, runner, bus, bus, box, acf)
+	self.Web = bus
 	self.Version, self.Image, self.Cluster, self.Advertise = version, os.Getenv("CF_IMAGE"), os.Getenv("CF_SELF_CLUSTER"), cfg.NATSAdvertise
 	self.MasterKey, self.VMURL = cfg.MasterKey, cfg.VictoriaMetricsURL
 	self.LoadSettings()
@@ -249,6 +259,10 @@ func serve() error {
 	csec.Box = box
 	// Fase 41: schijfbewaking en veilig opruimen, via scripttaken.
 	dsk := diskwatch.NewService(pool, ev, runner, bus, log)
+	// Fase 46: automatisch onderhoud door de agents (schijf en databases),
+	// per cluster rolling met het clusterslot, via scripttaken.
+	upk := upkeep.NewService(pool, ev, runner, bus, log)
+	upk.Nodes, upk.Disk, upk.DB = upd.Overview, dsk.Full, dbs.Overview
 	// Zabbix-agents: zabbix-agent2 met een eigen PSK per node, via runs en de Zabbix API.
 	zba := zabbixagent.NewService(pool, ev, runner, bus, log)
 	zbm := zabbixmon.NewService(pool, ev, zba, log)
@@ -282,6 +296,7 @@ func serve() error {
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
 	// Docker zoals Portainer (fase 28): lezen en wijzigen via de agent.
 	dkr := dockerhost.NewService(pool, ev, log, runner, bus)
+	upd.Containers = dkr.Running
 	pvh.Sync = pve
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
 	pvh.Box = box
@@ -294,6 +309,13 @@ func serve() error {
 	aivSvc.Version = version
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
+	pub.Run = &noderun.Runner{Bus: bus}
+	// Fase 48: een losse installatie vervangen door een cluster en de oude
+	// later opruimen.
+	rpl := replace.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
+	rpl.Pub, rpl.PVE = pub, pvh
+	// Testlijst 3, N30: de Postfix-relays volgen en testmails sturen.
+	mrl := mailrelay.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
 	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
@@ -372,6 +394,7 @@ func serve() error {
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
 		planner.Task{Name: "automatisch bijwerken", Tick: upd.AutoTick},
+		planner.Task{Name: "automatisch onderhoud", Tick: upk.Tick},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
 		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
@@ -493,6 +516,7 @@ func serve() error {
 	goLoop(ctx, log, "pbs", pbsSvc.Watch)
 	goLoop(ctx, log, "truenas", tnSvc.Watch)
 	goLoop(ctx, log, "aiverslag", aivSvc.Watch)
+	goLoop(ctx, log, "mailrelay", mrl.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -510,7 +534,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Replace: rpl, MailRelay: mrl, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -677,6 +701,86 @@ func adminCreate(args []string) error {
 		return err
 	}
 	fmt.Printf("gebruiker %s aangemaakt met rol %s\n", u.Username, u.Role)
+	return nil
+}
+
+// userReset herstelt een account waar de gebruiker niet meer in kan: TOTP
+// uit, een tijdelijk wachtwoord dat één keer werkt, en bij de volgende login
+// verplicht een nieuw wachtwoord en een nieuwe TOTP. Normaal met de
+// herstelcode van de loginpagina; -gebruiker is de noodweg als de
+// webinterface niet bereikbaar is.
+func userReset(args []string) error {
+	fs := flag.NewFlagSet("user reset", flag.ContinueOnError)
+	ttl := fs.Duration("geldig", auth.TempPasswordTTL, "hoe lang het tijdelijke wachtwoord werkt (hoogstens 24h)")
+	byName := fs.String("gebruiker", "", "noodweg zonder code: deze gebruikersnaam resetten")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "gebruik: clusterforge-server user reset <herstelcode>")
+		fmt.Fprintln(os.Stderr, "   of:   clusterforge-server user reset -gebruiker <naam>   (als de loginpagina niet bereikbaar is)")
+		fs.PrintDefaults()
+	}
+	// De code mag voor of na de vlaggen staan.
+	var code string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		code, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if code == "" && fs.NArg() > 0 {
+		code = fs.Arg(0)
+	}
+	switch {
+	case code == "" && *byName == "":
+		fs.Usage()
+		return errors.New("geef de herstelcode van de loginpagina")
+	case code != "" && *byName != "":
+		return errors.New("geef een herstelcode of -gebruiker, niet allebei")
+	case code != "" && !auth.LooksLikeCode(code):
+		return fmt.Errorf("%q is geen herstelcode (die ziet eruit als naam.ABCD-EFGH-JKLM-NPQR); de gebruiker vraagt er een aan via \"Wachtwoord vergeten of kan niet inloggen?\" op de loginpagina, of gebruik -gebruiker <naam>", code)
+	}
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg.LogLevel)
+	ctx := context.Background()
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := store.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	q := store.New(pool)
+	authSvc, err := auth.NewService(q, events.NewWriter(q, log), cfg.SessionTTL)
+	if err != nil {
+		return err
+	}
+	var res auth.ResetResult
+	name := *byName
+	if code != "" {
+		res, name, err = authSvc.ResetByCode(ctx, code, *ttl)
+	} else {
+		res, err = authSvc.ResetUser(ctx, name, *ttl)
+	}
+	switch {
+	case errors.Is(err, auth.ErrUnknownCode):
+		return errors.New("deze herstelcode is onbekend, verlopen (na 24 uur) of al gebruikt; laat de gebruiker een nieuwe aanvragen")
+	case errors.Is(err, auth.ErrUnknownUser) && code != "":
+		return fmt.Errorf("er bestaat geen account %q; de code is nu opgebruikt", name)
+	case errors.Is(err, auth.ErrUnknownUser):
+		return fmt.Errorf("gebruiker %q bestaat niet", name)
+	case err != nil:
+		return err
+	}
+	fmt.Printf("Account %s is gereset.\n\n", res.User.Username)
+	fmt.Printf("  Tijdelijk wachtwoord: %s\n", res.TempPassword)
+	fmt.Printf("  Geldig tot:           %s (werkt één keer)\n\n", res.ExpiresAt.Local().Format("2006-01-02 15:04 MST"))
+	fmt.Println("Tweestapsverificatie staat uit en alle sessies zijn beëindigd.")
+	fmt.Println("Bij de volgende login moet de gebruiker een nieuw wachtwoord en een nieuwe TOTP instellen.")
+	fmt.Println("De reset staat in het logboek (user.reset).")
 	return nil
 }
 

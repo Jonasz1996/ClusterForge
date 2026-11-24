@@ -135,6 +135,42 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for ApiTokenScopes.
+const (
+	ApiTokenScopesDashboard ApiTokenScopes = "dashboard"
+	ApiTokenScopesPentest   ApiTokenScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenScopes enum.
+func (e ApiTokenScopes) Valid() bool {
+	switch e {
+	case ApiTokenScopesDashboard:
+		return true
+	case ApiTokenScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiTokenInputScopes.
+const (
+	ApiTokenInputScopesDashboard ApiTokenInputScopes = "dashboard"
+	ApiTokenInputScopesPentest   ApiTokenInputScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenInputScopes enum.
+func (e ApiTokenInputScopes) Valid() bool {
+	switch e {
+	case ApiTokenInputScopesDashboard:
+		return true
+	case ApiTokenInputScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AppIssueTone.
 const (
 	AppIssueToneAmber AppIssueTone = "amber"
@@ -198,6 +234,27 @@ func (e AssistantConversationInputSubjectType) Valid() bool {
 	}
 }
 
+// Defines values for AttentionActionKind.
+const (
+	Link           AttentionActionKind = "link"
+	RestartService AttentionActionKind = "restart_service"
+	RunCommand     AttentionActionKind = "run_command"
+)
+
+// Valid indicates whether the value is a known member of the AttentionActionKind enum.
+func (e AttentionActionKind) Valid() bool {
+	switch e {
+	case Link:
+		return true
+	case RestartService:
+		return true
+	case RunCommand:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttentionBadgeTone.
 const (
 	AttentionBadgeToneAmber AttentionBadgeTone = "amber"
@@ -210,6 +267,24 @@ func (e AttentionBadgeTone) Valid() bool {
 	case AttentionBadgeToneAmber:
 		return true
 	case AttentionBadgeToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttentionItemImpact.
+const (
+	AttentionItemImpactServiceDown AttentionItemImpact = "service_down"
+	AttentionItemImpactServiceOk   AttentionItemImpact = "service_ok"
+)
+
+// Valid indicates whether the value is a known member of the AttentionItemImpact enum.
+func (e AttentionItemImpact) Valid() bool {
+	switch e {
+	case AttentionItemImpactServiceDown:
+		return true
+	case AttentionItemImpactServiceOk:
 		return true
 	default:
 		return false
@@ -924,6 +999,117 @@ func (e CrowdSecDecisionInputScope) Valid() bool {
 	case Ip:
 		return true
 	case Range:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecListKind.
+const (
+	CrowdSecListKindAuto   CrowdSecListKind = "auto"
+	CrowdSecListKindOwn    CrowdSecListKind = "own"
+	CrowdSecListKindPublic CrowdSecListKind = "public"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecListKind enum.
+func (e CrowdSecListKind) Valid() bool {
+	switch e {
+	case CrowdSecListKindAuto:
+		return true
+	case CrowdSecListKindOwn:
+		return true
+	case CrowdSecListKindPublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecListScope.
+const (
+	CrowdSecListScopeAll     CrowdSecListScope = "all"
+	CrowdSecListScopeCluster CrowdSecListScope = "cluster"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecListScope enum.
+func (e CrowdSecListScope) Valid() bool {
+	switch e {
+	case CrowdSecListScopeAll:
+		return true
+	case CrowdSecListScopeCluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecListInputScope.
+const (
+	CrowdSecListInputScopeAll     CrowdSecListInputScope = "all"
+	CrowdSecListInputScopeCluster CrowdSecListInputScope = "cluster"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecListInputScope enum.
+func (e CrowdSecListInputScope) Valid() bool {
+	switch e {
+	case CrowdSecListInputScopeAll:
+		return true
+	case CrowdSecListInputScopeCluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecNotifyChannelKind.
+const (
+	CrowdSecNotifyChannelKindDiscord  CrowdSecNotifyChannelKind = "discord"
+	CrowdSecNotifyChannelKindNtfy     CrowdSecNotifyChannelKind = "ntfy"
+	CrowdSecNotifyChannelKindSlack    CrowdSecNotifyChannelKind = "slack"
+	CrowdSecNotifyChannelKindTelegram CrowdSecNotifyChannelKind = "telegram"
+	CrowdSecNotifyChannelKindWebhook  CrowdSecNotifyChannelKind = "webhook"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecNotifyChannelKind enum.
+func (e CrowdSecNotifyChannelKind) Valid() bool {
+	switch e {
+	case CrowdSecNotifyChannelKindDiscord:
+		return true
+	case CrowdSecNotifyChannelKindNtfy:
+		return true
+	case CrowdSecNotifyChannelKindSlack:
+		return true
+	case CrowdSecNotifyChannelKindTelegram:
+		return true
+	case CrowdSecNotifyChannelKindWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecNotifyChannelInputKind.
+const (
+	CrowdSecNotifyChannelInputKindDiscord  CrowdSecNotifyChannelInputKind = "discord"
+	CrowdSecNotifyChannelInputKindNtfy     CrowdSecNotifyChannelInputKind = "ntfy"
+	CrowdSecNotifyChannelInputKindSlack    CrowdSecNotifyChannelInputKind = "slack"
+	CrowdSecNotifyChannelInputKindTelegram CrowdSecNotifyChannelInputKind = "telegram"
+	CrowdSecNotifyChannelInputKindWebhook  CrowdSecNotifyChannelInputKind = "webhook"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecNotifyChannelInputKind enum.
+func (e CrowdSecNotifyChannelInputKind) Valid() bool {
+	switch e {
+	case CrowdSecNotifyChannelInputKindDiscord:
+		return true
+	case CrowdSecNotifyChannelInputKindNtfy:
+		return true
+	case CrowdSecNotifyChannelInputKindSlack:
+		return true
+	case CrowdSecNotifyChannelInputKindTelegram:
+		return true
+	case CrowdSecNotifyChannelInputKindWebhook:
 		return true
 	default:
 		return false
@@ -2184,6 +2370,7 @@ const (
 	IncidentSubjectTypeNode    IncidentSubjectType = "node"
 	IncidentSubjectTypeService IncidentSubjectType = "service"
 	IncidentSubjectTypeTestRun IncidentSubjectType = "test_run"
+	IncidentSubjectTypeUnit    IncidentSubjectType = "unit"
 )
 
 // Valid indicates whether the value is a known member of the IncidentSubjectType enum.
@@ -2202,6 +2389,8 @@ func (e IncidentSubjectType) Valid() bool {
 	case IncidentSubjectTypeService:
 		return true
 	case IncidentSubjectTypeTestRun:
+		return true
+	case IncidentSubjectTypeUnit:
 		return true
 	default:
 		return false
@@ -4302,6 +4491,27 @@ func (e ListIncidentsParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListJobsParamsWho.
+const (
+	ListJobsParamsWhoAll    ListJobsParamsWho = "all"
+	ListJobsParamsWhoMe     ListJobsParamsWho = "me"
+	ListJobsParamsWhoPeople ListJobsParamsWho = "people"
+)
+
+// Valid indicates whether the value is a known member of the ListJobsParamsWho enum.
+func (e ListJobsParamsWho) Valid() bool {
+	switch e {
+	case ListJobsParamsWhoAll:
+		return true
+	case ListJobsParamsWhoMe:
+		return true
+	case ListJobsParamsWhoPeople:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetMapParamsLayer.
 const (
 	GetMapParamsLayerNetwork  GetMapParamsLayer = "network"
@@ -4646,6 +4856,12 @@ type AgentUpgradeOverview struct {
 	// HaltedBy De node waar de update op prod mislukte
 	HaltedBy string `json:"halted_by"`
 
+	// NextWindow Begin van het volgende nachtvenster
+	NextWindow *time.Time `json:"next_window,omitempty"`
+
+	// NightOnly Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent
+	NightOnly *bool `json:"night_only,omitempty"`
+
 	// OffClusterIds Clusters waar vanzelf bijwerken uitstaat
 	OffClusterIds []openapi_types.UUID `json:"off_cluster_ids"`
 
@@ -4697,7 +4913,13 @@ type ApiToken struct {
 
 	// Prefix Het begin van het token
 	Prefix string `json:"prefix"`
+
+	// Scopes Leeg = alle lees-routes; anders alleen de genoemde capabilities
+	Scopes []ApiTokenScopes `json:"scopes"`
 }
+
+// ApiTokenScopes defines model for ApiToken.Scopes.
+type ApiTokenScopes string
 
 // ApiTokenInput defines model for ApiTokenInput.
 type ApiTokenInput struct {
@@ -4705,9 +4927,15 @@ type ApiTokenInput struct {
 	ClusterIds *[]openapi_types.UUID `json:"cluster_ids,omitempty"`
 	Name       string                `json:"name"`
 
+	// Scopes Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege.
+	Scopes *[]ApiTokenInputScopes `json:"scopes,omitempty"`
+
 	// TtlDays 0 of weg = verloopt nooit
 	TtlDays *int `json:"ttl_days,omitempty"`
 }
+
+// ApiTokenInputScopes defines model for ApiTokenInput.Scopes.
+type ApiTokenInputScopes string
 
 // AppIssue defines model for AppIssue.
 type AppIssue struct {
@@ -4914,6 +5142,26 @@ type Attention struct {
 	Items  []AttentionItem           `json:"items"`
 }
 
+// AttentionAction defines model for AttentionAction.
+type AttentionAction struct {
+	Href *string `json:"href,omitempty"`
+
+	// Kind link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
+	Kind    AttentionActionKind   `json:"kind"`
+	Label   string                `json:"label"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+
+	// Script Het script bij run_command
+	Script *string `json:"script,omitempty"`
+
+	// Title Naam van het eenmalige commando bij run_command
+	Title *string `json:"title,omitempty"`
+	Unit  *string `json:"unit,omitempty"`
+}
+
+// AttentionActionKind link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
+type AttentionActionKind string
+
 // AttentionBadge defines model for AttentionBadge.
 type AttentionBadge struct {
 	Count int                `json:"count"`
@@ -4925,7 +5173,9 @@ type AttentionBadgeTone string
 
 // AttentionItem defines model for AttentionItem.
 type AttentionItem struct {
-	Count int `json:"count"`
+	// Actions Acties bij de regel zelf (fase 47), zoals de logs van de dienst of herstarten
+	Actions *[]AttentionAction `json:"actions,omitempty"`
+	Count   int                `json:"count"`
 
 	// Detail De betrokken clusters of nodes, kort
 	Detail string `json:"detail"`
@@ -4937,10 +5187,16 @@ type AttentionItem struct {
 	Href string `json:"href"`
 
 	// Id Vast kenmerk van het soort melding
-	Id    string            `json:"id"`
-	Title string            `json:"title"`
-	Tone  AttentionItemTone `json:"tone"`
+	Id string `json:"id"`
+
+	// Impact Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat
+	Impact *AttentionItemImpact `json:"impact,omitempty"`
+	Title  string               `json:"title"`
+	Tone   AttentionItemTone    `json:"tone"`
 }
+
+// AttentionItemImpact Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat
+type AttentionItemImpact string
 
 // AttentionItemTone defines model for AttentionItem.Tone.
 type AttentionItemTone string
@@ -5680,6 +5936,26 @@ type CommandDetail struct {
 type CommandInput struct {
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
+
+	// RunAs Leeg is root
+	RunAs  *string `json:"run_as,omitempty"`
+	Script string  `json:"script"`
+
+	// TimeoutSeconds Nul is 30 minuten
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+}
+
+// CommandOnceInput defines model for CommandOnceInput.
+type CommandOnceInput struct {
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+
+	// Confirm De slug van het prodcluster
+	Confirm         *string `json:"confirm,omitempty"`
+	ContinueOnError *bool   `json:"continue_on_error,omitempty"`
+
+	// Name De titel van de taak; leeg is Eenmalig commando
+	Name    *string               `json:"name,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
 
 	// RunAs Leeg is root
 	RunAs  *string `json:"run_as,omitempty"`
@@ -6815,6 +7091,24 @@ type CrowdSecAlert struct {
 	Value       string                                `json:"value"`
 }
 
+// CrowdSecAutoRules defines model for CrowdSecAutoRules.
+type CrowdSecAutoRules struct {
+	DurationHours int  `json:"duration_hours"`
+	Enabled       bool `json:"enabled"`
+
+	// Escalate Duur verdubbelt bij elke herhaling
+	Escalate bool `json:"escalate"`
+	MaxHours int  `json:"max_hours"`
+
+	// MultiNodes IP met alerts op zoveel nodes (0 is uit)
+	MultiNodes         int `json:"multi_nodes"`
+	MultiWindowMinutes int `json:"multi_window_minutes"`
+
+	// RepeatAlerts IP met zoveel alerts (0 is uit)
+	RepeatAlerts      int `json:"repeat_alerts"`
+	RepeatWindowHours int `json:"repeat_window_hours"`
+}
+
 // CrowdSecBan defines model for CrowdSecBan.
 type CrowdSecBan struct {
 	As       string   `json:"as"`
@@ -6844,21 +7138,37 @@ type CrowdSecConsoleKeyInput struct {
 	Key string `json:"key"`
 }
 
+// CrowdSecConsoleOffInput defines model for CrowdSecConsoleOffInput.
+type CrowdSecConsoleOffInput struct {
+	On bool `json:"on"`
+}
+
 // CrowdSecDecisionInput defines model for CrowdSecDecisionInput.
 type CrowdSecDecisionInput struct {
+	// Central Ook in de eigen blocklist (blijft, ook op nieuwe nodes)
+	Central   *bool               `json:"central,omitempty"`
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
 	Delete    *bool               `json:"delete,omitempty"`
 
 	// Duration Zoals 4h of 30m
-	Duration *string                    `json:"duration,omitempty"`
-	NodeIds  *[]openapi_types.UUID      `json:"node_ids,omitempty"`
-	Reason   *string                    `json:"reason,omitempty"`
-	Scope    CrowdSecDecisionInputScope `json:"scope"`
-	Value    string                     `json:"value"`
+	Duration *string               `json:"duration,omitempty"`
+	NodeIds  *[]openapi_types.UUID `json:"node_ids,omitempty"`
+
+	// Permanent Met central - zonder einddatum
+	Permanent *bool                      `json:"permanent,omitempty"`
+	Reason    *string                    `json:"reason,omitempty"`
+	Scope     CrowdSecDecisionInputScope `json:"scope"`
+	Value     string                     `json:"value"`
 }
 
 // CrowdSecDecisionInputScope defines model for CrowdSecDecisionInput.Scope.
 type CrowdSecDecisionInputScope string
+
+// CrowdSecDropped defines model for CrowdSecDropped.
+type CrowdSecDropped struct {
+	Value string `json:"value"`
+	Why   string `json:"why"`
+}
 
 // CrowdSecEnrollInput defines model for CrowdSecEnrollInput.
 type CrowdSecEnrollInput struct {
@@ -6868,6 +7178,129 @@ type CrowdSecEnrollInput struct {
 // CrowdSecEnrollResult defines model for CrowdSecEnrollResult.
 type CrowdSecEnrollResult struct {
 	Nodes int `json:"nodes"`
+}
+
+// CrowdSecList defines model for CrowdSecList.
+type CrowdSecList struct {
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// Count Waarden die echt op de nodes komen
+	Count int `json:"count"`
+
+	// Dropped Weggelaten (whitelist, eigen of speciaal netwerk)
+	Dropped       int                          `json:"dropped"`
+	Enabled       bool                         `json:"enabled"`
+	Failed        []CrowdSecNodeError          `json:"failed"`
+	FetchError    string                       `json:"fetch_error"`
+	FetchFailedAt nullable.Nullable[time.Time] `json:"fetch_failed_at"`
+	FetchedAt     nullable.Nullable[time.Time] `json:"fetched_at"`
+	Generation    int64                        `json:"generation"`
+	Id            openapi_types.UUID           `json:"id"`
+	Info          string                       `json:"info"`
+	Kind          CrowdSecListKind             `json:"kind"`
+	Name          string                       `json:"name"`
+	NodesSynced   int                          `json:"nodes_synced"`
+	NodesWanted   int                          `json:"nodes_wanted"`
+
+	// Pinned Teruggedraaid; haalt niet vanzelf op
+	Pinned         bool              `json:"pinned"`
+	RefreshMinutes int               `json:"refresh_minutes"`
+	Scope          CrowdSecListScope `json:"scope"`
+	Slug           string            `json:"slug"`
+	Source         string            `json:"source"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	Url            string            `json:"url"`
+}
+
+// CrowdSecListKind defines model for CrowdSecList.Kind.
+type CrowdSecListKind string
+
+// CrowdSecListScope defines model for CrowdSecList.Scope.
+type CrowdSecListScope string
+
+// CrowdSecListDiff defines model for CrowdSecListDiff.
+type CrowdSecListDiff struct {
+	// Added Hoogstens 50
+	Added        []string          `json:"added"`
+	AddedCount   int               `json:"added_count"`
+	Applied      bool              `json:"applied"`
+	Count        int               `json:"count"`
+	Nodes        int               `json:"nodes"`
+	Refused      []CrowdSecDropped `json:"refused"`
+	RefusedCount int               `json:"refused_count"`
+	Removed      []string          `json:"removed"`
+	RemovedCount int               `json:"removed_count"`
+	Updated      []string          `json:"updated"`
+	UpdatedCount int               `json:"updated_count"`
+	VersionId    *int64            `json:"version_id,omitempty"`
+}
+
+// CrowdSecListEntries defines model for CrowdSecListEntries.
+type CrowdSecListEntries struct {
+	Items []CrowdSecListEntry `json:"items"`
+	Total int                 `json:"total"`
+}
+
+// CrowdSecListEntriesInput defines model for CrowdSecListEntriesInput.
+type CrowdSecListEntriesInput struct {
+	Add    *[]CrowdSecListEntryInput `json:"add,omitempty"`
+	DryRun *bool                     `json:"dry_run,omitempty"`
+	Remove *[]string                 `json:"remove,omitempty"`
+}
+
+// CrowdSecListEntry defines model for CrowdSecListEntry.
+type CrowdSecListEntry struct {
+	AddedBy   string                       `json:"added_by"`
+	CreatedAt time.Time                    `json:"created_at"`
+	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at"`
+	Reason    string                       `json:"reason"`
+	Value     string                       `json:"value"`
+}
+
+// CrowdSecListEntryInput defines model for CrowdSecListEntryInput.
+type CrowdSecListEntryInput struct {
+	// ExpiresHours 0 of leeg is nooit
+	ExpiresHours *int    `json:"expires_hours,omitempty"`
+	Reason       *string `json:"reason,omitempty"`
+	Value        string  `json:"value"`
+}
+
+// CrowdSecListInput defines model for CrowdSecListInput.
+type CrowdSecListInput struct {
+	ClusterId      *openapi_types.UUID     `json:"cluster_id,omitempty"`
+	Enabled        *bool                   `json:"enabled,omitempty"`
+	Name           *string                 `json:"name,omitempty"`
+	RefreshMinutes *int                    `json:"refresh_minutes,omitempty"`
+	Scope          *CrowdSecListInputScope `json:"scope,omitempty"`
+
+	// Source Sleutel uit de catalogus of custom
+	Source *string `json:"source,omitempty"`
+	Url    *string `json:"url,omitempty"`
+}
+
+// CrowdSecListInputScope defines model for CrowdSecListInput.Scope.
+type CrowdSecListInputScope string
+
+// CrowdSecListVersion defines model for CrowdSecListVersion.
+type CrowdSecListVersion struct {
+	Actor     string    `json:"actor"`
+	Added     int       `json:"added"`
+	Count     int       `json:"count"`
+	CreatedAt time.Time `json:"created_at"`
+	Id        int64     `json:"id"`
+	Note      string    `json:"note"`
+	Removed   int       `json:"removed"`
+}
+
+// CrowdSecListVersions defines model for CrowdSecListVersions.
+type CrowdSecListVersions struct {
+	Items []CrowdSecListVersion `json:"items"`
+}
+
+// CrowdSecLists defines model for CrowdSecLists.
+type CrowdSecLists struct {
+	Catalog []CrowdSecPublicSource `json:"catalog"`
+	Items   []CrowdSecList         `json:"items"`
 }
 
 // CrowdSecNode defines model for CrowdSecNode.
@@ -6893,7 +7326,10 @@ type CrowdSecNode struct {
 	ConsoleEnrolledAt nullable.Nullable[time.Time] `json:"console_enrolled_at"`
 	ConsoleError      string                       `json:"console_error"`
 	ConsoleFailedAt   nullable.Nullable[time.Time] `json:"console_failed_at"`
-	DisabledProfiles  []string                     `json:"disabled_profiles"`
+
+	// ConsoleOffDone Het delen met de Console is op deze node uitgezet
+	ConsoleOffDone   bool     `json:"console_off_done"`
+	DisabledProfiles []string `json:"disabled_profiles"`
 
 	// Enabled CrowdSec staat aan in ClusterForge
 	Enabled       bool                              `json:"enabled"`
@@ -6920,6 +7356,12 @@ type CrowdSecNodeDetail struct {
 	Node   CrowdSecNode    `json:"node"`
 }
 
+// CrowdSecNodeError defines model for CrowdSecNodeError.
+type CrowdSecNodeError struct {
+	Error    string `json:"error"`
+	Hostname string `json:"hostname"`
+}
+
 // CrowdSecNodeInput defines model for CrowdSecNodeInput.
 type CrowdSecNodeInput struct {
 	Bouncer          bool     `json:"bouncer"`
@@ -6936,6 +7378,64 @@ type CrowdSecNodesInput struct {
 	ClusterId *openapi_types.UUID   `json:"cluster_id,omitempty"`
 	Managed   bool                  `json:"managed"`
 	NodeIds   *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
+// CrowdSecNotify defines model for CrowdSecNotify.
+type CrowdSecNotify struct {
+	// AlertBurst Zoveel alerts in 10 minuten (0 is uit)
+	AlertBurst   int                     `json:"alert_burst"`
+	AutoBlock    bool                    `json:"auto_block"`
+	Channels     []CrowdSecNotifyChannel `json:"channels"`
+	ListProblems bool                    `json:"list_problems"`
+	ManualBans   bool                    `json:"manual_bans"`
+	NewAlerts    bool                    `json:"new_alerts"`
+	NodeProblems bool                    `json:"node_problems"`
+}
+
+// CrowdSecNotifyChannel defines model for CrowdSecNotifyChannel.
+type CrowdSecNotifyChannel struct {
+	Id   string                    `json:"id"`
+	Kind CrowdSecNotifyChannelKind `json:"kind"`
+	Name string                    `json:"name"`
+
+	// Target Adres zonder geheim deel
+	Target string `json:"target"`
+}
+
+// CrowdSecNotifyChannelKind defines model for CrowdSecNotifyChannel.Kind.
+type CrowdSecNotifyChannelKind string
+
+// CrowdSecNotifyChannelInput defines model for CrowdSecNotifyChannelInput.
+type CrowdSecNotifyChannelInput struct {
+	Id   *string                        `json:"id,omitempty"`
+	Kind CrowdSecNotifyChannelInputKind `json:"kind"`
+	Name *string                        `json:"name,omitempty"`
+
+	// Token ntfy/webhook: bearer-token; Telegram: bot-token
+	Token *string `json:"token,omitempty"`
+
+	// Url Adres (Telegram: chat-id); leeg bij een bestaand kanaal houdt het
+	Url *string `json:"url,omitempty"`
+}
+
+// CrowdSecNotifyChannelInputKind defines model for CrowdSecNotifyChannelInput.Kind.
+type CrowdSecNotifyChannelInputKind string
+
+// CrowdSecNotifyInput defines model for CrowdSecNotifyInput.
+type CrowdSecNotifyInput struct {
+	AlertBurst   int                          `json:"alert_burst"`
+	AutoBlock    bool                         `json:"auto_block"`
+	Channels     []CrowdSecNotifyChannelInput `json:"channels"`
+	ListProblems bool                         `json:"list_problems"`
+	ManualBans   bool                         `json:"manual_bans"`
+	NewAlerts    bool                         `json:"new_alerts"`
+	NodeProblems bool                         `json:"node_problems"`
+}
+
+// CrowdSecNotifyTest defines model for CrowdSecNotifyTest.
+type CrowdSecNotifyTest struct {
+	// Results Kanaal → fout (leeg is gelukt)
+	Results map[string]string `json:"results"`
 }
 
 // CrowdSecOverview defines model for CrowdSecOverview.
@@ -6995,19 +7495,41 @@ type CrowdSecProfile struct {
 // CrowdSecProfileOrigin defines model for CrowdSecProfile.Origin.
 type CrowdSecProfileOrigin string
 
+// CrowdSecPublicSource defines model for CrowdSecPublicSource.
+type CrowdSecPublicSource struct {
+	DefaultMinutes int    `json:"default_minutes"`
+	Format         string `json:"format"`
+	Info           string `json:"info"`
+	Key            string `json:"key"`
+	MinMinutes     int    `json:"min_minutes"`
+	Name           string `json:"name"`
+	Url            string `json:"url"`
+}
+
+// CrowdSecRollbackInput defines model for CrowdSecRollbackInput.
+type CrowdSecRollbackInput struct {
+	DryRun    *bool `json:"dry_run,omitempty"`
+	VersionId int64 `json:"version_id"`
+}
+
 // CrowdSecSettings defines model for CrowdSecSettings.
 type CrowdSecSettings struct {
-	AutoApply      bool `json:"auto_apply"`
-	BouncerDefault bool `json:"bouncer_default"`
+	AutoApply      bool              `json:"auto_apply"`
+	AutoRules      CrowdSecAutoRules `json:"auto_rules"`
+	BouncerDefault bool              `json:"bouncer_default"`
 
 	// ConsoleAvailable De server heeft een masterkey om de sleutel te bewaren
 	ConsoleAvailable bool `json:"console_available"`
 
 	// ConsoleKeySet Er is een enroll-sleutel voor de CrowdSec Console
-	ConsoleKeySet bool                      `json:"console_key_set"`
-	ShareBans     CrowdSecSettingsShareBans `json:"share_bans"`
-	UpdatedAt     time.Time                 `json:"updated_at"`
-	Whitelist     []string                  `json:"whitelist"`
+	ConsoleKeySet bool `json:"console_key_set"`
+
+	// ConsoleOff Het delen met de CrowdSec Console staat uit (fase 47)
+	ConsoleOff bool                      `json:"console_off"`
+	Notify     CrowdSecNotify            `json:"notify"`
+	ShareBans  CrowdSecSettingsShareBans `json:"share_bans"`
+	UpdatedAt  time.Time                 `json:"updated_at"`
+	Whitelist  []string                  `json:"whitelist"`
 }
 
 // CrowdSecSettingsShareBans defines model for CrowdSecSettings.ShareBans.
@@ -11777,6 +12299,22 @@ type Metrics struct {
 // MetricsRange defines model for MetricsRange.
 type MetricsRange string
 
+// NavUsage defines model for NavUsage.
+type NavUsage struct {
+	Aiverslag bool `json:"aiverslag"`
+
+	// Dependencies Er zijn afhankelijkheden tussen diensten (Kaart)
+	Dependencies bool `json:"dependencies"`
+	Docker       bool `json:"docker"`
+	Gitops       bool `json:"gitops"`
+	Kubernetes   bool `json:"kubernetes"`
+	Opnsense     bool `json:"opnsense"`
+	Pbs          bool `json:"pbs"`
+	Proxmox      bool `json:"proxmox"`
+	Truenas      bool `json:"truenas"`
+	Zabbix       bool `json:"zabbix"`
+}
+
 // NewApiToken defines model for NewApiToken.
 type NewApiToken struct {
 	Item ApiToken `json:"item"`
@@ -12089,6 +12627,23 @@ type NodeRuntime struct {
 type Preferences struct {
 	// KubeLearning De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's
 	KubeLearning bool `json:"kube_learning"`
+}
+
+// Prod2FA defines model for Prod2FA.
+type Prod2FA struct {
+	// Required Acties op prodclusters vragen een account met tweestapsverificatie. Het intikken van de clusternaam blijft altijd.
+	Required  bool                         `json:"required"`
+	UpdatedAt nullable.Nullable[time.Time] `json:"updated_at"`
+}
+
+// Prod2FAInput defines model for Prod2FAInput.
+type Prod2FAInput struct {
+	// Password Om uit te zetten: je wachtwoord (zonder tweestapsverificatie)
+	Password *string `json:"password,omitempty"`
+	Required bool    `json:"required"`
+
+	// TotpCode Om uit te zetten: je code (met tweestapsverificatie)
+	TotpCode *string `json:"totp_code,omitempty"`
 }
 
 // ProxmoxConnection defines model for ProxmoxConnection.
@@ -12464,6 +13019,25 @@ type RecipeVersionDetail struct {
 	Version   string                    `json:"version"`
 }
 
+// RecoveryCommand defines model for RecoveryCommand.
+type RecoveryCommand struct {
+	Command string `json:"command"`
+	Label   string `json:"label"`
+}
+
+// RecoveryHelp defines model for RecoveryHelp.
+type RecoveryHelp struct {
+	// Code Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich
+	Code     string            `json:"code"`
+	Commands []RecoveryCommand `json:"commands"`
+
+	// ExpiresAt Tot wanneer de beheerder de code kan gebruiken
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// TtlMinutes Hoe lang het tijdelijke wachtwoord geldig is
+	TtlMinutes int `json:"ttl_minutes"`
+}
+
 // RecoveryReport defines model for RecoveryReport.
 type RecoveryReport struct {
 	Clusters    []RecoveryReportCluster `json:"clusters"`
@@ -12575,6 +13149,11 @@ type RecoveryReportRun struct {
 	Trigger         string                     `json:"trigger"`
 }
 
+// RecoveryRequest defines model for RecoveryRequest.
+type RecoveryRequest struct {
+	Username string `json:"username"`
+}
+
 // RecoveryTargets defines model for RecoveryTargets.
 type RecoveryTargets struct {
 	// Custom Het cluster heeft eigen doelen
@@ -12673,6 +13252,11 @@ type RemediationStepChoice struct {
 
 	// Step De stap, zoals file:/etc/keepalived/keepalived.conf
 	Step string `json:"step"`
+}
+
+// ResetPasswordRequest defines model for ResetPasswordRequest.
+type ResetPasswordRequest struct {
+	NewPassword string `json:"new_password"`
 }
 
 // RiskAcceptance defines model for RiskAcceptance.
@@ -12786,6 +13370,9 @@ type RiskFinding struct {
 	Severity RiskSeverity `json:"severity"`
 	Subject  RiskSubject  `json:"subject"`
 	Text     string       `json:"text"`
+
+	// Title De korte naam van de check (fase 47), om per oorzaak te groeperen
+	Title *string `json:"title,omitempty"`
 }
 
 // RiskGuestOutcome defines model for RiskGuestOutcome.
@@ -12864,6 +13451,9 @@ type RiskPlacedFinding struct {
 	Severity RiskSeverity `json:"severity"`
 	Subject  RiskSubject  `json:"subject"`
 	Text     string       `json:"text"`
+
+	// Title De korte naam van de check (fase 47), om per oorzaak te groeperen
+	Title *string `json:"title,omitempty"`
 }
 
 // RiskPoint defines model for RiskPoint.
@@ -13926,6 +14516,43 @@ type TotpSetup struct {
 	Secret     string `json:"secret"`
 }
 
+// UpdateAllInput defines model for UpdateAllInput.
+type UpdateAllInput struct {
+	Apt *struct {
+		Autoremove *bool `json:"autoremove,omitempty"`
+		Full       *bool `json:"full,omitempty"`
+	} `json:"apt,omitempty"`
+
+	// Confirm Met include_prod: prod, ter bevestiging
+	Confirm *string `json:"confirm,omitempty"`
+	Docker  *struct {
+		Always        *bool `json:"always,omitempty"`
+		HealthSeconds *int  `json:"health_seconds,omitempty"`
+		Prune         *bool `json:"prune,omitempty"`
+		Rollback      *bool `json:"rollback,omitempty"`
+	} `json:"docker,omitempty"`
+	DryRun      *bool `json:"dry_run,omitempty"`
+	Failover    *bool `json:"failover,omitempty"`
+	IncludeProd *bool `json:"include_prod,omitempty"`
+	Reboot      *bool `json:"reboot,omitempty"`
+}
+
+// UpdateAllResult defines model for UpdateAllResult.
+type UpdateAllResult struct {
+	// Clusters De clusters in de rij
+	Clusters []string `json:"clusters"`
+
+	// Hosts Proxmox-hosts
+	Hosts []string `json:"hosts"`
+	Job   *Job     `json:"job,omitempty"`
+
+	// Prod De prodclusters in de rij (slug)
+	Prod []string `json:"prod"`
+
+	// Skipped Wat niet meedoet
+	Skipped []string `json:"skipped"`
+}
+
 // UpdateInput defines model for UpdateInput.
 type UpdateInput struct {
 	Apt *struct {
@@ -13951,7 +14578,10 @@ type UpdateInput struct {
 
 		// Rollback Bij een mislukte test de vorige versie terugzetten (standaard aan)
 		Rollback *bool `json:"rollback,omitempty"`
-		Tags     *[]struct {
+
+		// Skip Fase 47: deze Compose-projecten deze keer overslaan
+		Skip *[]string `json:"skip,omitempty"`
+		Tags *[]struct {
 			From    string `json:"from"`
 			Project string `json:"project"`
 			To      string `json:"to"`
@@ -13964,6 +14594,9 @@ type UpdateInput struct {
 
 	// Reboot Herstarten als de node daar na de update om vraagt
 	Reboot *bool `json:"reboot,omitempty"`
+
+	// StartFrom Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id
+	StartFrom *openapi_types.UUID `json:"start_from,omitempty"`
 }
 
 // UpdateNode defines model for UpdateNode.
@@ -14001,13 +14634,16 @@ type UpdateNode struct {
 	FactsAt       nullable.Nullable[time.Time] `json:"facts_at"`
 
 	// HasDatabase Het cluster heeft een database; die pakketten blijven staan
-	HasDatabase    bool               `json:"has_database"`
-	Hostname       string             `json:"hostname"`
-	NodeId         openapi_types.UUID `json:"node_id"`
-	Online         bool               `json:"online"`
-	Packages       []string           `json:"packages"`
-	Protocol       int                `json:"protocol"`
-	RebootRequired bool               `json:"reboot_required"`
+	HasDatabase bool               `json:"has_database"`
+	Hostname    string             `json:"hostname"`
+	NodeId      openapi_types.UUID `json:"node_id"`
+	Online      bool               `json:"online"`
+	Packages    []string           `json:"packages"`
+	Protocol    int                `json:"protocol"`
+
+	// PveHost De node is een Proxmox-host; Alles bijwerken slaat hem over (fase 47)
+	PveHost        bool `json:"pve_host"`
+	RebootRequired bool `json:"reboot_required"`
 
 	// Smart De agent kent de updates van fase 15 (protocol 29)
 	Smart            bool `json:"smart"`
@@ -14088,16 +14724,45 @@ type UpdatePolicyInput struct {
 	Window string `json:"window"`
 }
 
+// UpdateResumeHint defines model for UpdateResumeHint.
+type UpdateResumeHint struct {
+	ClusterSlug string `json:"cluster_slug"`
+
+	// Done De nodes die al bijgewerkt waren
+	Done     []string `json:"done"`
+	Hostname string   `json:"hostname"`
+
+	// NodeId De node waar de update stopte
+	NodeId openapi_types.UUID `json:"node_id"`
+	Prod   bool               `json:"prod"`
+
+	// Projects De Compose-projecten die op die node mislukten
+	Projects []string `json:"projects"`
+}
+
+// UpdateResumeInput defines model for UpdateResumeInput.
+type UpdateResumeInput struct {
+	Confirm      *string             `json:"confirm,omitempty"`
+	FromNodeId   *openapi_types.UUID `json:"from_node_id,omitempty"`
+	SkipProjects *[]string           `json:"skip_projects,omitempty"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt time.Time          `json:"created_at"`
 	Id        openapi_types.UUID `json:"id"`
 
 	// KubeLearning De leermodus in het dashboard Kubernetes staat aan
-	KubeLearning bool   `json:"kube_learning"`
-	Role         Role   `json:"role"`
-	TotpEnabled  bool   `json:"totp_enabled"`
-	Username     string `json:"username"`
+	KubeLearning bool `json:"kube_learning"`
+
+	// MustChangePassword Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden
+	MustChangePassword bool `json:"must_change_password"`
+
+	// MustSetupTotp Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden
+	MustSetupTotp bool   `json:"must_setup_totp"`
+	Role          Role   `json:"role"`
+	TotpEnabled   bool   `json:"totp_enabled"`
+	Username      string `json:"username"`
 }
 
 // UserRef defines model for UserRef.
@@ -14840,6 +15505,11 @@ type SetAgentUpgradeAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
 }
 
+// SetAgentUpgradeNightOnlyJSONBody defines parameters for SetAgentUpgradeNightOnly.
+type SetAgentUpgradeNightOnlyJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
 type SetAgentUpgradeProdAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
@@ -15022,6 +15692,12 @@ type ListCrowdSecAlertsParams struct {
 	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListCrowdSecListEntriesParams defines parameters for ListCrowdSecListEntries.
+type ListCrowdSecListEntriesParams struct {
+	Q     *string `form:"q,omitempty" json:"q,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ApplyCrowdSecNodeJSONBody defines parameters for ApplyCrowdSecNode.
 type ApplyCrowdSecNodeJSONBody struct {
 	Remove *bool `json:"remove,omitempty"`
@@ -15192,8 +15868,15 @@ type ListJobsParams struct {
 	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
 	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
 	ProxmoxId *openapi_types.UUID `form:"proxmox_id,omitempty" json:"proxmox_id,omitempty"`
-	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Who Fase 47: me is wat jij startte, people wat een gebruiker startte (geen automatische taken), all is alles
+	Who    *ListJobsParamsWho `form:"who,omitempty" json:"who,omitempty"`
+	Status *JobStatus         `form:"status,omitempty" json:"status,omitempty"`
+	Limit  *int               `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// ListJobsParamsWho defines parameters for ListJobs.
+type ListJobsParamsWho string
 
 // GetKubeConfigParams defines parameters for GetKubeConfig.
 type GetKubeConfigParams struct {
@@ -15449,6 +16132,16 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetPublishAutoBackupParams defines parameters for GetPublishAutoBackup.
+type GetPublishAutoBackupParams struct {
+	ServiceKey string `form:"service_key" json:"service_key"`
+}
+
+// GetPublishChangesParams defines parameters for GetPublishChanges.
+type GetPublishChangesParams struct {
+	Hours *int `form:"hours,omitempty" json:"hours,omitempty"`
+}
+
 // GetPublishLoginsParams defines parameters for GetPublishLogins.
 type GetPublishLoginsParams struct {
 	Window *GetPublishLoginsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -15560,6 +16253,9 @@ type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 // SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
 type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
 
+// SetAgentUpgradeNightOnlyJSONRequestBody defines body for SetAgentUpgradeNightOnly for application/json ContentType.
+type SetAgentUpgradeNightOnlyJSONRequestBody SetAgentUpgradeNightOnlyJSONBody
+
 // SetAgentUpgradeProdAutoJSONRequestBody defines body for SetAgentUpgradeProdAuto for application/json ContentType.
 type SetAgentUpgradeProdAutoJSONRequestBody SetAgentUpgradeProdAutoJSONBody
 
@@ -15595,6 +16291,12 @@ type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
 // SetPreferencesJSONRequestBody defines body for SetPreferences for application/json ContentType.
 type SetPreferencesJSONRequestBody = Preferences
+
+// AccountRecoveryHelpJSONRequestBody defines body for AccountRecoveryHelp for application/json ContentType.
+type AccountRecoveryHelpJSONRequestBody = RecoveryRequest
+
+// CompleteResetPasswordJSONRequestBody defines body for CompleteResetPassword for application/json ContentType.
+type CompleteResetPasswordJSONRequestBody = ResetPasswordRequest
 
 // DisableTotpJSONRequestBody defines body for DisableTotp for application/json ContentType.
 type DisableTotpJSONRequestBody = TotpDisableRequest
@@ -15716,6 +16418,9 @@ type CreateVipJSONRequestBody = VipInput
 // CreateCommandJSONRequestBody defines body for CreateCommand for application/json ContentType.
 type CreateCommandJSONRequestBody = CommandInput
 
+// RunCommandOnceJSONRequestBody defines body for RunCommandOnce for application/json ContentType.
+type RunCommandOnceJSONRequestBody = CommandOnceInput
+
 // UpdateCommandJSONRequestBody defines body for UpdateCommand for application/json ContentType.
 type UpdateCommandJSONRequestBody = CommandInput
 
@@ -15737,14 +16442,35 @@ type RunCronJobJSONRequestBody RunCronJobJSONBody
 // StopCronRunJSONRequestBody defines body for StopCronRun for application/json ContentType.
 type StopCronRunJSONRequestBody StopCronRunJSONBody
 
+// UpdateCrowdSecAutoRulesJSONRequestBody defines body for UpdateCrowdSecAutoRules for application/json ContentType.
+type UpdateCrowdSecAutoRulesJSONRequestBody = CrowdSecAutoRules
+
 // SetCrowdSecConsoleKeyJSONRequestBody defines body for SetCrowdSecConsoleKey for application/json ContentType.
 type SetCrowdSecConsoleKeyJSONRequestBody = CrowdSecConsoleKeyInput
 
 // EnrollCrowdSecConsoleJSONRequestBody defines body for EnrollCrowdSecConsole for application/json ContentType.
 type EnrollCrowdSecConsoleJSONRequestBody = CrowdSecEnrollInput
 
+// SetCrowdSecConsoleOffJSONRequestBody defines body for SetCrowdSecConsoleOff for application/json ContentType.
+type SetCrowdSecConsoleOffJSONRequestBody = CrowdSecConsoleOffInput
+
 // DecideCrowdSecJSONRequestBody defines body for DecideCrowdSec for application/json ContentType.
 type DecideCrowdSecJSONRequestBody = CrowdSecDecisionInput
+
+// AddCrowdSecListJSONRequestBody defines body for AddCrowdSecList for application/json ContentType.
+type AddCrowdSecListJSONRequestBody = CrowdSecListInput
+
+// PreviewCrowdSecListJSONRequestBody defines body for PreviewCrowdSecList for application/json ContentType.
+type PreviewCrowdSecListJSONRequestBody = CrowdSecListInput
+
+// UpdateCrowdSecListJSONRequestBody defines body for UpdateCrowdSecList for application/json ContentType.
+type UpdateCrowdSecListJSONRequestBody = CrowdSecListInput
+
+// ChangeCrowdSecListEntriesJSONRequestBody defines body for ChangeCrowdSecListEntries for application/json ContentType.
+type ChangeCrowdSecListEntriesJSONRequestBody = CrowdSecListEntriesInput
+
+// RollbackCrowdSecListJSONRequestBody defines body for RollbackCrowdSecList for application/json ContentType.
+type RollbackCrowdSecListJSONRequestBody = CrowdSecRollbackInput
 
 // SetCrowdSecNodesJSONRequestBody defines body for SetCrowdSecNodes for application/json ContentType.
 type SetCrowdSecNodesJSONRequestBody = CrowdSecNodesInput
@@ -15754,6 +16480,9 @@ type ConfigureCrowdSecNodeJSONRequestBody = CrowdSecNodeInput
 
 // ApplyCrowdSecNodeJSONRequestBody defines body for ApplyCrowdSecNode for application/json ContentType.
 type ApplyCrowdSecNodeJSONRequestBody ApplyCrowdSecNodeJSONBody
+
+// UpdateCrowdSecNotifyJSONRequestBody defines body for UpdateCrowdSecNotify for application/json ContentType.
+type UpdateCrowdSecNotifyJSONRequestBody = CrowdSecNotifyInput
 
 // UpdateCrowdSecSettingsJSONRequestBody defines body for UpdateCrowdSecSettings for application/json ContentType.
 type UpdateCrowdSecSettingsJSONRequestBody = CrowdSecSettingsInput
@@ -15959,6 +16688,12 @@ type StartPublishJSONRequestBody = PveObject
 // AdoptPublishHostsJSONRequestBody defines body for AdoptPublishHosts for application/json ContentType.
 type AdoptPublishHostsJSONRequestBody = PveObject
 
+// RetryPublishAutoJSONRequestBody defines body for RetryPublishAuto for application/json ContentType.
+type RetryPublishAutoJSONRequestBody = PveObject
+
+// SavePublishAutoRuleJSONRequestBody defines body for SavePublishAutoRule for application/json ContentType.
+type SavePublishAutoRuleJSONRequestBody = PveObject
+
 // PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
 type PlanPublishJSONRequestBody = PveObject
 
@@ -16010,6 +16745,9 @@ type ApplySecurityFixesJSONRequestBody = SecurityFixInput
 // CreateSecurityImportTokenJSONRequestBody defines body for CreateSecurityImportToken for application/json ContentType.
 type CreateSecurityImportTokenJSONRequestBody = SecurityObject
 
+// SetProd2FAJSONRequestBody defines body for SetProd2FA for application/json ContentType.
+type SetProd2FAJSONRequestBody = Prod2FAInput
+
 // RefreshSecurityJSONRequestBody defines body for RefreshSecurity for application/json ContentType.
 type RefreshSecurityJSONRequestBody = SecurityRefreshInput
 
@@ -16046,6 +16784,9 @@ type UpdateStackJSONRequestBody = StackUpdateInput
 // StartUpdatesJSONRequestBody defines body for StartUpdates for application/json ContentType.
 type StartUpdatesJSONRequestBody = UpdateInput
 
+// StartUpdatesAllJSONRequestBody defines body for StartUpdatesAll for application/json ContentType.
+type StartUpdatesAllJSONRequestBody = UpdateAllInput
+
 // ReadComposeFilesJSONRequestBody defines body for ReadComposeFiles for application/json ContentType.
 type ReadComposeFilesJSONRequestBody = ComposeRef
 
@@ -16060,6 +16801,9 @@ type SetClusterUpdatePolicyJSONRequestBody = ClusterUpdatePolicyInput
 
 // SetEnvUpdatePolicyJSONRequestBody defines body for SetEnvUpdatePolicy for application/json ContentType.
 type SetEnvUpdatePolicyJSONRequestBody = UpdatePolicyInput
+
+// ResumeUpdateJSONRequestBody defines body for ResumeUpdate for application/json ContentType.
+type ResumeUpdateJSONRequestBody = UpdateResumeInput
 
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
@@ -16105,6 +16849,9 @@ type ServerInterface interface {
 	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/auto)
 	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
+	// SetAgentUpgradeNightOnly Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+	// (PUT /agent-upgrades/night-only)
+	SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request)
 	// SetAgentUpgradeProdAuto Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/prod-auto)
 	SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request)
@@ -16189,6 +16936,12 @@ type ServerInterface interface {
 	// SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 	// (PUT /auth/preferences)
 	SetPreferences(w http.ResponseWriter, r *http.Request)
+	// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
+	// (POST /auth/recovery)
+	AccountRecoveryHelp(w http.ResponseWriter, r *http.Request)
+	// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+	// (POST /auth/reset/password)
+	CompleteResetPassword(w http.ResponseWriter, r *http.Request)
 	// ListMySessions De actieve sessies van de ingelogde gebruiker
 	// (GET /auth/sessions)
 	ListMySessions(w http.ResponseWriter, r *http.Request)
@@ -16426,6 +17179,9 @@ type ServerInterface interface {
 	// CreateCommand Een eigen commando maken (admin)
 	// (POST /commands)
 	CreateCommand(w http.ResponseWriter, r *http.Request)
+	// RunCommandOnce Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+	// (POST /commands/once)
+	RunCommandOnce(w http.ResponseWriter, r *http.Request)
 	// DeleteCommand Een eigen commando weghalen (admin); de taken van zijn runs blijven
 	// (DELETE /commands/{commandId})
 	DeleteCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID)
@@ -16486,18 +17242,54 @@ type ServerInterface interface {
 	// ListCrowdSecAlerts Alerts van de nodes, nieuwste eerst (90 dagen)
 	// (GET /crowdsec/alerts)
 	ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request, params ListCrowdSecAlertsParams)
+	// UpdateCrowdSecAutoRules Regels voor automatisch blokkeren over alle nodes (admin)
+	// (PUT /crowdsec/auto-rules)
+	UpdateCrowdSecAutoRules(w http.ResponseWriter, r *http.Request)
 	// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
 	// (PUT /crowdsec/console)
 	SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request)
 	// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
 	// (POST /crowdsec/console/enroll)
 	EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request)
+	// SetCrowdSecConsoleOff CrowdSec Console loskoppelen (on) of weer toelaten (admin)
+	// (PUT /crowdsec/console/off)
+	SetCrowdSecConsoleOff(w http.ResponseWriter, r *http.Request)
 	// ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
 	// (GET /crowdsec/decisions)
 	ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request)
 	// DecideCrowdSec IP of range blokkeren of deblokkeren (admin)
 	// (POST /crowdsec/decisions)
 	DecideCrowdSec(w http.ResponseWriter, r *http.Request)
+	// ListCrowdSecLists Centrale blocklists (fase 47) met hun stand op de nodes, en de catalogus met publieke lijsten
+	// (GET /crowdsec/lists)
+	ListCrowdSecLists(w http.ResponseWriter, r *http.Request)
+	// AddCrowdSecList Publieke lijst aanzetten - uit de catalogus of een eigen https-URL (admin)
+	// (POST /crowdsec/lists)
+	AddCrowdSecList(w http.ResponseWriter, r *http.Request)
+	// PreviewCrowdSecList Een publieke lijst ophalen zonder te bewaren - aantal en wat wegvalt (admin)
+	// (POST /crowdsec/lists/preview)
+	PreviewCrowdSecList(w http.ResponseWriter, r *http.Request)
+	// DeleteCrowdSecList Publieke lijst weghalen; de nodes verliezen de bans bij de volgende ronde (admin)
+	// (DELETE /crowdsec/lists/{listId})
+	DeleteCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID)
+	// UpdateCrowdSecList Lijst aan/uit, naam, bereik of verversing (admin)
+	// (PUT /crowdsec/lists/{listId})
+	UpdateCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID)
+	// ListCrowdSecListEntries Waarden van een lijst, nieuwste eerst
+	// (GET /crowdsec/lists/{listId}/entries)
+	ListCrowdSecListEntries(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID, params ListCrowdSecListEntriesParams)
+	// ChangeCrowdSecListEntries Waarden toevoegen of weghalen in de eigen of de automatische lijst; dry_run geeft het voorbeeld (admin)
+	// (POST /crowdsec/lists/{listId}/entries)
+	ChangeCrowdSecListEntries(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID)
+	// RefreshCrowdSecList Publieke lijst nu ophalen; zet een vastgezette lijst weer op automatisch (admin)
+	// (POST /crowdsec/lists/{listId}/refresh)
+	RefreshCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID)
+	// RollbackCrowdSecList Lijst terugdraaien naar een versie; dry_run geeft het voorbeeld (admin)
+	// (POST /crowdsec/lists/{listId}/rollback)
+	RollbackCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID)
+	// ListCrowdSecListVersions Bewaarde versies van een lijst, nieuwste eerst
+	// (GET /crowdsec/lists/{listId}/versions)
+	ListCrowdSecListVersions(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID)
 	// SetCrowdSecNodes CrowdSec aan- of uitzetten op nodes (admin)
 	// (POST /crowdsec/nodes)
 	SetCrowdSecNodes(w http.ResponseWriter, r *http.Request)
@@ -16513,6 +17305,12 @@ type ServerInterface interface {
 	// RefreshCrowdSecNode De stand van een node meteen ophalen (admin)
 	// (POST /crowdsec/nodes/{nodeId}/refresh)
 	RefreshCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// UpdateCrowdSecNotify Meldingen en kanalen (ntfy, Discord, Slack, Telegram, webhook) (admin)
+	// (PUT /crowdsec/notify)
+	UpdateCrowdSecNotify(w http.ResponseWriter, r *http.Request)
+	// TestCrowdSecNotify Testmelding naar alle kanalen (admin)
+	// (POST /crowdsec/notify/test)
+	TestCrowdSecNotify(w http.ResponseWriter, r *http.Request)
 	// UpdateCrowdSecSettings CrowdSec-instellingen bewaren (admin)
 	// (PUT /crowdsec/settings)
 	UpdateCrowdSecSettings(w http.ResponseWriter, r *http.Request)
@@ -16885,6 +17683,9 @@ type ServerInterface interface {
 	// GetMap Een laag van de infrastructuurkaart
 	// (GET /map)
 	GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams)
+	// GetNavUsage Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47)
+	// (GET /nav/usage)
+	GetNavUsage(w http.ResponseWriter, r *http.Request)
 	// ListNodeLinks Voorstellen om een node aan een VM te koppelen
 	// (GET /node-links)
 	ListNodeLinks(w http.ResponseWriter, r *http.Request)
@@ -17089,6 +17890,21 @@ type ServerInterface interface {
 	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
 	// (POST /publish/adopt)
 	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// GetPublishAuto Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+	// (GET /publish/auto)
+	GetPublishAuto(w http.ResponseWriter, r *http.Request)
+	// GetPublishAutoBackup De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+	// (GET /publish/auto/backup)
+	GetPublishAutoBackup(w http.ResponseWriter, r *http.Request, params GetPublishAutoBackupParams)
+	// RetryPublishAuto Een mislukte automatische publicatie opnieuw laten proberen (admin)
+	// (POST /publish/auto/retry)
+	RetryPublishAuto(w http.ResponseWriter, r *http.Request)
+	// SavePublishAutoRule Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+	// (PUT /publish/auto/rules)
+	SavePublishAutoRule(w http.ResponseWriter, r *http.Request)
+	// GetPublishChanges Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+	// (GET /publish/changes)
+	GetPublishChanges(w http.ResponseWriter, r *http.Request, params GetPublishChangesParams)
 	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
 	// (POST /publish/hosts/{hostId}/accept)
 	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
@@ -17248,6 +18064,12 @@ type ServerInterface interface {
 	// RevokeSecurityImportToken Importsleutel intrekken (admin)
 	// (DELETE /security/import-tokens/{tokenId})
 	RevokeSecurityImportToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID)
+	// GetProd2FA Of acties op prodclusters tweestapsverificatie vragen
+	// (GET /security/prod-2fa)
+	GetProd2FA(w http.ResponseWriter, r *http.Request)
+	// SetProd2FA Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code)
+	// (PUT /security/prod-2fa)
+	SetProd2FA(w http.ResponseWriter, r *http.Request)
 	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 	// (POST /security/refresh)
 	RefreshSecurity(w http.ResponseWriter, r *http.Request)
@@ -17350,6 +18172,9 @@ type ServerInterface interface {
 	// StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
 	// (POST /updates)
 	StartUpdates(w http.ResponseWriter, r *http.Request)
+	// StartUpdatesAll Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+	// (POST /updates/all)
+	StartUpdatesAll(w http.ResponseWriter, r *http.Request)
 	// ReadComposeFiles De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders
 	// (POST /updates/compose)
 	ReadComposeFiles(w http.ResponseWriter, r *http.Request)
@@ -17368,6 +18193,12 @@ type ServerInterface interface {
 	// SetEnvUpdatePolicy Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
 	// (PUT /updates/policies/environments/{environment})
 	SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, environment string)
+	// GetUpdateResume Waar een gestopte clusterupdate kan hervatten (fase 47)
+	// (GET /updates/resume/{jobId})
+	GetUpdateResume(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// ResumeUpdate Een gestopte clusterupdate hervatten (admin, fase 47)
+	// (POST /updates/resume/{jobId})
+	ResumeUpdate(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -17479,6 +18310,12 @@ func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request
 // SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 // (PUT /agent-upgrades/auto)
 func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentUpgradeNightOnly Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+// (PUT /agent-upgrades/night-only)
+func (_ Unimplemented) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -17647,6 +18484,18 @@ func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 // (PUT /auth/preferences)
 func (_ Unimplemented) SetPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
+// (POST /auth/recovery)
+func (_ Unimplemented) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+// (POST /auth/reset/password)
+func (_ Unimplemented) CompleteResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18124,6 +18973,12 @@ func (_ Unimplemented) CreateCommand(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RunCommandOnce Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+// (POST /commands/once)
+func (_ Unimplemented) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // DeleteCommand Een eigen commando weghalen (admin); de taken van zijn runs blijven
 // (DELETE /commands/{commandId})
 func (_ Unimplemented) DeleteCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID) {
@@ -18244,6 +19099,12 @@ func (_ Unimplemented) ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// UpdateCrowdSecAutoRules Regels voor automatisch blokkeren over alle nodes (admin)
+// (PUT /crowdsec/auto-rules)
+func (_ Unimplemented) UpdateCrowdSecAutoRules(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
 // (PUT /crowdsec/console)
 func (_ Unimplemented) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
@@ -18256,6 +19117,12 @@ func (_ Unimplemented) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SetCrowdSecConsoleOff CrowdSec Console loskoppelen (on) of weer toelaten (admin)
+// (PUT /crowdsec/console/off)
+func (_ Unimplemented) SetCrowdSecConsoleOff(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
 // (GET /crowdsec/decisions)
 func (_ Unimplemented) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request) {
@@ -18265,6 +19132,66 @@ func (_ Unimplemented) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Requ
 // DecideCrowdSec IP of range blokkeren of deblokkeren (admin)
 // (POST /crowdsec/decisions)
 func (_ Unimplemented) DecideCrowdSec(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCrowdSecLists Centrale blocklists (fase 47) met hun stand op de nodes, en de catalogus met publieke lijsten
+// (GET /crowdsec/lists)
+func (_ Unimplemented) ListCrowdSecLists(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddCrowdSecList Publieke lijst aanzetten - uit de catalogus of een eigen https-URL (admin)
+// (POST /crowdsec/lists)
+func (_ Unimplemented) AddCrowdSecList(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PreviewCrowdSecList Een publieke lijst ophalen zonder te bewaren - aantal en wat wegvalt (admin)
+// (POST /crowdsec/lists/preview)
+func (_ Unimplemented) PreviewCrowdSecList(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteCrowdSecList Publieke lijst weghalen; de nodes verliezen de bans bij de volgende ronde (admin)
+// (DELETE /crowdsec/lists/{listId})
+func (_ Unimplemented) DeleteCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCrowdSecList Lijst aan/uit, naam, bereik of verversing (admin)
+// (PUT /crowdsec/lists/{listId})
+func (_ Unimplemented) UpdateCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCrowdSecListEntries Waarden van een lijst, nieuwste eerst
+// (GET /crowdsec/lists/{listId}/entries)
+func (_ Unimplemented) ListCrowdSecListEntries(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID, params ListCrowdSecListEntriesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ChangeCrowdSecListEntries Waarden toevoegen of weghalen in de eigen of de automatische lijst; dry_run geeft het voorbeeld (admin)
+// (POST /crowdsec/lists/{listId}/entries)
+func (_ Unimplemented) ChangeCrowdSecListEntries(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshCrowdSecList Publieke lijst nu ophalen; zet een vastgezette lijst weer op automatisch (admin)
+// (POST /crowdsec/lists/{listId}/refresh)
+func (_ Unimplemented) RefreshCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RollbackCrowdSecList Lijst terugdraaien naar een versie; dry_run geeft het voorbeeld (admin)
+// (POST /crowdsec/lists/{listId}/rollback)
+func (_ Unimplemented) RollbackCrowdSecList(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCrowdSecListVersions Bewaarde versies van een lijst, nieuwste eerst
+// (GET /crowdsec/lists/{listId}/versions)
+func (_ Unimplemented) ListCrowdSecListVersions(w http.ResponseWriter, r *http.Request, listId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18295,6 +19222,18 @@ func (_ Unimplemented) ApplyCrowdSecNode(w http.ResponseWriter, r *http.Request,
 // RefreshCrowdSecNode De stand van een node meteen ophalen (admin)
 // (POST /crowdsec/nodes/{nodeId}/refresh)
 func (_ Unimplemented) RefreshCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCrowdSecNotify Meldingen en kanalen (ntfy, Discord, Slack, Telegram, webhook) (admin)
+// (PUT /crowdsec/notify)
+func (_ Unimplemented) UpdateCrowdSecNotify(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestCrowdSecNotify Testmelding naar alle kanalen (admin)
+// (POST /crowdsec/notify/test)
+func (_ Unimplemented) TestCrowdSecNotify(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19042,6 +19981,12 @@ func (_ Unimplemented) GetMap(w http.ResponseWriter, r *http.Request, params Get
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetNavUsage Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47)
+// (GET /nav/usage)
+func (_ Unimplemented) GetNavUsage(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListNodeLinks Voorstellen om een node aan een VM te koppelen
 // (GET /node-links)
 func (_ Unimplemented) ListNodeLinks(w http.ResponseWriter, r *http.Request) {
@@ -19450,6 +20395,36 @@ func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetPublishAuto Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+// (GET /publish/auto)
+func (_ Unimplemented) GetPublishAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishAutoBackup De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+// (GET /publish/auto/backup)
+func (_ Unimplemented) GetPublishAutoBackup(w http.ResponseWriter, r *http.Request, params GetPublishAutoBackupParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RetryPublishAuto Een mislukte automatische publicatie opnieuw laten proberen (admin)
+// (POST /publish/auto/retry)
+func (_ Unimplemented) RetryPublishAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishAutoRule Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+// (PUT /publish/auto/rules)
+func (_ Unimplemented) SavePublishAutoRule(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishChanges Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+// (GET /publish/changes)
+func (_ Unimplemented) GetPublishChanges(w http.ResponseWriter, r *http.Request, params GetPublishChangesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
 // (POST /publish/hosts/{hostId}/accept)
 func (_ Unimplemented) AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int) {
@@ -19768,6 +20743,18 @@ func (_ Unimplemented) RevokeSecurityImportToken(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetProd2FA Of acties op prodclusters tweestapsverificatie vragen
+// (GET /security/prod-2fa)
+func (_ Unimplemented) GetProd2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetProd2FA Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code)
+// (PUT /security/prod-2fa)
+func (_ Unimplemented) SetProd2FA(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 // (POST /security/refresh)
 func (_ Unimplemented) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
@@ -19972,6 +20959,12 @@ func (_ Unimplemented) StartUpdates(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// StartUpdatesAll Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+// (POST /updates/all)
+func (_ Unimplemented) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ReadComposeFiles De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders
 // (POST /updates/compose)
 func (_ Unimplemented) ReadComposeFiles(w http.ResponseWriter, r *http.Request) {
@@ -20005,6 +20998,18 @@ func (_ Unimplemented) SetClusterUpdatePolicy(w http.ResponseWriter, r *http.Req
 // SetEnvUpdatePolicy Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
 // (PUT /updates/policies/environments/{environment})
 func (_ Unimplemented) SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, environment string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetUpdateResume Waar een gestopte clusterupdate kan hervatten (fase 47)
+// (GET /updates/resume/{jobId})
+func (_ Unimplemented) GetUpdateResume(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResumeUpdate Een gestopte clusterupdate hervatten (admin, fase 47)
+// (POST /updates/resume/{jobId})
+func (_ Unimplemented) ResumeUpdate(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -20236,6 +21241,20 @@ func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentUpgradeNightOnly operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentUpgradeNightOnly(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20979,6 +21998,34 @@ func (siw *ServerInterfaceWrapper) SetPreferences(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AccountRecoveryHelp operation middleware
+func (siw *ServerInterfaceWrapper) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AccountRecoveryHelp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteResetPassword operation middleware
+func (siw *ServerInterfaceWrapper) CompleteResetPassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteResetPassword(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -23381,6 +24428,20 @@ func (siw *ServerInterfaceWrapper) CreateCommand(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// RunCommandOnce operation middleware
+func (siw *ServerInterfaceWrapper) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunCommandOnce(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteCommand operation middleware
 func (siw *ServerInterfaceWrapper) DeleteCommand(w http.ResponseWriter, r *http.Request) {
 
@@ -23911,6 +24972,20 @@ func (siw *ServerInterfaceWrapper) ListCrowdSecAlerts(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// UpdateCrowdSecAutoRules operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCrowdSecAutoRules(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCrowdSecAutoRules(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetCrowdSecConsoleKey operation middleware
 func (siw *ServerInterfaceWrapper) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
 
@@ -23939,6 +25014,20 @@ func (siw *ServerInterfaceWrapper) EnrollCrowdSecConsole(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// SetCrowdSecConsoleOff operation middleware
+func (siw *ServerInterfaceWrapper) SetCrowdSecConsoleOff(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCrowdSecConsoleOff(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListCrowdSecDecisions operation middleware
 func (siw *ServerInterfaceWrapper) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request) {
 
@@ -23958,6 +25047,259 @@ func (siw *ServerInterfaceWrapper) DecideCrowdSec(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DecideCrowdSec(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCrowdSecLists operation middleware
+func (siw *ServerInterfaceWrapper) ListCrowdSecLists(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCrowdSecLists(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddCrowdSecList operation middleware
+func (siw *ServerInterfaceWrapper) AddCrowdSecList(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddCrowdSecList(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewCrowdSecList operation middleware
+func (siw *ServerInterfaceWrapper) PreviewCrowdSecList(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewCrowdSecList(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCrowdSecList operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCrowdSecList(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCrowdSecList(w, r, listId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCrowdSecList operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCrowdSecList(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCrowdSecList(w, r, listId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCrowdSecListEntries operation middleware
+func (siw *ServerInterfaceWrapper) ListCrowdSecListEntries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCrowdSecListEntriesParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCrowdSecListEntries(w, r, listId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeCrowdSecListEntries operation middleware
+func (siw *ServerInterfaceWrapper) ChangeCrowdSecListEntries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeCrowdSecListEntries(w, r, listId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshCrowdSecList operation middleware
+func (siw *ServerInterfaceWrapper) RefreshCrowdSecList(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshCrowdSecList(w, r, listId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackCrowdSecList operation middleware
+func (siw *ServerInterfaceWrapper) RollbackCrowdSecList(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackCrowdSecList(w, r, listId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCrowdSecListVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListCrowdSecListVersions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "listId" -------------
+	var listId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "listId", chi.URLParam(r, "listId"), &listId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "listId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCrowdSecListVersions(w, r, listId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -24076,6 +25418,34 @@ func (siw *ServerInterfaceWrapper) RefreshCrowdSecNode(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RefreshCrowdSecNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCrowdSecNotify operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCrowdSecNotify(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCrowdSecNotify(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestCrowdSecNotify operation middleware
+func (siw *ServerInterfaceWrapper) TestCrowdSecNotify(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestCrowdSecNotify(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -26353,6 +27723,32 @@ func (siw *ServerInterfaceWrapper) ListJobs(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// ------------- Optional query parameter "who" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "who", r.URL.Query(), &params.Who, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "who"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "who", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -27971,6 +29367,20 @@ func (siw *ServerInterfaceWrapper) GetMap(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMap(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNavUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetNavUsage(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNavUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -29972,6 +31382,114 @@ func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishAuto operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishAutoBackup operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishAutoBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishAutoBackupParams
+
+	// ------------- Required query parameter "service_key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "service_key", r.URL.Query(), &params.ServiceKey, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "service_key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "service_key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishAutoBackup(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryPublishAuto operation middleware
+func (siw *ServerInterfaceWrapper) RetryPublishAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryPublishAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishAutoRule operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishAutoRule(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishAutoRule(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishChanges operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishChangesParams
+
+	// ------------- Optional query parameter "hours" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "hours", r.URL.Query(), &params.Hours, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "hours"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hours", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AcceptPublishDrift operation middleware
 func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -31183,6 +32701,34 @@ func (siw *ServerInterfaceWrapper) RevokeSecurityImportToken(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
+// GetProd2FA operation middleware
+func (siw *ServerInterfaceWrapper) GetProd2FA(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProd2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetProd2FA operation middleware
+func (siw *ServerInterfaceWrapper) SetProd2FA(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetProd2FA(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RefreshSecurity operation middleware
 func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
 
@@ -31975,6 +33521,20 @@ func (siw *ServerInterfaceWrapper) StartUpdates(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// StartUpdatesAll operation middleware
+func (siw *ServerInterfaceWrapper) StartUpdatesAll(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartUpdatesAll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReadComposeFiles operation middleware
 func (siw *ServerInterfaceWrapper) ReadComposeFiles(w http.ResponseWriter, r *http.Request) {
 
@@ -32074,6 +33634,58 @@ func (siw *ServerInterfaceWrapper) SetEnvUpdatePolicy(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetEnvUpdatePolicy(w, r, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUpdateResume operation middleware
+func (siw *ServerInterfaceWrapper) GetUpdateResume(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUpdateResume(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeUpdate operation middleware
+func (siw *ServerInterfaceWrapper) ResumeUpdate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeUpdate(w, r, jobId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -32741,6 +34353,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/auth/password", wrapper.ChangePassword)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/recovery", wrapper.AccountRecoveryHelp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/reset/password", wrapper.CompleteResetPassword)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/auth/sessions", wrapper.ListMySessions)
 	})
 	r.Group(func(r chi.Router) {
@@ -32751,6 +34369,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/attention", wrapper.GetAttention)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nav/usage", wrapper.GetNavUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/prod-2fa", wrapper.GetProd2FA)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/security/prod-2fa", wrapper.SetProd2FA)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/disk/settings", wrapper.GetDiskWatchSettings)
@@ -33416,6 +35043,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/updates", wrapper.StartUpdates)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/updates/resume/{jobId}", wrapper.GetUpdateResume)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates/resume/{jobId}", wrapper.ResumeUpdate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates/all", wrapper.StartUpdatesAll)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/updates/policies", wrapper.GetUpdatePolicies)
 	})
 	r.Group(func(r chi.Router) {
@@ -33534,6 +35170,48 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/crowdsec/decisions", wrapper.DecideCrowdSec)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec/lists", wrapper.ListCrowdSecLists)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/lists", wrapper.AddCrowdSecList)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/lists/preview", wrapper.PreviewCrowdSecList)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/crowdsec/lists/{listId}", wrapper.DeleteCrowdSecList)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/lists/{listId}", wrapper.UpdateCrowdSecList)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec/lists/{listId}/entries", wrapper.ListCrowdSecListEntries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/lists/{listId}/entries", wrapper.ChangeCrowdSecListEntries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/lists/{listId}/refresh", wrapper.RefreshCrowdSecList)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec/lists/{listId}/versions", wrapper.ListCrowdSecListVersions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/lists/{listId}/rollback", wrapper.RollbackCrowdSecList)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/auto-rules", wrapper.UpdateCrowdSecAutoRules)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/notify", wrapper.UpdateCrowdSecNotify)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/notify/test", wrapper.TestCrowdSecNotify)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/console/off", wrapper.SetCrowdSecConsoleOff)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve-hosts", wrapper.ListPveHosts)
@@ -33695,6 +35373,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/publish/actions", wrapper.StartPublish)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/changes", wrapper.GetPublishChanges)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/adopt", wrapper.AdoptPublishHosts)
 	})
 	r.Group(func(r chi.Router) {
@@ -33702,6 +35383,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/hosts/{hostId}/release", wrapper.ReleasePublishHost)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/auto", wrapper.GetPublishAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/auto/rules", wrapper.SavePublishAutoRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/auto/retry", wrapper.RetryPublishAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/auto/backup", wrapper.GetPublishAutoBackup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)
@@ -33887,6 +35580,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/commands/{commandId}/run", wrapper.RunCommand)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/commands/once", wrapper.RunCommandOnce)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/agent-upgrades", wrapper.ListAgentUpgrades)
 	})
 	r.Group(func(r chi.Router) {
@@ -33897,6 +35593,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/agent-upgrades/prod-auto", wrapper.SetAgentUpgradeProdAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-upgrades/night-only", wrapper.SetAgentUpgradeNightOnly)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/agent-upgrades/prod-queue", wrapper.ClearAgentUpgradeProdQueue)

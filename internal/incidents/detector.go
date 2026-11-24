@@ -53,6 +53,9 @@ func (d *Detector) Detect(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if err := restartLoops(ctx, tx, &w, now); err != nil {
+			return err
+		}
 		incs, err := load(ctx, q, now.Add(-d.Rules.Reopen))
 		if err != nil {
 			return err

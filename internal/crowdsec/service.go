@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -55,8 +56,19 @@ type Service struct {
 	// zonder masterkey.
 	Box *secrets.Box
 
+	// HTTP haalt publieke lijsten op en stuurt meldingen; nil is een
+	// gewone client.
+	HTTP *http.Client
+
 	tick      sync.Mutex
 	lastPrune time.Time
+
+	listMu   sync.Mutex
+	listKick chan struct{}
+	notifyMu sync.Mutex
+	notified map[string]time.Time
+	// alertCursor is de hoogste alert-id die al gemeld is.
+	alertCursor int64
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus Bus, log *slog.Logger) *Service {
@@ -66,6 +78,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus 
 	s := &Service{
 		pool: pool, ev: ev, runner: runner, bus: bus, log: log, Run: &noderun.Runner{Bus: bus},
 		PollEvery: time.Minute, StatusEvery: 5 * time.Minute, Now: time.Now,
+		listKick: make(chan struct{}, 1), notified: map[string]time.Time{}, alertCursor: -1,
 	}
 	if runner != nil {
 		runner.Register(Kind, s.apply)
@@ -116,6 +129,11 @@ func (s *Service) UpdateSettings(ctx context.Context, actor events.Actor, userID
 	s.event(ctx, actor, nil, "crowdsec.settings_changed", map[string]any{
 		"auto_apply": in.AutoApply, "bouncer_default": in.BouncerDefault, "share_bans": in.ShareBans, "whitelist": in.Whitelist,
 	})
+	// Een andere whitelist verandert wat de lijsten mogen blokkeren.
+	if err := s.RecomputeAll(ctx); err != nil {
+		return Settings{}, err
+	}
+	s.kickLists()
 	return s.Settings(ctx)
 }
 
@@ -373,6 +391,7 @@ func logPlan(st logger, plan Plan) {
 // Loop haalt elke PollEvery de stand, de alerts en de bans op, past
 // gewijzigde plannen toe en deelt bans.
 func (s *Service) Loop(ctx context.Context) {
+	go s.ListLoop(ctx)
 	t := time.NewTicker(s.PollEvery)
 	defer t.Stop()
 	for {
@@ -432,7 +451,7 @@ func (s *Service) Tick(ctx context.Context) error {
 				}
 			}
 		}
-		if n.wantsConsole(set.consoleKeyHash) && (n.ConsoleFailedAt == nil || now.Sub(*n.ConsoleFailedAt) >= RetryFailed) {
+		if !set.ConsoleOff && n.wantsConsole(set.consoleKeyHash) && (n.ConsoleFailedAt == nil || now.Sub(*n.ConsoleFailedAt) >= RetryFailed) {
 			if !consoleTried {
 				consoleTried = true
 				consoleKey, consoleErr = s.consoleKey(set)
@@ -549,6 +568,9 @@ func (s *Service) poll(ctx context.Context, n Node) ([]sharedBan, error) {
 	}
 	var fresh []sharedBan
 	for _, d := range p.Decisions {
+		if strings.HasPrefix(d.Scenario, protocol.CrowdSecListPrefix) {
+			continue
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO crowdsec_decisions (node_id, decision_id, origin, type, scope, value, scenario, until, country, as_name)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING`,
 			n.NodeID, d.ID, d.Origin, d.Type, d.Scope, d.Value, d.Scenario, d.Until, d.Country, d.AS); err != nil {
@@ -558,8 +580,14 @@ func (s *Service) poll(ctx context.Context, n Node) ([]sharedBan, error) {
 			fresh = append(fresh, sharedBan{node: n, scope: d.Scope, value: d.Value, scenario: d.Scenario, until: d.Until})
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE crowdsec_nodes SET poll_at = now(), poll_error = '', blocklist = $2, last_alert_at = $3 WHERE node_id = $1`,
-		n.NodeID, p.Blocklist, last); err != nil {
+	var lists []byte
+	if p.Lists != nil {
+		if lists, err = json.Marshal(p.Lists); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE crowdsec_nodes SET poll_at = now(), poll_error = '', blocklist = $2, last_alert_at = $3, lists = $4 WHERE node_id = $1`,
+		n.NodeID, p.Blocklist, last, lists); err != nil {
 		return nil, err
 	}
 	return fresh, tx.Commit(ctx)
@@ -634,6 +662,11 @@ func (s *Service) share(ctx context.Context, mode string, nodes []Node, bans []s
 type BanTarget struct {
 	NodeIDs   []uuid.UUID
 	ClusterID *uuid.UUID
+	// Central zet het IP ook in de eigen blocklist: dan blijft het, ook op
+	// nodes die later bijkomen. Permanent: zonder einddatum.
+	Central   bool
+	Permanent bool
+	UserID    *uuid.UUID
 }
 
 // BanResult zegt per node hoe het ging.
@@ -681,6 +714,39 @@ func (s *Service) Ban(ctx context.Context, actor events.Actor, d protocol.CrowdS
 		res.Nodes = append(res.Nodes, n.Hostname)
 	}
 	if d.Delete {
+		// Ook uit de eigen en de automatische lijst, anders komt het IP
+		// bij de volgende ronde terug.
+		for _, slug := range []string{"eigen", "auto"} {
+			l, err := s.listBySlug(ctx, slug)
+			if err != nil {
+				return res, err
+			}
+			if _, err := s.ChangeEntries(ctx, actor, target.UserID, l.ID, nil, []string{d.Value}, false); err != nil {
+				return res, err
+			}
+		}
+		if _, err := s.pool.Exec(ctx, `INSERT INTO crowdsec_offenders (value, offenses, last_at) VALUES ($1, 0, now())
+			ON CONFLICT (value) DO UPDATE SET last_at = now()`, d.Value); err != nil {
+			return res, err
+		}
+	} else if target.Central {
+		l, err := s.listBySlug(ctx, "eigen")
+		if err != nil {
+			return res, err
+		}
+		in := EntryInput{Value: d.Value, Reason: d.Reason}
+		if !target.Permanent {
+			in.ExpiresIn, _ = time.ParseDuration(d.Duration)
+		}
+		diff, err := s.ChangeEntries(ctx, actor, target.UserID, l.ID, []EntryInput{in}, nil, false)
+		if err != nil {
+			return res, err
+		}
+		if len(diff.Refused) > 0 {
+			res.Errors = append(res.Errors, "niet in de centrale lijst: "+diff.Refused[0].Why)
+		}
+	}
+	if d.Delete {
 		if _, err := s.pool.Exec(ctx, `DELETE FROM crowdsec_decisions WHERE value = $1`, d.Value); err != nil {
 			return res, err
 		}
@@ -694,7 +760,15 @@ func (s *Service) Ban(ctx context.Context, actor events.Actor, d protocol.CrowdS
 	}
 	s.event(ctx, actor, nil, action, map[string]any{
 		"scope": d.Scope, "value": d.Value, "duration": d.Duration, "reason": d.Reason, "nodes": res.Nodes, "errors": res.Errors,
+		"central": target.Central, "permanent": target.Permanent,
 	})
+	if set, err := s.Settings(ctx); err == nil && set.Notify.ManualBans {
+		title := "IP geblokkeerd: " + d.Value
+		if d.Delete {
+			title = "IP gedeblokkeerd: " + d.Value
+		}
+		s.notify(ctx, title, fmt.Sprintf("op %d nodes; %s", len(res.Nodes), d.Reason), "info")
+	}
 	return res, nil
 }
 

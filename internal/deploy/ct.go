@@ -342,6 +342,7 @@ func (r *runCtx) createCT(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		}); err != nil {
 			return err
 		}
+		r.s.noteClonedFrom(ctx, st, n.ID, "CT-template "+vs.OSTemplate)
 		if err := next("start"); err != nil {
 			return err
 		}

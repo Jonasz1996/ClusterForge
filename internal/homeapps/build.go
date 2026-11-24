@@ -2,6 +2,7 @@ package homeapps
 
 import (
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strconv"
@@ -126,10 +127,14 @@ type App struct {
 	Icon    string `json:"icon"`
 	Catalog string `json:"catalog,omitempty"`
 	// Auto: zelf herkend (catalogus) of via een gepubliceerde host.
-	Auto        string     `json:"found_by"`
-	Status      string     `json:"status"`
-	StatusLabel string     `json:"status_label"`
-	Reason      string     `json:"reason,omitempty"`
+	Auto        string `json:"found_by"`
+	Status      string `json:"status"`
+	StatusLabel string `json:"status_label"`
+	Reason      string `json:"reason,omitempty"`
+	// ReasonCode (testlijst 3, N25): target_unknown (ClusterForge kent het
+	// doel niet, de app antwoordt wel), target_dead (het doel antwoordt
+	// niet), npm_problem, of leeg.
+	ReasonCode  string     `json:"reason_code,omitempty"`
 	Gone        bool       `json:"gone"`
 	FirstSeen   *time.Time `json:"first_seen,omitempty"`
 	LastSeen    *time.Time `json:"last_seen,omitempty"`
@@ -138,16 +143,19 @@ type App struct {
 	ActiveNode  string     `json:"active_node,omitempty"`
 	URL         string     `json:"url,omitempty"`
 	InternalURL string     `json:"internal_url,omitempty"`
-	Version     string     `json:"version,omitempty"`
-	Domains     []string   `json:"domains"`
-	Authentik   string     `json:"authentik,omitempty"`
-	Ports       []int      `json:"ports"`
-	Instances   []Instance `json:"instances"`
-	Problems    []string   `json:"problems"`
-	Stats       string     `json:"stats,omitempty"`
-	Override    Override   `json:"override"`
-	Hidden      bool       `json:"hidden"`
-	Sort        int        `json:"sort"`
+	// Target is het echte doel als host:poort: waar NPM naartoe stuurt, of
+	// anders waar de dienst luistert (homepage H12).
+	Target    string     `json:"target,omitempty"`
+	Version   string     `json:"version,omitempty"`
+	Domains   []string   `json:"domains"`
+	Authentik string     `json:"authentik,omitempty"`
+	Ports     []int      `json:"ports"`
+	Instances []Instance `json:"instances"`
+	Problems  []string   `json:"problems"`
+	Stats     string     `json:"stats,omitempty"`
+	Override  Override   `json:"override"`
+	Hidden    bool       `json:"hidden"`
+	Sort      int        `json:"sort"`
 }
 
 // Doubt is een webdienst die ClusterForge niet zeker herkent: één klik
@@ -401,6 +409,9 @@ func buildApp(key string, g *group, nodes map[uuid.UUID]Node, hostsBySvc map[str
 			if a.Authentik == "" {
 				a.Authentik = h.Authentik
 			}
+			if a.Target == "" && h.Enabled && h.ForwardHost != "" {
+				a.Target = net.JoinHostPort(h.ForwardHost, strconv.Itoa(h.ForwardPort))
+			}
 			for _, p := range h.Problems {
 				if p.Level == "crit" {
 					a.Problems = append(a.Problems, "NPM: "+p.Text)
@@ -435,6 +446,9 @@ func buildApp(key string, g *group, nodes map[uuid.UUID]Node, hostsBySvc map[str
 		}
 		if mainRow.Target != "" {
 			a.InternalURL = scheme + "://" + mainRow.Target + ":" + strconv.Itoa(mainRow.Port)
+			if a.Target == "" {
+				a.Target = net.JoinHostPort(mainRow.Target, strconv.Itoa(mainRow.Port))
+			}
 		}
 	}
 	if a.URL == "" {
@@ -487,6 +501,7 @@ func hostApp(h publish.HostView) App {
 			scheme = "http"
 		}
 		a.InternalURL = scheme + "://" + h.ForwardHost + ":" + strconv.Itoa(h.ForwardPort)
+		a.Target = net.JoinHostPort(h.ForwardHost, strconv.Itoa(h.ForwardPort))
 		a.Ports = []int{h.ForwardPort}
 	}
 	for _, p := range h.Problems {
@@ -494,9 +509,25 @@ func hostApp(h publish.HostView) App {
 			a.Problems = append(a.Problems, "NPM: "+p.Text)
 		}
 	}
-	a.Status, a.Reason = StatusOK, "via NPM naar "+h.ForwardHost+" (geen ClusterForge-agent op dat adres)"
-	if len(a.Problems) > 0 {
-		a.Status, a.Reason = StatusWarn, a.Problems[0]
+	// Testlijst 3, N23/N25: ClusterForge bekeek het doel zelf. Antwoordt
+	// het, dan is de app gezond, ook al kent ClusterForge de dienst niet.
+	pr := h.TargetProbe
+	switch {
+	case pr != nil && h.TargetAlive && pr.Status < 500:
+		a.Status, a.ReasonCode = StatusOK, "target_unknown"
+		a.Reason = fmt.Sprintf("via NPM naar %s:%d; dat antwoordt (HTTP %d), maar ClusterForge ontdekte er geen dienst", h.ForwardHost, h.ForwardPort, pr.Status)
+		a.Problems = []string{}
+	case pr != nil && h.TargetAlive:
+		a.Status, a.ReasonCode = StatusDown, "app_error"
+		a.Reason = fmt.Sprintf("het doel %s:%d antwoordt met HTTP %d", h.ForwardHost, h.ForwardPort, pr.Status)
+	case pr != nil:
+		a.Status, a.ReasonCode = StatusDown, "target_dead"
+		a.Reason = fmt.Sprintf("het doel %s:%d antwoordt niet (%s)", h.ForwardHost, h.ForwardPort, pr.Error)
+	case len(a.Problems) > 0:
+		a.Status, a.Reason, a.ReasonCode = StatusWarn, a.Problems[0], "npm_problem"
+	default:
+		a.Status, a.Reason = StatusOK, "via NPM naar "+h.ForwardHost+" (geen ClusterForge-agent op dat adres)"
+		a.ReasonCode = "target_unknown"
 	}
 	return a
 }

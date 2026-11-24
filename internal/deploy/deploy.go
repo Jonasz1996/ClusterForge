@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -76,6 +77,8 @@ type Service struct {
 	EnrollTimeout     time.Duration
 	// HTTPGet doet de HTTP-controle; tests vervangen hem.
 	HTTPGet func(ctx context.Context, url string) (int, error)
+	// UDPProbe doet de udp-controle; tests vervangen hem.
+	UDPProbe func(ctx context.Context, addr string, probe []byte) error
 	// Changed wordt aangeroepen als nodes van lifecycle veranderen. Mag nil zijn.
 	Changed func()
 	// Templates zijn de templates die de server kent; tests zetten er andere.
@@ -100,10 +103,12 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, box: box, pve: pve, bus: bus,
 		inv: inventory.NewService(pool, ev), agents: agents.NewService(pool, ev, bus),
 		Poll: 3 * time.Second, GuestAgentTimeout: 10 * time.Minute, EnrollTimeout: 5 * time.Minute,
-		HTTPGet: httpGet, Templates: templates.BuiltinRegistry(),
+		HTTPGet: httpGet, UDPProbe: udpProbe, Templates: templates.BuiltinRegistry(),
 	}
 	runner.Register(Kind, s.run)
 	runner.Retryable(Kind)
+	runner.Register(CleanupKind, s.cleanup)
+	runner.Retryable(CleanupKind)
 	return s
 }
 
@@ -120,6 +125,33 @@ func httpGet(ctx context.Context, u string) (int, error) {
 	}
 	_ = resp.Body.Close()
 	return resp.StatusCode, nil
+}
+
+// udpProbe stuurt probe naar addr en wacht op een antwoord. De socket is
+// verbonden: een antwoord van een ander adres (het IP van de node in plaats
+// van het VIP) komt niet binnen en telt dus als geen antwoord.
+func udpProbe(ctx context.Context, addr string, probe []byte) error {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "udp", addr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	buf := make([]byte, 2048)
+	for range 3 {
+		if _, err := conn.Write(probe); err != nil {
+			return err
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, err := conn.Read(buf)
+		if err == nil && n > 0 {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	return fmt.Errorf("geen antwoord van %s", addr)
 }
 
 // Request is een aanvraag om een cluster uit te rollen.
@@ -1012,4 +1044,15 @@ func (s *Service) planExisting(ctx context.Context, tpl *templates.Template, p *
 		}
 	}
 	return nil
+}
+
+// noteClonedFrom legt vast waaruit ClusterForge de gast maakte (testlijst 3,
+// N18). node_type blijft unknown: een gast die ClusterForge uitrolt is
+// productie tot een mens hem als wegwerpkloon aanduidt. Een fout hier stopt
+// de uitrol niet.
+func (s *Service) noteClonedFrom(ctx context.Context, st *jobs.Step, id uuid.UUID, from string) {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO node_pentest (node_id, cloned_from) VALUES ($1, $2)
+		ON CONFLICT (node_id) DO UPDATE SET cloned_from = EXCLUDED.cloned_from`, id, from); err != nil {
+		st.Logf("herkomst niet vastgelegd: %v", err)
+	}
 }

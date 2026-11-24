@@ -10,10 +10,10 @@ import { MenuIcon, MoonIcon, SearchIcon, SunIcon, SystemIcon } from "@/component
 import { Sidebar } from "@/components/shell/Sidebar";
 import { ToastHost } from "@/components/Toast";
 import { PageHelpBox } from "@/components/help/PageHelpBox";
-import { useHelpOn } from "@/lib/helpPrefs";
+import { reopenHelp, useHelpClosed, useHelpOn } from "@/lib/helpPrefs";
 import { Button } from "@/components/ui";
 import { useAttentionBadges } from "@/lib/attention";
-import { useLogout, useRequireMe } from "@/lib/auth";
+import { setupPending, useLogout, useRequireMe } from "@/lib/auth";
 import { useLiveUpdates } from "@/lib/live";
 import { titleFor } from "@/lib/nav";
 import { useTheme, type Theme } from "@/lib/theme";
@@ -26,11 +26,13 @@ const themeIcon: Record<Theme, ReactNode> = { system: <SystemIcon />, light: <Su
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const me = useRequireMe();
+  // Na een reset gaat de gebruiker eerst naar /login om zijn account in te stellen.
+  const ready = !!me.data && !setupPending(me.data);
   // Het adres voor agents, voor elk installcommando in de interface.
-  useAgentEndpoints(!!me.data);
+  useAgentEndpoints(ready);
   const logout = useLogout();
   const pathname = usePathname();
-  useLiveUpdates(!!me.data);
+  useLiveUpdates(ready);
   const isAdmin = me.data?.user.role === "admin";
   // Het menu op mobiel hoort bij de pagina waar het openging: na een
   // navigatie is het vanzelf dicht.
@@ -40,8 +42,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [theme, setTheme] = useTheme();
   const [helpOn, setHelpOn] = useHelpOn();
-  const badges = useAttentionBadges(!!me.data);
-  const updated = useServerUpdated(!!me.data);
+  const helpClosedHere = useHelpClosed().includes(pathname);
+  const badges = useAttentionBadges(ready);
+  const updated = useServerUpdated(ready);
   useReloadOnStaleChunks();
 
   // De titel van het tabblad volgt de pagina (React zet <title> in <head>).
@@ -72,7 +75,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     };
   }, [menuOpen]);
 
-  if (!me.data) {
+  if (!me.data || !ready) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-slate-500">
         {title}
@@ -164,8 +167,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             {searchButton}
             <button
               type="button"
-              onClick={() => setHelpOn(!helpOn)}
-              title={helpOn ? "Uitleg op elke pagina: aan (klik om te verbergen)" : "Uitleg op elke pagina: uit (klik om te tonen)"}
+              onClick={() => {
+                // Gesloten op deze pagina: eerst die uitleg terug.
+                if (helpOn && helpClosedHere) reopenHelp(pathname);
+                else {
+                  if (!helpOn) reopenHelp(pathname);
+                  setHelpOn(!helpOn);
+                }
+              }}
+              title={
+                helpOn && helpClosedHere
+                  ? "Uitleg bij deze pagina tonen"
+                  : helpOn
+                    ? "Uitleg op elke pagina: aan (klik om te verbergen)"
+                    : "Uitleg op elke pagina: uit (klik om te tonen)"
+              }
               aria-label={helpOn ? "Uitleg verbergen" : "Uitleg tonen"}
               aria-pressed={helpOn}
               className={`flex size-8 items-center justify-center rounded-full border text-sm font-bold ${

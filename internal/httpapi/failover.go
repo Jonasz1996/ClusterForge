@@ -205,7 +205,7 @@ func (s *Server) StartFailoverTest(w http.ResponseWriter, r *http.Request, id uu
 		return
 	}
 	if c.Environment == store.EnvironmentProd {
-		if p.User.TotpEnabledAt == nil {
+		if s.needs2FA(r.Context(), p) {
 			writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie een failovertest starten; zet die aan bij Instellingen")
 			return
 		}

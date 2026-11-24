@@ -10,7 +10,15 @@ import { AKBadge, Empty, StatusBar } from "@/components/publish/bits";
 import { toast } from "@/components/Toast";
 import { Alert, Badge, Button, Card, Input, PageHeader } from "@/components/ui";
 import { useMe } from "@/lib/auth";
-import { useAcceptDrift, useAdoptHosts, usePublishOverview, useReleaseHost, type PublishAction, type PublishHost } from "@/lib/publish";
+import {
+  useAcceptDrift,
+  useAdoptHosts,
+  usePublishChanges,
+  usePublishOverview,
+  useReleaseHost,
+  type PublishAction,
+  type PublishHost,
+} from "@/lib/publish";
 
 type Open = { title: string; action: PublishAction };
 
@@ -40,6 +48,9 @@ export default function PublishNPMPage() {
   const akHalf = (ov?.hosts ?? []).filter((h) => h.authentik === "half" && !h.typo);
   const suggested = (ov?.hosts ?? []).filter((h) => h.suggest?.sure || (h.advanced_fix?.length ?? 0) > 0);
   const typos = (ov?.hosts ?? []).filter((h) => h.typo_domains);
+  const deadNets = ov?.dead_nets ?? [];
+  const inDeadNet = new Set(deadNets.flatMap((d) => d.hosts));
+  const dead = (ov?.hosts ?? []).filter((h) => h.cleanup && !inDeadNet.has(h.id));
 
   const doAdopt = async (ids: number[]) => {
     try {
@@ -97,6 +108,38 @@ export default function PublishNPMPage() {
               </p>
             </>
           )}
+          {admin && (deadNets.length > 0 || dead.length > 0) && (
+            <Card title="Opruimen? Doelen die niet meer antwoorden">
+              <p className="mb-2 text-sm text-slate-600 dark:text-slate-300">
+                ClusterForge vroeg deze adressen zelf op vanaf de NPM-node: er antwoordt niets en geen enkele dienst heeft dezelfde naam. Er wordt
+                niets gegokt. Opruimen maakt per host eerst een kopie; terugzetten kan per host hieronder bij &quot;Wat ClusterForge veranderde&quot;.
+              </p>
+              <ul className="space-y-2 text-sm">
+                {deadNets.map((d) => (
+                  <li key={d.prefix} className="flex flex-wrap items-center gap-2">
+                    <span>
+                      Net <b>{d.prefix}</b> bestaat niet meer: {d.hosts.length} proxy hosts ({d.names.slice(0, 6).join(", ")}
+                      {d.names.length > 6 ? ", …" : ""})
+                    </span>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setOpen({ title: `${d.hosts.length} proxy hosts in ${d.prefix} opruimen`, action: { action: "delete_dead", net: d.prefix } })}
+                    >
+                      Alles in {d.prefix} opruimen
+                    </Button>
+                  </li>
+                ))}
+                {dead.length > 0 && (
+                  <li className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {dead.length} losse {dead.length === 1 ? "host" : "hosts"}: {dead.map((h) => h.domains[0]).join(", ")}
+                    </span>
+                  </li>
+                )}
+              </ul>
+            </Card>
+          )}
+          <ChangesCard admin={admin} onOpen={setOpen} />
           <Card title={`Proxy hosts · ${hosts.length}`}>
             <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
               <Input placeholder="Zoeken" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
@@ -187,6 +230,74 @@ export default function PublishNPMPage() {
   );
 }
 
+// ChangesCard: wat ClusterForge de laatste 24 uur aan proxy hosts veranderde,
+// met per host terugdraaien (testlijst 2, 1.1).
+function ChangesCard({ admin, onOpen }: { admin: boolean; onOpen: (o: Open) => void }) {
+  const q = usePublishChanges(24);
+  const list = q.data ?? [];
+  if (list.length === 0) return null;
+  return (
+    <Card title={`Laatste 24 uur door ClusterForge veranderd · ${list.length}`}>
+      <div className="overflow-x-auto">
+        <table className={tableClass}>
+          <thead>
+            <tr>
+              <th className={thClass}>Wanneer</th>
+              <th className={thClass}>Host</th>
+              <th className={thClass}>Wat</th>
+              <th className={thClass}>Pagina</th>
+              {admin && <th className={thClass} />}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {list.map((c) => (
+              <tr key={c.id}>
+                <td className={`${tdClass} whitespace-nowrap text-xs`}>
+                  {new Date(c.changed_at).toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" })}
+                  {c.changed_by && <div className="text-slate-500">{c.changed_by}</div>}
+                </td>
+                <td className={tdClass}>
+                  {c.domain}
+                  <div className="text-xs text-slate-500">{c.action}</div>
+                </td>
+                <td className={`${tdClass} text-xs`}>
+                  {c.summary.map((l) => (
+                    <div key={l}>{l}</div>
+                  ))}
+                </td>
+                <td className={`${tdClass} text-xs`}>
+                  {c.title_before || c.title_after ? (
+                    <>
+                      {c.title_before || "?"} → {c.title_after || "?"}
+                    </>
+                  ) : (
+                    <span className="text-slate-500">geen titel</span>
+                  )}
+                </td>
+                {admin && (
+                  <td className={`${tdClass} text-xs whitespace-nowrap`}>
+                    {c.reverted_at ? (
+                      <Badge tone="slate">teruggedraaid</Badge>
+                    ) : (
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => onOpen({ title: `Terugdraaien: ${c.domain}`, action: { action: "revert", change_id: c.id } })}
+                      >
+                        terugdraaien
+                      </button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 function HostRow({
   h,
   admin,
@@ -267,7 +378,7 @@ function HostRow({
         {h.problems.map((p) => (
           <div
             key={p.code}
-            className={`mt-1 text-xs ${p.level === "crit" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-300"}`}
+            className={`mt-1 text-xs ${p.level === "crit" ? "text-red-700 dark:text-red-400" : p.level === "warn" ? "text-amber-700 dark:text-amber-300" : "text-slate-500"}`}
           >
             {p.text}
           </div>
@@ -286,6 +397,24 @@ function HostRow({
                 onClick={() => onOpen({ title: `Nieuw doel voor ${name}`, action: { action: "retarget_many", hosts: [h.id] } })}
               >
                 voorstel toepassen
+              </button>
+            )}
+            {h.other_app && h.revert_change && (
+              <button
+                type="button"
+                className="text-red-700 underline dark:text-red-400"
+                onClick={() => onOpen({ title: `${name}: vorig doel terugzetten`, action: { action: "revert", change_id: h.revert_change } })}
+              >
+                vorig doel terugzetten
+              </button>
+            )}
+            {h.cleanup && (
+              <button
+                type="button"
+                className="text-red-700 underline dark:text-red-400"
+                onClick={() => onOpen({ title: `${name} opruimen`, action: { action: "delete_dead", hosts: [h.id] } })}
+              >
+                opruimen
               </button>
             )}
             {h.typo_domains && (
@@ -331,6 +460,15 @@ function HostRow({
                   }
                 >
                   naar VIP
+                </button>
+              )}
+              {akLinked && h.authentik === "half" && !h.typo && (
+                <button
+                  type="button"
+                  className={btn}
+                  onClick={() => onOpen({ title: `Authentik afwerken voor ${name}`, action: { action: "ak_repair", hosts: [h.id] } })}
+                >
+                  Authentik afwerken
                 </button>
               )}
               {akLinked &&

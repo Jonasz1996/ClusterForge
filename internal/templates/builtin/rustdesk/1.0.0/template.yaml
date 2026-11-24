@@ -138,7 +138,8 @@ roles:
       disk: "{{ .params.disk }}"
     steps:
       # sqlite3 voor de kopie, rsync en sshd voor de sync van ClusterForge.
-      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl, iputils-arping, iputils-ping, iproute2] }
+      # nftables: UDP 21116 antwoordt vanaf het VIP (rustdesk-ctl.sh udp_vip_on).
+      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl, iputils-arping, iputils-ping, iproute2, nftables] }
       # Docker alleen op een node zonder Docker. Een bestaande Docker CE of
       # docker.io blijft zoals hij is (docker.io zou Docker CE verdringen).
       - command:
@@ -221,6 +222,9 @@ syncs:
 checks:
   - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
   - http: { url: "http://{{ .params.vip }}:21114/_admin/", expect: 200, within: 300s }
+  # Een echte registratie bij hbbs over UDP: het antwoord moet van het VIP
+  # komen, anders blijft de client "not ready".
+  - udp: { addr: "{{ .params.vip }}:21116", probe: rustdesk, within: 120s }
 
 services:
   - { name: rustdesk, kind: app, unit: cf-rustdesk, port: 21116, depends_on: [keepalived], strength: hard }

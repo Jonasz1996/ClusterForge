@@ -148,3 +148,133 @@ export function flag(cc: string) {
   if (!/^[A-Z]{2}$/.test(cc)) return "";
   return String.fromCodePoint(flagBase + cc.charCodeAt(0) - 65, flagBase + cc.charCodeAt(1) - 65);
 }
+
+// Centrale blocklists, automatisch blokkeren en meldingen (fase 47).
+
+export type CrowdSecList = components["schemas"]["CrowdSecList"];
+export type CrowdSecListDiff = components["schemas"]["CrowdSecListDiff"];
+export type CrowdSecPublicSource = components["schemas"]["CrowdSecPublicSource"];
+export type CrowdSecListInput = components["schemas"]["CrowdSecListInput"];
+export type CrowdSecListEntriesInput = components["schemas"]["CrowdSecListEntriesInput"];
+export type CrowdSecAutoRules = components["schemas"]["CrowdSecAutoRules"];
+export type CrowdSecNotifyInput = components["schemas"]["CrowdSecNotifyInput"];
+
+export function useCrowdSecLists() {
+  return useQuery({
+    queryKey: [...key, "lists"],
+    queryFn: async () => unwrap(await api.GET("/crowdsec/lists")),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useCrowdSecListEntries(id: string, q: string) {
+  return useQuery({
+    queryKey: [...key, "lists", id, "entries", q],
+    queryFn: async () => unwrap(await api.GET("/crowdsec/lists/{listId}/entries", { params: { path: { listId: id }, query: { q, limit: 500 } } })),
+  });
+}
+
+export function useCrowdSecListVersions(id: string) {
+  return useQuery({
+    queryKey: [...key, "lists", id, "versions"],
+    queryFn: async () => unwrap(await api.GET("/crowdsec/lists/{listId}/versions", { params: { path: { listId: id } } })).items,
+  });
+}
+
+export function useAddCrowdSecList() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: CrowdSecListInput) => unwrap(await api.POST("/crowdsec/lists", { body })),
+    onSuccess: done,
+  });
+}
+
+export function usePreviewCrowdSecList() {
+  return useMutation({
+    mutationFn: async (body: CrowdSecListInput) => unwrap(await api.POST("/crowdsec/lists/preview", { body })),
+  });
+}
+
+export function useUpdateCrowdSecList() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async ({ id, body }: { id: string; body: CrowdSecListInput }) =>
+      unwrap(await api.PUT("/crowdsec/lists/{listId}", { params: { path: { listId: id } }, body })),
+    onSuccess: done,
+  });
+}
+
+export function useDeleteCrowdSecList() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await api.DELETE("/crowdsec/lists/{listId}", { params: { path: { listId: id } } })),
+    onSuccess: done,
+  });
+}
+
+export function useChangeCrowdSecListEntries() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async ({ id, body }: { id: string; body: CrowdSecListEntriesInput }) =>
+      unwrap(await api.POST("/crowdsec/lists/{listId}/entries", { params: { path: { listId: id } }, body })),
+    onSuccess: (d) => {
+      if (d.applied) done();
+    },
+  });
+}
+
+export function useRefreshCrowdSecList() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await api.POST("/crowdsec/lists/{listId}/refresh", { params: { path: { listId: id } } })),
+    onSuccess: done,
+  });
+}
+
+export function useRollbackCrowdSecList() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async ({ id, version, dryRun }: { id: string; version: number; dryRun: boolean }) =>
+      unwrap(await api.POST("/crowdsec/lists/{listId}/rollback", { params: { path: { listId: id } }, body: { version_id: version, dry_run: dryRun } })),
+    onSuccess: (d) => {
+      if (d.applied) done();
+    },
+  });
+}
+
+export function useCrowdSecAutoRules() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: CrowdSecAutoRules) => unwrap(await api.PUT("/crowdsec/auto-rules", { body })),
+    onSuccess: done,
+  });
+}
+
+export function useCrowdSecNotify() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: CrowdSecNotifyInput) => unwrap(await api.PUT("/crowdsec/notify", { body })),
+    onSuccess: done,
+  });
+}
+
+export function useTestCrowdSecNotify() {
+  return useMutation({
+    mutationFn: async () => unwrap(await api.POST("/crowdsec/notify/test")).results,
+  });
+}
+
+export function useCrowdSecConsoleOff() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (on: boolean) => unwrap(await api.PUT("/crowdsec/console/off", { body: { on } })),
+    onSuccess: done,
+  });
+}
+
+/** Minuten leesbaar: 60 → 1 uur, 1440 → 1 dag. */
+export function everyLabel(m: number) {
+  if (m % 1440 === 0) return m === 1440 ? "elke dag" : `elke ${m / 1440} dagen`;
+  if (m % 60 === 0) return m === 60 ? "elk uur" : `elke ${m / 60} uur`;
+  return `elke ${m} minuten`;
+}

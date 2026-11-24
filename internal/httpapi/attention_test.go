@@ -98,3 +98,63 @@ func TestAttention(t *testing.T) {
 		t.Fatalf("schijfmeldingen: %+v", full)
 	}
 }
+
+// Per oorzaak (fase 47): ufw die op drie nodes niet draait is één regel met
+// acties, en het cluster dat alleen daardoor verminderd is, staat niet
+// apart bij "werkt met minder reserve".
+func TestAttentionCauses(t *testing.T) {
+	e := newTestEnv(t)
+	e.createUser("jonas", "een-lang-wachtwoord", store.UserRoleViewer)
+	c := e.client()
+	c.login("jonas", "een-lang-wachtwoord", "")
+	ctx := context.Background()
+	if _, err := e.pool.Exec(ctx, `INSERT INTO clusters (slug, name, type, environment, status) VALUES
+		('web', 'Web', 'generic', 'lab', 'degraded'), ('db', 'DB', 'generic', 'lab', 'degraded')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO nodes (hostname, cluster_id, status, status_reason)
+		SELECT h, (SELECT id FROM clusters WHERE slug = s), 'degraded', r FROM (VALUES
+		  ('web1', 'web', 'service ufw draait niet'),
+		  ('web2', 'web', 'service ufw draait niet'),
+		  ('db1', 'db', 'service ufw draait niet; schijf / is 95 % vol')) AS v(h, s, r)`); err != nil {
+		t.Fatal(err)
+	}
+	var a struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Title   string `json:"title"`
+			Count   int    `json:"count"`
+			Impact  string `json:"impact"`
+			Detail  string `json:"detail"`
+			Actions []struct {
+				Kind    string   `json:"kind"`
+				Label   string   `json:"label"`
+				Unit    string   `json:"unit"`
+				NodeIDs []string `json:"node_ids"`
+			} `json:"actions"`
+		} `json:"items"`
+	}
+	if s := c.do("GET", "/api/v1/attention", nil, &a); s != 200 {
+		t.Fatalf("attention: %d", s)
+	}
+	found := false
+	for _, it := range a.Items {
+		switch it.ID {
+		case "cause-stopped-ufw":
+			found = true
+			if it.Count != 3 || it.Title != "ufw draait niet op 3 nodes" || it.Impact != "service_ok" || len(it.Actions) < 3 {
+				t.Fatalf("oorzaak: %+v", it)
+			}
+			if r := it.Actions[1]; r.Kind != "restart_service" || r.Unit != "ufw" || len(r.NodeIDs) != 3 {
+				t.Fatalf("herstarten: %+v", r)
+			}
+		case "clusters-degraded":
+			if it.Count != 1 || it.Detail != "DB" || it.Impact != "service_ok" {
+				t.Fatalf("alleen DB heeft een ander probleem: %+v", it)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("geen oorzaak: %+v", a.Items)
+	}
+}

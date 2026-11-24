@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { Alert, Field, Input } from "@/components/ui";
-import { useMe } from "@/lib/auth";
+import { useMe, useProdAllowed } from "@/lib/auth";
 
 // prodConfirmed zegt of de knop mag: de slug is ingetikt en
-// tweestapsverificatie staat aan. De server controleert hetzelfde.
+// tweestapsverificatie staat aan (of de installatie vraagt die niet). De
+// server controleert hetzelfde. totp komt van useProdTotp.
 export function prodConfirmed(slug: string, typed: string, totp: boolean) {
   return totp && typed === slug;
 }
@@ -14,7 +15,7 @@ export function prodConfirmed(slug: string, typed: string, totp: boolean) {
 // cluster in, en moet tweestapsverificatie aan hebben.
 export function ProdConfirm({ slug, value, onChange }: { slug: string; value: string; onChange: (v: string) => void }) {
   const me = useMe();
-  const totp = me.data?.user.totp_enabled ?? false;
+  const totp = useProdAllowed();
   return (
     <div className="space-y-3 rounded-md border border-red-200 bg-red-50/60 p-3 dark:border-red-900 dark:bg-red-950/40">
       <p className="font-medium text-red-800 dark:text-red-200">Dit is een prodcluster.</p>
@@ -42,7 +43,9 @@ export function ProdConfirm({ slug, value, onChange }: { slug: string; value: st
   );
 }
 
-// useProdTotp zegt of de ingelogde gebruiker tweestapsverificatie aan heeft.
+// useProdTotp zegt of de ingelogde gebruiker op prod mag handelen: met
+// tweestapsverificatie, of als de installatie die niet vraagt (Instellingen
+// → Tweestapsverificatie).
 export function useProdTotp() {
-  return useMe().data?.user.totp_enabled ?? false;
+  return useProdAllowed();
 }

@@ -43,7 +43,7 @@ func (s *Server) KubeAction(w http.ResponseWriter, r *http.Request, clusterID uu
 		writeError(w, http.StatusBadRequest, "validation", "geef het aantal pods in replicas")
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, what) {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, what) {
 		return
 	}
 	a := kube.Action{
@@ -122,7 +122,7 @@ func (s *Server) DrainKubeNode(w http.ResponseWriter, r *http.Request, clusterID
 		})
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een node leegmaken") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een node leegmaken") {
 		return
 	}
 	j, err := s.kube.RequestDrain(ctx, events.User(p.User.ID), clusterID, in.Node, deref(in.Force))

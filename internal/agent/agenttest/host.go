@@ -38,6 +38,7 @@ var Provides = map[string]map[string]Unit{
 	"keepalived": {"keepalived": {Enabled: true}},
 	"docker.io":  {"docker": {Enabled: true, Active: true}},
 	"cron":       {"cron": {Enabled: true, Active: true}},
+	"postfix":    {"postfix": {Enabled: true, Active: true}},
 	// MariaDB start meteen na het installeren; garbd pas met een
 	// configuratie die zegt waar het cluster is.
 	"mariadb-server":      {"mariadb": {Enabled: true, Active: true}},

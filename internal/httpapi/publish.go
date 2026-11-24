@@ -117,6 +117,19 @@ func (s *Server) StartPublish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"job": toAPIJob(j, &p.User.Username), "plan": pl})
 }
 
+func (s *Server) GetPublishChanges(w http.ResponseWriter, r *http.Request, params gen.GetPublishChangesParams) {
+	hours := 24
+	if params.Hours != nil {
+		hours = *params.Hours
+	}
+	out, err := s.publish.Changes(r.Context(), hours)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) AdoptPublishHosts(w http.ResponseWriter, r *http.Request) {
 	p, ok := requireAdmin(w, r)
 	if !ok {

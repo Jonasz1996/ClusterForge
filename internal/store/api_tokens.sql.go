@@ -14,9 +14,9 @@ import (
 )
 
 const createAPIToken = `-- name: CreateAPIToken :one
-INSERT INTO api_tokens (name, token_hash, prefix, cluster_ids, expires_at, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, token_hash, prefix, cluster_ids, expires_at, created_at, created_by, last_used_at, last_used_ip
+INSERT INTO api_tokens (name, token_hash, prefix, cluster_ids, scopes, expires_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, name, token_hash, prefix, cluster_ids, expires_at, created_at, created_by, last_used_at, last_used_ip, scopes
 `
 
 type CreateAPITokenParams struct {
@@ -24,6 +24,7 @@ type CreateAPITokenParams struct {
 	TokenHash  []byte
 	Prefix     string
 	ClusterIds []uuid.UUID
+	Scopes     []string
 	ExpiresAt  *time.Time
 	CreatedBy  *uuid.UUID
 }
@@ -34,6 +35,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		arg.TokenHash,
 		arg.Prefix,
 		arg.ClusterIds,
+		arg.Scopes,
 		arg.ExpiresAt,
 		arg.CreatedBy,
 	)
@@ -49,6 +51,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		&i.CreatedBy,
 		&i.LastUsedAt,
 		&i.LastUsedIp,
+		&i.Scopes,
 	)
 	return i, err
 }
@@ -374,7 +377,7 @@ func (q *Queries) DeleteAPIToken(ctx context.Context, id uuid.UUID) (int64, erro
 }
 
 const getAPITokenByHash = `-- name: GetAPITokenByHash :one
-SELECT id, name, token_hash, prefix, cluster_ids, expires_at, created_at, created_by, last_used_at, last_used_ip FROM api_tokens WHERE token_hash = $1
+SELECT id, name, token_hash, prefix, cluster_ids, expires_at, created_at, created_by, last_used_at, last_used_ip, scopes FROM api_tokens WHERE token_hash = $1
 `
 
 func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash []byte) (ApiToken, error) {
@@ -391,12 +394,13 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash []byte) (ApiT
 		&i.CreatedBy,
 		&i.LastUsedAt,
 		&i.LastUsedIp,
+		&i.Scopes,
 	)
 	return i, err
 }
 
 const listAPITokens = `-- name: ListAPITokens :many
-SELECT t.id, t.name, t.token_hash, t.prefix, t.cluster_ids, t.expires_at, t.created_at, t.created_by, t.last_used_at, t.last_used_ip, coalesce(u.username, '')::text AS created_by_name
+SELECT t.id, t.name, t.token_hash, t.prefix, t.cluster_ids, t.expires_at, t.created_at, t.created_by, t.last_used_at, t.last_used_ip, t.scopes, coalesce(u.username, '')::text AS created_by_name
 FROM api_tokens t
 LEFT JOIN users u ON u.id = t.created_by
 ORDER BY t.created_at
@@ -413,6 +417,7 @@ type ListAPITokensRow struct {
 	CreatedBy     *uuid.UUID
 	LastUsedAt    *time.Time
 	LastUsedIp    string
+	Scopes        []string
 	CreatedByName string
 }
 
@@ -436,6 +441,7 @@ func (q *Queries) ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 			&i.CreatedBy,
 			&i.LastUsedAt,
 			&i.LastUsedIp,
+			&i.Scopes,
 			&i.CreatedByName,
 		); err != nil {
 			return nil, err

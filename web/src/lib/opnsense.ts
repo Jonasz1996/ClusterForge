@@ -598,7 +598,7 @@ export function useOpnAutoApply(id: string) {
 
 export type OpnAdviceItem = {
   key: string;
-  kind: "open" | "dup" | "shadow" | "unused" | "wan";
+  kind: "open" | "dup" | "shadow" | "unused" | "wan" | "vip";
   op: "add" | "set" | "del" | "conflict";
   title: string;
   detail?: string;

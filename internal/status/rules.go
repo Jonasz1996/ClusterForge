@@ -38,13 +38,21 @@ const (
 )
 
 // ignoredInactive zijn units die normaal inactief zijn terwijl ze enabled
-// staan, omdat een socket ze start.
-var ignoredInactive = []string{"ssh"}
+// staan, omdat een socket ze start. ufw.service is een oneshot die niets
+// zegt over de firewall zelf: of ufw filtert, komt van de firewallmodule
+// (één bron), niet van de unit.
+var ignoredInactive = []string{"ssh", "ufw"}
 
 // serviceProblems zijn controles die als unit draaien: faalt de unit, dan
 // is dit de reden.
 var serviceProblems = map[string]string{
 	"cf-zabbix-proxy-check": "Zabbix-proxy bereikt geen Zabbix server (zie journalctl -u cf-zabbix-proxy-check)",
+}
+
+// restartProblems zegt in gewone taal waarom een bekende dienst steeds
+// opnieuw start, in plaats van alleen "crasht".
+var restartProblems = map[string]string{
+	"cf-vaultx": "VaultX start niet: meestal bezet de oude VaultX nog poort 8000 (journalctl -u cf-vaultx zegt welk proces)",
 }
 
 type Result struct {
@@ -103,6 +111,8 @@ func Node(in NodeInput) Result {
 			problems = append(problems, serviceProblems[name])
 		case state == "failed":
 			problems = append(problems, "service "+name+" is gefaald")
+		case state == "auto-restart" && restartProblems[name] != "":
+			problems = append(problems, restartProblems[name])
 		case state == "auto-restart":
 			problems = append(problems, "service "+name+" crasht en start steeds opnieuw")
 		case state == "inactive" && slices.Contains(in.EnabledServices, name) && !slices.Contains(ignoredInactive, name):
