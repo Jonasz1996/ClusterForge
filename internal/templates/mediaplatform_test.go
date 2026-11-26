@@ -84,10 +84,11 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"REPLICATIE='001'", "db_backup\n    systemctl restart cf-platform", "\"app\":\"media-platform\"", "--format '{{.Names}} {{.Status}}'",
 			"sleutels-klaar) sleutels_klaar ;;", "python -m app.cli sleutels-check </dev/null",
 			"docker info --format '{{.MemoryLimit}} {{.CPUCfsQuota}}'", "mapregels) shift; mapregels \"$@\" ;;"},
-		"/etc/systemd/system/cf-platform.service": {"ConditionPathExists=/srv/platform-data/.cf-platform-active", "\nBindsTo=keepalived.service\n",
+		"/etc/systemd/system/cf-platform.service": {"ConditionPathExists=/var/lib/cf-platform/actief\n", "\nBindsTo=keepalived.service\n",
 			"\nAfter=docker.service cf-platform-mount.service keepalived.service\n", "\nSuccessExitStatus=3\n"},
-		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-allowOthers -cacheDir=/var/cache/weed-mount'\n"},
-		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
+		"/etc/systemd/system/cf-platform-mount.service": {"\nExecStart=/usr/local/lib/clusterforge/platform-ctl.sh mount\n",
+			"\nMemoryHigh=2G\n", "\nMemoryMax=3G\n", "\nEnvironment=GOMEMLIMIT=1536MiB\n"},
+		"/etc/keepalived/keepalived.conf": {"\n    timeout 30\n    fall 6\n", "priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
 	} {
 		got, ok := files[path]
 		if !ok {
@@ -211,6 +212,7 @@ func newMPNode(t *testing.T, files map[string]string) *mpNode {
 		"/opt/cf-platform/modellen", dir+"/modellen",
 		"/run/cf-platform.hash", dir+"/hash",
 		"/run/cf-platform-arr.", dir+"/run-arr.",
+		"/run/cf-platform-backup.", dir+"/run-backup.",
 		"/var/backups/cf-platform", dir+"/backups",
 		"/var/lib/clusterforge", dir+"/varlib",
 		"/var/lib/cf-platform", dir+"/cfp",
@@ -235,10 +237,19 @@ func newMPNode(t *testing.T, files map[string]string) *mpNode {
 		t.Skip("sleep staat niet op deze machine")
 	}
 	stubs := map[string]string{
-		"ip":         `[ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.168.10.150/24 scope global secondary eth0"; exit 0`,
-		"mountpoint": `[ -f "$CF_TEST_DIR/mounted" ]`,
+		"ip": `[ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.168.10.150/24 scope global secondary eth0"; exit 0`,
+		"mountpoint": `[ -f "$CF_TEST_DIR/mount-hangs" ] && exec ` + realSleep + ` 60
+[ -f "$CF_TEST_DIR/mounted" ]`,
 		"systemctl": `case "$1 $2" in "is-active --quiet") [ -f "$CF_TEST_DIR/active-$3" ]; exit $?;; "is-failed --quiet") exit 1;; esac
+case "$*" in
+*ExecMainStartTimestampMonotonic*) cat "$CF_TEST_DIR/mount-start" 2>/dev/null; exit 0;;
+*ActiveEnterTimestampMonotonic*) cat "$CF_TEST_DIR/platform-start" 2>/dev/null; exit 0;;
+"show "*) exit 0;;
+"stop cf-platform-mount") rm -f "$CF_TEST_DIR/mounted";;
+"start --no-block cf-platform-mount") : > "$CF_TEST_DIR/mounted";;
+esac
 echo "systemctl $*" >> "$CF_TEST_DIR/log"`,
+		"hostname":    `echo media-02`,
 		"systemd-run": `echo "systemd-run $*" >> "$CF_TEST_DIR/log"`,
 		"stat": `if [ "$1 $2" = "-c %u" ] && [ -f "$CF_TEST_DIR/uid" ]; then cat "$CF_TEST_DIR/uid"; exit 0; fi
 exec ` + realStat + ` "$@"`,
@@ -1177,4 +1188,178 @@ func TestMediaPlatformReplicatie(t *testing.T) {
 func sha256hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+// TestMediaPlatformCheckFuse: check (keepalived) blijft nooit hangen op een
+// vastgelopen mount, leest de markering van de overstap lokaal, en herstart
+// het platform na een nieuwe weed mount (fixlijst 26-11, punt 10 en 5).
+func TestMediaPlatformCheckFuse(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	var ee *exec.ExitError
+	local := filepath.Join(n.dir, "cfp/actief")
+	shared := filepath.Join(n.dir, "data/.cf-platform-active")
+
+	// Vóór de overstap: VIP mag, niets starten.
+	n.set(map[string]*string{"active-cf-platform-mount": on(""), "mounted": on(""), "vip": on("")})
+	if out, err := n.run("check"); err != nil || strings.Contains(n.log(), "start") {
+		t.Fatalf("check voor de overstap: %v %s\n%s", err, out, n.log())
+	}
+	// Na de overstap: lokale kopie, en de VIP-node start het platform.
+	must(t, os.WriteFile(shared, []byte("2026-11-26T10:00:00+01:00\n"), 0o644))
+	if out, err := n.run("check"); err != nil || !strings.Contains(n.log(), "systemctl start --no-block cf-platform\n") {
+		t.Fatalf("check na de overstap: %v %s\n%s", err, out, n.log())
+	}
+	if b, err := os.ReadFile(local); err != nil || !strings.Contains(string(b), "2026-11-26") {
+		t.Fatalf("geen lokale markering: %v %q", err, b)
+	}
+	// De gedeelde markering weg (terug naar de single): niet starten, lokale weg.
+	must(t, os.Remove(shared))
+	if out, err := n.run("check"); err != nil || strings.Contains(n.log(), "start") {
+		t.Fatalf("check zonder gedeelde markering: %v %s\n%s", err, out, n.log())
+	}
+	if _, err := os.Stat(local); err == nil {
+		t.Error("de lokale markering bleef staan")
+	}
+	must(t, os.WriteFile(shared, []byte("x\n"), 0o644))
+
+	// Een vastgelopen mount: check stopt binnen de 10 s met 1.
+	n.set(map[string]*string{"mount-hangs": on("")})
+	begin := time.Now()
+	if _, err := n.run("check"); !errors.As(err, &ee) || ee.ExitCode() != 1 {
+		t.Errorf("check met een vastgelopen mount: %v", err)
+	}
+	if d := time.Since(begin); d > 10*time.Second {
+		t.Errorf("check wachtte %s op de mount", d)
+	}
+	n.set(map[string]*string{"mount-hangs": nil})
+
+	// weed mount startte opnieuw terwijl het platform draaide: herstarten.
+	n.set(map[string]*string{"active-cf-platform": on(""), "mount-start": on("900\n"), "platform-start": on("500\n")})
+	if out, err := n.run("check"); err != nil || !strings.Contains(n.log(), "systemctl restart --no-block cf-platform\n") {
+		t.Fatalf("check na een nieuwe mount: %v %s\n%s", err, out, n.log())
+	}
+	n.set(map[string]*string{"mount-start": on("400\n")})
+	if out, err := n.run("check"); err != nil || strings.Contains(n.log(), "restart") {
+		t.Fatalf("check met een oudere mount: %v %s\n%s", err, out, n.log())
+	}
+
+	// Een back-up van deze CT: check faalt (VIP afgeven).
+	n.set(map[string]*string{"run-backup.pauze": on("")})
+	if _, err := n.run("check"); !errors.As(err, &ee) || ee.ExitCode() != 1 {
+		t.Errorf("check tijdens een back-up: %v", err)
+	}
+}
+
+// TestMediaPlatformBackupPauze: de mount los voor vzdump, één node tegelijk,
+// en daarna terug (fixlijst 26-11, punt 3).
+func TestMediaPlatformBackupPauze(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	slot := filepath.Join(n.dir, "data/.cf-backup-pauze")
+	pauze := filepath.Join(n.dir, "run-backup.pauze")
+
+	// Een andere node staat los (net begonnen): niet wachten (0 s), niets doen.
+	n.set(map[string]*string{"mounted": on(""), "data/.cf-backup-pauze/van": on(fmt.Sprintf("media-03 %d\n", time.Now().Unix()))})
+	out, err := n.run("backup-pauze", "0")
+	if err == nil || !strings.Contains(out, "media-03") || strings.Contains(n.log(), "stop") {
+		t.Fatalf("backup-pauze met een andere node los: %v\n%s\n%s", err, out, n.log())
+	}
+	if _, err := os.Stat(pauze); err == nil {
+		t.Fatal("pauze gezet terwijl een andere node los stond")
+	}
+	// Het slot is ouder dan 6 uur: overnemen.
+	n.set(map[string]*string{"data/.cf-backup-pauze/van": on(fmt.Sprintf("media-03 %d\n", time.Now().Unix()-7*3600))})
+	if out, err := n.run("backup-pauze", "0"); err != nil {
+		t.Fatalf("backup-pauze: %v\n%s\n%s", err, out, n.log())
+	}
+	l := n.log()
+	if !strings.Contains(l, "systemctl stop cf-platform\n") || !strings.Contains(l, "systemctl stop cf-platform-mount\n") ||
+		!strings.Contains(l, "systemd-run --unit=cf-platform-backup-hervat --on-active=6h") {
+		t.Errorf("backup-pauze: %s", l)
+	}
+	if _, err := os.Stat(pauze); err != nil {
+		t.Error("geen pauze")
+	}
+	if b, _ := os.ReadFile(filepath.Join(slot, "van")); !strings.HasPrefix(string(b), "media-02 ") {
+		t.Errorf("slot: %q", b)
+	}
+	// Terug: de mount start, het slot gaat weg.
+	if out, err := n.run("backup-hervat"); err != nil || !strings.Contains(n.log(), "systemctl start --no-block cf-platform-mount\n") {
+		t.Fatalf("backup-hervat: %v\n%s\n%s", err, out, n.log())
+	}
+	if _, err := os.Stat(pauze); err == nil {
+		t.Error("pauze bleef staan")
+	}
+	if _, err := os.Stat(slot); err == nil {
+		t.Error("slot bleef staan")
+	}
+}
+
+// TestMediaPlatformMappen: /data/arr van uid 10001, ook als hij er als root
+// stond (fixlijst 26-11, punt 6).
+func TestMediaPlatformMappen(t *testing.T) {
+	tpl, c := mpContext(t, map[string]any{"arr": true})
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	n.set(map[string]*string{"mounted": on(""), "src/infra/single/compose.arr.yaml": on("")})
+	if out, err := n.run("mappen"); err != nil {
+		t.Fatalf("mappen: %v\n%s", err, out)
+	}
+	l := n.log()
+	for _, d := range []string{"arr", "arr/qbittorrent", "arr/prowlarr"} {
+		p := filepath.Join(n.dir, "data", d)
+		if !strings.Contains(l, "setpriv --reuid=10001 --regid=10001 --clear-groups mkdir -p "+p+"\n") ||
+			!strings.Contains(l, "chown -h 10001:10001 "+p+"\n") {
+			t.Errorf("%s: %s", d, l)
+		}
+	}
+	// Al van 10001: niets te doen.
+	n.set(map[string]*string{"uid": on("10001")})
+	if out, err := n.run("mappen"); err != nil || strings.Contains(n.log(), "chown") || strings.Contains(n.log(), "mkdir") {
+		t.Errorf("mappen opnieuw: %v %s\n%s", err, out, n.log())
+	}
+}
+
+// TestMediaPlatformLidarrYoutube: Lidarr en de YouTube-module komen alleen
+// mee als de versie ze heeft (PR #11 van het platform, fixlijst 26-11).
+func TestMediaPlatformLidarrYoutube(t *testing.T) {
+	tpl, c := mpContext(t, map[string]any{"arr": true})
+	files, _ := npmFiles(t, tpl, c)
+	if !strings.Contains(files["/etc/clusterforge/platform.env"], "\nYOUTUBE=aan\nYOUTUBE_KEY="+sha256hex("youtube mediasleutel1")+"\n") {
+		t.Errorf("platform.env: %s", files["/etc/clusterforge/platform.env"])
+	}
+	if !strings.Contains(files["/etc/clusterforge/platform-lidarr.yaml"], "lidarr:\n    restart: \"no\"\n    volumes:\n      - /var/lib/cf-platform/torrents:/downloads\n") ||
+		!strings.Contains(files["/etc/clusterforge/platform-youtube.yaml"], "youtube:\n    image: cf-platform:local\n    restart: \"no\"\n") {
+		t.Errorf("lidarr/youtube:\n%s\n%s", files["/etc/clusterforge/platform-lidarr.yaml"], files["/etc/clusterforge/platform-youtube.yaml"])
+	}
+	n := newMPNode(t, files)
+	// Een versie zonder Lidarr en zonder YouTube: zoals voorheen.
+	n.set(map[string]*string{"src/infra/single/compose.arr.yaml": on("services:\n  qbittorrent:\n    image: q\n")})
+	if out, err := n.run("compose", "config"); err != nil {
+		t.Fatalf("compose: %v %s", err, out)
+	}
+	if got := n.composeFiles(); strings.Contains(got, "lidarr") || strings.Contains(got, "youtube") {
+		t.Errorf("zonder Lidarr en YouTube: %s", got)
+	}
+	// Met beide.
+	n.set(map[string]*string{"src/infra/single/compose.arr.yaml": on("services:\n  qbittorrent:\n    image: q\n  lidarr:\n    image: l\n"),
+		"src/infra/single/compose.youtube.yaml": on("services: {}\n")})
+	if out, err := n.run("compose", "config"); err != nil {
+		t.Fatalf("compose: %v %s", err, out)
+	}
+	if got := n.composeFiles(); !strings.Contains(got, "compose.arr.yaml platform-arr.yaml platform-lidarr.yaml compose.youtube.yaml platform-youtube.yaml") {
+		t.Errorf("met Lidarr en YouTube: %s", got)
+	}
+	n.set(map[string]*string{"mounted": on("")})
+	if out, err := n.run("mappen"); err != nil {
+		t.Fatalf("mappen: %v %s", err, out)
+	}
+	for _, d := range []string{"arr/lidarr", "import/lidarr", "import/youtube"} {
+		if _, err := os.Stat(filepath.Join(n.dir, "data", d)); err != nil {
+			t.Errorf("geen %s", d)
+		}
+	}
 }

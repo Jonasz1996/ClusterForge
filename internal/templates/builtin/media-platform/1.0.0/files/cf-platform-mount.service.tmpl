@@ -6,16 +6,26 @@ Requires=cf-seaweedfs.service
 After=cf-seaweedfs.service
 
 [Service]
-# Het wachten op de filer zit in ExecStart, niet in ExecStartPre: de filer
-# komt pas als PostgreSQL er is, en dat zet ClusterForge na de uitrol. Zo
-# geldt de mount meteen als gestart en houdt hij de uitrol niet tegen.
+# platform-ctl.sh mount wacht op de filer (in ExecStart, niet in
+# ExecStartPre: de filer komt pas als PostgreSQL er is, en dat zet
+# ClusterForge na de uitrol; zo houdt de mount de uitrol niet tegen) en op
+# het einde van een back-up van deze CT, en start dan weed mount met de
+# opties voor het geheugen.
 # Geen -replication: dat zou winnen van elke regel per map van de filer
-# (fs.configure, zoals blobs-media op 2 kopieën). Zonder kiest de filer: zijn
+# (fs.configure, zoals blobs-r2 op 2 kopieën). Zonder kiest de filer: zijn
 # regel voor de map, anders zijn standaard (de replicatie van ClusterForge).
-ExecStart=/bin/sh -c 'until curl -fsS -o /dev/null http://127.0.0.1:8888/; do sleep 5; done; exec /usr/local/bin/weed mount -filer=127.0.0.1:8888 -filer.path=/ -dir=/srv/platform-data -allowOthers -cacheDir=/var/cache/weed-mount'
+ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh mount
 ExecStopPost=-/bin/fusermount3 -uz /srv/platform-data
 Restart=always
 RestartSec=5
+# Geheugen (fixlijst 26-11, punt 5; was de drop-in geheugen.conf). Boven
+# MemoryHigh haalt de kernel eerst de cache van de bestanden van de mount
+# terug; GOMEMLIMIT laat Go zijn heap opruimen voor MemoryMax bereikt is.
+# Wordt hij toch gedood (OOM), dan start hij na 5 s opnieuw, en herstart
+# keepalived (platform-ctl.sh check) het platform op de VIP-node.
+MemoryHigh=2G
+MemoryMax=3G
+Environment=GOMEMLIMIT=1536MiB
 
 [Install]
 WantedBy=multi-user.target

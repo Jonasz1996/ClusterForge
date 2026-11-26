@@ -31,6 +31,10 @@ database:
     - { kind: db_user, user: "{{ .params.db_user }}", password: "{{ .params.db_password }}", grant_on: "{{ .params.files_db_name }}" }
 # Terugspringen zou het platform zonder reden stoppen en elders starten.
 failback: false
+# Elke node start mee met zijn Proxmox-host (onboot), ook een bestaande CT
+# die het cluster overnam (CT 146 stond uit na een reboot; fixlijst 26-11,
+# punt 4). Toepassen en Herstel zetten het aan als het uit staat.
+autostart: true
 
 params:
   - name: vip
@@ -140,12 +144,21 @@ params:
     label: Mediabeheer (qBittorrent en Prowlarr)
     help: >-
       Downloaden met qBittorrent en torrentsites via Prowlarr (fase 11, alleen
-      een versie met compose.arr.yaml). Ze draaien alleen op de node met het
+      een versie met compose.arr.yaml), en muziek met Lidarr als de versie
+      hem heeft (poort 8686, alleen in het eigen netwerk). Ze draaien alleen op de node met het
       VIP. De downloads staan op die node zelf (/var/lib/cf-platform/torrents):
       na een failover mist qBittorrent de bestanden van een lopende download;
       de app ziet die als mislukt en zoekt de titel opnieuw. Poorten 6881 (tcp
       en udp, torrent) en 9696 (Prowlarr, alleen in het eigen netwerk).
     default: false
+  - name: youtube
+    type: bool
+    label: YouTube-module
+    help: >-
+      Zoeken en kijken op YouTube en een video als mp3 in een muziekmap
+      bewaren (een eigen container met yt-dlp, met internet; alleen een
+      versie met compose.youtube.yaml). Draait alleen op de node met het VIP.
+    default: true
   - name: secure_cookies
     type: bool
     label: Cookies alleen over https
@@ -264,6 +277,11 @@ roles:
           run: /usr/local/lib/clusterforge/platform-weed.sh
           unless: /usr/local/lib/clusterforge/platform-weed.sh --check
           notify: [service:cf-platform-mount:restart]
+      # platform-ctl.sh vóór de mount: die start ermee (platform-ctl.sh mount).
+      - file:
+          path: /usr/local/lib/clusterforge/platform-ctl.sh
+          template: platform-ctl.sh.tmpl
+          mode: "0755"
       - file:
           path: /etc/systemd/system/cf-platform-mount.service
           template: cf-platform-mount.service.tmpl
@@ -288,16 +306,20 @@ roles:
           run: /usr/local/lib/clusterforge/platform-src.sh
           unless: /usr/local/lib/clusterforge/platform-src.sh --check
       - file:
-          path: /usr/local/lib/clusterforge/platform-ctl.sh
-          template: platform-ctl.sh.tmpl
-          mode: "0755"
-      - file:
           path: /etc/clusterforge/platform-analyse.yaml
           template: platform-analyse.yaml.tmpl
       # Mediabeheer (fase 11): alleen met ARR=aan (platform-ctl.sh).
       - file:
           path: /etc/clusterforge/platform-arr.yaml
           template: platform-arr.yaml.tmpl
+      # Lidarr (mee met mediabeheer) en de YouTube-module: alleen als de
+      # versie ze heeft (platform-ctl.sh).
+      - file:
+          path: /etc/clusterforge/platform-lidarr.yaml
+          template: platform-lidarr.yaml.tmpl
+      - file:
+          path: /etc/clusterforge/platform-youtube.yaml
+          template: platform-youtube.yaml.tmpl
       # Gezichten en zoeken op beeld (0.8.1): de modellen op elke node zelf,
       # zodat het platform na een failover meteen alles heeft.
       - command:
