@@ -397,8 +397,8 @@ case "${1:-}" in
     exit 0
     ;;
   master)
-    udp_vip_on
     systemctl reset-failed cf-rustdesk 2>/dev/null
+    udp_vip_on
     [ -z "$(foreign)" ] && systemctl start --no-block cf-rustdesk
     exit 0
     ;;

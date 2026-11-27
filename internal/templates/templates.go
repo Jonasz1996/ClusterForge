@@ -41,6 +41,11 @@ type Template struct {
 	// prioriteit zodra die weer gezond is (keepalived met preempt). Een
 	// failovertest verwacht dat dan standaard.
 	Failback bool `yaml:"failback"`
+	// Autostart zegt dat elke node die een Proxmox-gast is, met de host
+	// meestart (onboot). Een nieuwe CT of VM van ClusterForge heeft dat al;
+	// Toepassen en Herstel zetten het ook bij een bestaande gast die het
+	// cluster overnam, als het uit staat.
+	Autostart bool `yaml:"autostart"`
 	// Kubernetes zegt welke Kubernetes deze versie installeert; alleen bij
 	// cluster_type kubernetes, en daar verplicht.
 	Kubernetes *KubeInfo `yaml:"kubernetes"`

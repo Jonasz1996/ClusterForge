@@ -6,6 +6,7 @@ import { askConfirm } from "@/components/Confirm";
 import { Empty, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Modal } from "@/components/Modal";
 import { DatacenterGate, Meter, uptime, useCallRunner } from "@/components/pve/bits";
+import { AgentInstallDialog } from "@/components/pve/AgentInstall";
 import { CreateCTDialog, CreateVMDialog } from "@/components/pve/CreateGuest";
 import { TagChips, useTagColors } from "@/components/pve/TagChips";
 import { Badge, Button, Card, cx, Field, Input, PageHeader, Select } from "@/components/ui";
@@ -37,7 +38,7 @@ function GuestsView({ dc }: { dc: Datacenter }) {
   const [state, setState] = useState("");
   const [tag, setTag] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [dialog, setDialog] = useState<"vm" | "ct" | "tags" | null>(null);
+  const [dialog, setDialog] = useState<"vm" | "ct" | "tags" | "agent" | null>(null);
 
   const all = useMemo(() => (res.data ?? []).filter((r) => r.type === "qemu" || r.type === "lxc"), [res.data]);
   const tags = useMemo(() => [...new Set(all.flatMap((r) => splitTags(r.tags)))].sort(), [all]);
@@ -125,6 +126,11 @@ function GuestsView({ dc }: { dc: Datacenter }) {
               <Button variant="secondary" disabled={pending} onClick={() => void bulk("shutdown")}>
                 Afsluiten
               </Button>
+              {selected.some((r) => r.type === "lxc" && r.template !== 1) && (
+                <Button variant="secondary" onClick={() => setDialog("agent")}>
+                  Agent installeren…
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => setPicked(new Set())}>
                 Wissen
               </Button>
@@ -212,6 +218,7 @@ function GuestsView({ dc }: { dc: Datacenter }) {
       </Card>
       {dialog === "vm" && <CreateVMDialog dc={dc} nodes={nodes} storages={storages} used={all} onClose={() => setDialog(null)} />}
       {dialog === "ct" && <CreateCTDialog dc={dc} nodes={nodes} storages={storages} used={all} onClose={() => setDialog(null)} />}
+      {dialog === "agent" && <AgentInstallDialog dc={dc} guests={selected} onClose={() => setDialog(null)} />}
       {dialog === "tags" && (
         <BulkTags
           guests={selected}

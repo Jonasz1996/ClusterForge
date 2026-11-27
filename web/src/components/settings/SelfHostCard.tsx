@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Alert, Badge, Button, Card, Field, Input, Select } from "@/components/ui";
 import { useMe } from "@/lib/auth";
-import { useCheckImage, useSelfInfo, useSelfMove, useSelfUpdate, type SelfJob, type SelfTarget } from "@/lib/selfhost";
+import { useCheckImage, useMetricsImport, useSelfInfo, useSelfMove, useSelfUpdate, type SelfJob, type SelfTarget } from "@/lib/selfhost";
 
 const statusTone = { succeeded: "green", failed: "red", canceled: "slate", running: "blue", queued: "blue" } as const;
 const statusLabel: Record<string, string> = {
@@ -85,6 +85,7 @@ export function SelfHostCard({ isAdmin }: { isAdmin: boolean }) {
                 )}
               </dd>
             </dl>
+            {d.mode === "cluster" && <MetricsImport />}
             <UpdateSection info={d} isAdmin={isAdmin} />
             {d.mode === "compose" && <MoveSection info={d} isAdmin={isAdmin} />}
             {d.jobs.length > 0 && (
@@ -304,6 +305,47 @@ function MoveSection({ info, isAdmin }: { info: NonNullable<ReturnType<typeof us
       )}
       {running && <Alert kind="info">De verhuizing loopt; volg ze bij de taak hieronder. Op het einde stopt deze server en ga je naar het VIP.</Alert>}
       {move.isError && <Alert>{move.error.message}</Alert>}
+    </div>
+  );
+}
+
+const mins = (a?: string, b?: string) => {
+  if (!a) return "";
+  const s = Math.max(0, ((b ? new Date(b).getTime() : Date.now()) - new Date(a).getTime()) / 1000);
+  return s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`;
+};
+
+// MetricsImport toont na een verhuizing per node hoe het inladen van de
+// metrics van de oude server staat (fase 48, 4.5). De server draait al; de
+// grafieken van vóór de verhuizing verschijnen per node zodra die klaar is.
+function MetricsImport() {
+  const q = useMetricsImport(true);
+  const nodes = q.data?.nodes ?? [];
+  if (nodes.length === 0) return null;
+  const busy = nodes.some((n) => n.state === "bezig");
+  return (
+    <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+      <p className="font-medium">Metrics van de oude server</p>
+      {busy && (
+        <p className="text-slate-600 dark:text-slate-400">
+          Ze worden op de achtergrond ingeladen, op alle nodes tegelijk. ClusterForge werkt al; de grafieken van vóór de verhuizing
+          verschijnen zodra een node klaar is.
+        </p>
+      )}
+      <ul className="space-y-1">
+        {nodes.map((n) => (
+          <li key={n.address} className="flex flex-wrap items-baseline gap-2">
+            <Badge tone={n.state === "klaar" ? "green" : n.state === "mislukt" ? "red" : "blue"}>{n.state}</Badge>
+            <span>{n.hostname || n.address}</span>
+            <span className="text-xs text-slate-500">
+              {n.state === "bezig"
+                ? `${mins(n.started_at)} bezig${n.bytes ? `, ${Math.round(n.bytes / 1048576)} MB` : ""}`
+                : mins(n.started_at, n.ended_at)}
+            </span>
+            {n.reason && <span className="w-full text-xs text-red-700 dark:text-red-300">{n.reason}</span>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

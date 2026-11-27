@@ -157,7 +157,7 @@ func (s *Service) PlanEdit(ctx context.Context, clusterID uuid.UUID, e Edit) (Ed
 func (s *Service) editPlanOf(ctx context.Context, c store.Cluster, cl *Cluster, pd *planned) (EditPlan, error) {
 	ep := EditPlan{
 		Plan: *pd.plan, Hash: planHash(pd.plan), Prod: c.Environment == store.EnvironmentProd,
-		All: c.AppliedRevision < c.SpecRevision || pd.oldTpl == nil,
+		All: c.AppliedRevision < c.SpecRevision || pd.oldTpl == nil || pd.rebuild,
 	}
 	inv, _, err := s.dep.Nodes(ctx, c.ID)
 	if err != nil {

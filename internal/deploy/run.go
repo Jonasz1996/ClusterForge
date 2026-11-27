@@ -277,6 +277,7 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		}); err != nil {
 			return err
 		}
+		r.s.noteClonedFrom(ctx, st, n.ID, "VM-template "+r.p.ImageName)
 		vs.Phase = "config"
 		if vs.CloneHost != "" {
 			vs.Phase = "migrate"

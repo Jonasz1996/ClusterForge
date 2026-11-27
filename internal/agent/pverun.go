@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -478,6 +479,10 @@ func (r *RunExecutor) pveBootstrap(ctx context.Context, dir string, p *protocol.
 		}
 	}
 
+	if err := r.ctReach(ctx, id, b.Reach, out); err != nil {
+		return -1, err
+	}
+
 	if _, code, err := r.capture(ctx, "pct", "exec", id, "--", "test", "-s", "/etc/clusterforge/agent.json"); err == nil && code == 0 {
 		_, _ = fmt.Fprintf(out, "cf-agent is in deze CT al aangemeld; alleen de service aanzetten\n")
 		return r.step(ctx, out, nil, "pct", "exec", id, "--", "systemctl", "enable", "--now", "cf-agent.service")
@@ -528,6 +533,44 @@ func (r *RunExecutor) pveBootstrap(ctx context.Context, dir string, p *protocol.
 		r.knownHost(ctx, b.KnownHost, out)
 	}
 	return 0, nil
+}
+
+// ctReachProbe test een TCP-verbinding vanuit de CT, met wat er in de CT
+// is: bash (/dev/tcp), nc of curl. Exit 3: geen van de drie.
+const ctReachProbe = `h="$1"; p="$2"
+if command -v bash >/dev/null 2>&1; then exec timeout 5 bash -c 'exec 3<>/dev/tcp/'"$h"'/'"$p"; fi
+if command -v nc >/dev/null 2>&1; then exec nc -z -w 5 "$h" "$p"; fi
+if command -v curl >/dev/null 2>&1; then curl -s -m 5 -o /dev/null "telnet://$h:$p" </dev/null; c=$?; [ $c -eq 0 ] || [ $c -eq 49 ] || [ $c -eq 23 ] && exit 0; exit 1; fi
+exit 3`
+
+// ctReach controleert vóór de installatie of de CT ClusterForge en NATS
+// bereikt (fase 48). Zonder die verbinding meldt de agent zich nooit aan en
+// blijft een half geïnstalleerde CT achter; nu stopt het meteen met de
+// reden (meestal een firewallregel voor 4222).
+func (r *RunExecutor) ctReach(ctx context.Context, id string, reach []string, out io.Writer) error {
+	var failed []string
+	for _, addr := range reach {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
+		_, code, err := r.capture(ctx, "pct", "exec", id, "--", "sh", "-c", ctReachProbe, "probe", host, port)
+		switch {
+		case err != nil:
+			return err
+		case code == 0:
+			_, _ = fmt.Fprintf(out, "✓ de CT bereikt %s\n", addr)
+		case code == 3:
+			_, _ = fmt.Fprintf(out, "de CT heeft geen bash, nc of curl om %s te testen; toch verder\n", addr)
+		default:
+			_, _ = fmt.Fprintf(out, "✗ de CT bereikt %s niet\n", addr)
+			failed = append(failed, addr)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("de CT bereikt %s niet; er is niets geïnstalleerd. Laat in de firewall (OPNsense) verkeer van de CT naar die poort toe en probeer opnieuw", strings.Join(failed, " en "))
+	}
+	return nil
 }
 
 // forgetToken haalt het aanmeldtoken uit spec.json van de run.

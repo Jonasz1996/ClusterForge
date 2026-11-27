@@ -79,6 +79,8 @@ type Action struct {
 	// OldDomain en NewDomain bij ActRename.
 	OldDomain string `json:"old_domain,omitempty"`
 	NewDomain string `json:"new_domain,omitempty"`
+	// Net bij ActDeleteDead: alle hosts in dat verdwenen net (192.168.0.x).
+	Net string `json:"net,omitempty"`
 	// KeepOld: de oude naam blijft als extra naam op de host.
 	KeepOld bool `json:"keep_old,omitempty"`
 	// Fase 42, bij ActUpdate: eigen Advanced (zonder het blok van
@@ -580,6 +582,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			p.Lines = append(p.Lines, "Authentik: applicatie en provider van ClusterForge weg")
 		}
 		p.Hosts = append(p.Hosts, ph)
+	case ActDeleteDead:
+		if err := s.planDeleteDead(ctx, npm, a, &p); err != nil {
+			return Plan{}, err
+		}
 	case ActRetargetMany:
 		if err := s.planRetargetMany(ctx, st, npm, managed, a, &p); err != nil {
 			return Plan{}, err
@@ -591,6 +597,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 		akNeeded = true
 	case ActThemeMany:
 		if err := s.planThemeMany(ctx, st, npm, managed, a, &p); err != nil {
+			return Plan{}, err
+		}
+	case ActMoveAddress:
+		if err := s.planMoveAddress(ctx, st, npm, managed, a, &p); err != nil {
 			return Plan{}, err
 		}
 	case ActRename:
@@ -1009,7 +1019,7 @@ func (s *Service) runApply(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
-	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair) && len(p.Plan.Hosts) > 1 {
+	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair || p.Action.Action == ActMoveAddress || p.Action.Action == ActDeleteDead) && len(p.Plan.Hosts) > 1 {
 		return s.runMany(ctx, j, st, node, snapshot, p)
 	}
 	for i := range p.Plan.Hosts {
@@ -1147,8 +1157,11 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 		return err
 	}
 	// 2. De controles.
+	// Testlijst 3, N15: een nieuwe host achter Authentik is na deze stap nog
+	// gewoon open (Authentik komt pas daarna); de eerste controle eist dus
+	// nog geen doorsturen, anders draaide alles terug.
 	checkErr := j.Step(ctx, "Controle: "+ph.Domain, func(ctx context.Context, step *jobs.Step) error {
-		return s.verify(ctx, step, st, node, hostID, ph, ph.Protect)
+		return s.check(ctx, step, st, node, hostID, ph, ph.Protect && !created)
 	})
 	if checkErr == nil && created && ph.Protect {
 		// Een nieuwe host achter Authentik: eerst gewoon (doel antwoordt),
@@ -1172,7 +1185,7 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 				return err
 			}
 			step.Logf("Forward auth in NPM gezet (outpost %s)", ph.Outpost)
-			return s.verify(ctx, step, st, node, hostID, ph, true)
+			return s.check(ctx, step, st, node, hostID, ph, true)
 		})
 	}
 	if checkErr != nil {
@@ -1208,7 +1221,8 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 		}
 		return nil
 	}
-	if h, err := s.npmHost(ctx, st, node, hostID); err != nil {
+	h, herr := s.npmHost(ctx, st, node, hostID)
+	if err := herr; err != nil {
 		failed = append(failed, "host teruglezen: "+err.Error())
 	} else if h == nil {
 		failed = append(failed, fmt.Sprintf("host %d bestaat niet in NPM", hostID))
@@ -1248,6 +1262,16 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 	// Het adres zelf, op de NPM-node via 127.0.0.1.
 	url := ph.Scheme + "://" + firstName(ph) + "/"
 	cr, err := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: &protocol.WebCheck{URL: url, Connect: "127.0.0.1"}})
+	// Testlijst 3, N28: een doorverwijzing naar https op dezelfde naam
+	// (SSL afdwingen) zegt niets over het doel; die ene stap volgen.
+	if err == nil && cr.Check != nil && cr.Check.Error == "" && cr.Check.Status >= 300 && cr.Check.Status < 400 &&
+		strings.HasPrefix(strings.ToLower(cr.Check.Location), "https://"+strings.ToLower(firstName(ph))) {
+		u2 := "https://" + firstName(ph) + "/"
+		if r2, err2 := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: &protocol.WebCheck{URL: u2, Connect: "127.0.0.1"}}); err2 == nil && r2.Check != nil {
+			step.Logf("· %s stuurt door naar https; dat adres controleren", url)
+			url, cr = u2, r2
+		}
+	}
 	switch {
 	case err != nil:
 		failed = append(failed, "adres: "+err.Error())
@@ -1287,10 +1311,50 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 			}
 		}
 	}
+	// N28: het doel zelf moet vanaf de NPM-node antwoorden.
+	if h != nil && h.ForwardHost != "" && h.ForwardPort > 0 {
+		if msg := s.checkTargetFrom(ctx, step, node, h.ForwardScheme, h.ForwardHost, h.ForwardPort); msg != "" {
+			failed = append(failed, msg)
+		}
+	}
 	if len(failed) > 0 {
 		return errors.New(strings.Join(failed, "; "))
 	}
 	return nil
+}
+
+// checkTargetFrom kijkt of het doel van een host vanaf de NPM-node een
+// HTTP-antwoord geeft. Leeg als het antwoordt; anders de fout met een
+// voorstel voor de firewall (testlijst 3, N28).
+func (s *Service) checkTargetFrom(ctx context.Context, step *jobs.Step, node nodeRow, scheme, host string, port int) string {
+	u := targetURL(scheme, host, port)
+	res, err := s.web(ctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: checkFor(u)})
+	msg := ""
+	switch {
+	case err != nil:
+		msg = err.Error()
+	case res.Check == nil:
+		msg = "geen antwoord"
+	case res.Check.Error != "":
+		msg = res.Check.Error
+	case res.Check.Status == 0:
+		msg = "geen HTTP-antwoord"
+	}
+	if msg == "" {
+		step.Logf("✓ doel %s antwoordt vanaf %s (HTTP %d)", u, node.Hostname, res.Check.Status)
+		return ""
+	}
+	from := node.Hostname
+	if node.PrimaryIP != "" {
+		from += " (" + node.PrimaryIP + ")"
+	}
+	step.Logf("✗ doel %s onbereikbaar vanaf NPM-node %s: %s", u, from, trimText(msg, 160))
+	src := node.PrimaryIP
+	if src == "" {
+		src = node.Hostname
+	}
+	return fmt.Sprintf("doel %s onbereikbaar vanaf NPM-node %s (%s). Firewall? Voorstel voor OPNsense: sta %s toe naar %s poort %d (TCP)",
+		u, from, trimText(msg, 120), src, host, port)
 }
 
 func firstName(ph *PlannedHost) string {

@@ -144,8 +144,9 @@ func (r *CronRunner) attempt(ctx context.Context, job protocol.ManagedCron, run 
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	var exit int
 	var runErr error
+	skipped := false
 	if job.Kind == protocol.CronKindSync {
-		exit, run.Sync, runErr = r.runSync(rctx, job, out)
+		exit, run.Sync, skipped, runErr = r.runSync(rctx, job, out)
 	} else {
 		exit, runErr = runCronCommand(rctx, job.User, job.Command, out)
 	}
@@ -170,6 +171,10 @@ func (r *CronRunner) attempt(ctx context.Context, job protocol.ManagedCron, run 
 		run.Result = protocol.CronTimedOut
 	case stopped:
 		run.Result = protocol.CronStopped
+	// De voorbereiding van een sync zei dat deze node niet stuurt: geen
+	// fout, en dus ook geen herhaling.
+	case skipped:
+		run.Result = protocol.CronSkipped
 	case exit == 0 && runErr == nil:
 		run.Result = protocol.CronOK
 	default:
@@ -178,7 +183,7 @@ func (r *CronRunner) attempt(ctx context.Context, job protocol.ManagedCron, run 
 	run.Output, run.OutputTruncated = tailFile(outPath, protocol.CronOutputMax)
 	run.Output = protocol.MaskSecrets(run.Output)
 	r.spool(*run)
-	if exit == 0 && run.Result != protocol.CronOK {
+	if exit == 0 && run.Result != protocol.CronOK && run.Result != protocol.CronSkipped {
 		return 1
 	}
 	return exit

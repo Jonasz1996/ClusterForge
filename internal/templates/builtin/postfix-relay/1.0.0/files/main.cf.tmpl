@@ -1,0 +1,54 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Een relay, geen mailserver: niets wordt hier lokaal afgeleverd. Alleen
+# 127.0.0.0/8 en {{ .params.mynetworks }} mogen relayen; al de rest krijgt
+# "Relay access denied". postfix-ctl.sh relaytest controleert dat.
+
+compatibility_level = 3.6
+myhostname = {{ .node.hostname }}
+myorigin = $myhostname
+mydestination =
+local_recipient_maps =
+local_transport = error:deze relay levert niets lokaal af
+alias_maps =
+alias_database =
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+inet_protocols = ipv4
+# master.cf bepaalt de adressen (127.0.0.1 en het VIP), zie postfix-ctl.sh.
+inet_interfaces = all
+
+mynetworks_style = host
+mynetworks = 127.0.0.0/8, {{ .params.mynetworks }}
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, reject
+smtpd_client_restrictions = permit_mynetworks, reject
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+smtpd_banner = $myhostname ESMTP
+# Alleen voor de eigen test: zich voordoen als een adres van buiten.
+smtpd_authorized_xclient_hosts = 127.0.0.1
+message_size_limit = {{ mul .params.message_size_mb 1048576 }}
+mailbox_size_limit = 0
+
+# Naar de smarthost.
+relayhost = [{{ .params.relayhost }}]:{{ .params.relay_port }}
+smtp_tls_security_level = {{ if .params.relay_tls }}encrypt{{ else }}may{{ end }}
+smtp_tls_wrappermode = {{ if eq .params.relay_port 465 }}yes{{ else }}no{{ end }}
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_tls_loglevel = 1
+{{- if .params.relay_user }}
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+{{- else }}
+smtp_sasl_auth_enable = no
+{{- end }}
+
+# Altijd dezelfde afzender: in de envelop en in de kop From.
+sender_canonical_maps = regexp:/etc/postfix/sender_canonical
+sender_canonical_classes = envelope_sender, header_sender
+smtp_header_checks = regexp:/etc/postfix/header_checks

@@ -79,7 +79,7 @@ func (s *Server) StartPveHostAction(w http.ResponseWriter, r *http.Request, node
 		return
 	}
 	j, err := s.pvehosts.Start(r.Context(), events.User(p.User.ID), pvehost.Request{
-		NodeID: nodeId, Op: op, Confirm: deref(in.Confirm), ServerURL: deref(in.ServerUrl),
+		NodeID: nodeId, Op: op, Confirm: deref(in.Confirm), ServerURL: deref(in.ServerUrl), NATS: s.natsURL(r),
 	})
 	if err != nil {
 		s.pveHostError(w, r, err)

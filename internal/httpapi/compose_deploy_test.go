@@ -150,6 +150,17 @@ HEALTH service nginx
 	if s := c.do("POST", "/api/v1/clusters/"+res.ClusterID+"/connection/reveal", map[string]any{"secret": "db_password", "password": "een-lang-wachtwoord"}, &sec); s != 200 || len(sec.Value) != 32 {
 		t.Errorf("tonen: %d %+v", s, sec)
 	}
+	// Fase 48 (4.4): een versleutelde parameter tonen, na je wachtwoord.
+	var pv struct{ Name, Value string }
+	if s := c.do("POST", "/api/v1/clusters/"+res.ClusterID+"/params/reveal", map[string]any{"name": "auth_pass"}, nil); s != http.StatusUnauthorized && s != http.StatusForbidden && s != http.StatusBadRequest {
+		t.Errorf("parameter zonder wachtwoord: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/clusters/"+res.ClusterID+"/params/reveal", map[string]any{"name": "vip", "password": "een-lang-wachtwoord"}, nil); s != http.StatusNotFound {
+		t.Errorf("geen geheim: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/clusters/"+res.ClusterID+"/params/reveal", map[string]any{"name": "auth_pass", "password": "een-lang-wachtwoord"}, &pv); s != 200 || len(pv.Value) != 8 {
+		t.Errorf("parameter tonen: %d %+v", s, pv)
+	}
 
 	// Een nieuwe receptversie met een tweede database: opnieuw samenstellen
 	// geeft versie 1.0.1, en Wijzigen op het cluster past haar toe.

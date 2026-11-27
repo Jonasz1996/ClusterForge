@@ -426,7 +426,8 @@ func (s *Server) RunCommand(w http.ResponseWriter, r *http.Request, id uuid.UUID
 		return
 	}
 	ctx := r.Context()
-	if _, err := s.q.GetCommand(ctx, id); err != nil {
+	cmd, err := s.q.GetCommand(ctx, id)
+	if err != nil {
 		s.updateError(w, r, err)
 		return
 	}
@@ -439,11 +440,13 @@ func (s *Server) RunCommand(w http.ResponseWriter, r *http.Request, id uuid.UUID
 		s.updateError(w, r, err)
 		return
 	}
-	if len(t.Prod) > 1 {
+	// Testlijst 3, N11: een leescommando verandert niets; geen bevestiging.
+	readOnly := commands.ReadOnly(cmd.Script)
+	if len(t.Prod) > 1 && !readOnly {
 		writeError(w, http.StatusBadRequest, "invalid", "draai een commando op één prodcluster tegelijk")
 		return
 	}
-	if len(t.Prod) == 1 && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
+	if len(t.Prod) == 1 && !readOnly && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
 		return
 	}
 	j, err := s.commands.Start(ctx, events.User(p.User.ID), id, req, t)
@@ -476,11 +479,12 @@ func (s *Server) RunCommandOnce(w http.ResponseWriter, r *http.Request) {
 		s.updateError(w, r, err)
 		return
 	}
-	if len(t.Prod) > 1 {
+	readOnly := commands.ReadOnly(in.Script)
+	if len(t.Prod) > 1 && !readOnly {
 		writeError(w, http.StatusBadRequest, "invalid", "draai een commando op één prodcluster tegelijk")
 		return
 	}
-	if len(t.Prod) == 1 && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
+	if len(t.Prod) == 1 && !readOnly && !s.confirmProd(w, r, p, true, t.Prod[0], in.Confirm, "een commando draaien") {
 		return
 	}
 	o := commands.Once{Name: deref(in.Name), Script: in.Script, RunAs: deref(in.RunAs)}

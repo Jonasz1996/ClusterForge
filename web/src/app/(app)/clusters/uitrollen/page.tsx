@@ -15,6 +15,8 @@ import { environments, useIsAdmin, useNodes, type Environment } from "@/lib/inve
 import { usePveHosts } from "@/lib/pvehosts";
 import { useProxmoxConnections, useProxmoxResources, useSyncProxmox, type ProxmoxResources, type ProxmoxStorage } from "@/lib/proxmox";
 import { agentServerURL } from "@/lib/agentEndpoints";
+import { useFailedDeploy, useNetHint, type DeployRequest } from "@/lib/deployFailed";
+import { jobActive, useJob } from "@/lib/proxmox";
 
 export default function DeployPage() {
   return (
@@ -175,6 +177,60 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
   };
 }
 
+// fromRequest vult het formulier met een eerdere aanvraag (fase 48, 4.2:
+// opnieuw na een mislukte uitrol). Geheimen staan er niet in.
+function fromRequest(r: DeployRequest): Form {
+  const str = (v: unknown) => (v === undefined || v === null ? "" : String(v));
+  const params: Record<string, string> = {};
+  for (const [k, v] of Object.entries(r.params ?? {})) {
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") params[k] = String(v);
+  }
+  const f: Form = {
+    ...emptyForm,
+    template: r.template,
+    name: r.cluster.name,
+    slug: r.cluster.slug,
+    slugTouched: true,
+    environment: (r.cluster.environment as Environment) || "lab",
+    params,
+    serverUrl: r.server_url ? r.server_url : null,
+  };
+  if (r.existing_nodes) {
+    return { ...f, where: "existing", existing: Object.fromEntries(r.existing_nodes.map((n) => [n.node_id, n.role])) };
+  }
+  const t = r.target;
+  if (!t) return f;
+  const placement: Record<string, Placement> = {};
+  for (const p of t.placement ?? []) {
+    placement[placementKey(p.role, p.index)] = {
+      host: p.host ?? "",
+      storage: p.storage ?? "",
+      vmid: p.vmid ? String(p.vmid) : "",
+      address: p.address ?? "",
+      cpu: p.cpu ? String(p.cpu) : "",
+      memory: p.memory_mib ? String(p.memory_mib) : "",
+      disk: p.disk_gib ? String(p.disk_gib) : "",
+    };
+  }
+  return {
+    ...f,
+    where: t.create === "ct" ? "newct" : t.image_type === "lxc" ? "ct" : "vm",
+    proxmoxId: t.proxmox_id ?? "",
+    imageVmid: t.image_vmid ? String(t.image_vmid) : "",
+    storage: t.storage ?? "",
+    bridge: t.bridge || "vmbr0",
+    vlan: str(t.vlan),
+    network: t.network === "dhcp" ? "dhcp" : "static",
+    firstIp: t.first_ip ?? "",
+    gateway: t.gateway ?? "",
+    dns: (t.dns ?? []).join(", "),
+    sshKeys: t.ssh_keys ?? "",
+    ostemplate: t.ostemplate ?? "",
+    privileged: !!t.privileged,
+    placement,
+  };
+}
+
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -193,6 +249,18 @@ function DeployInner() {
   const [form, setForm] = useState<Form>(emptyForm);
   const [error, setError] = useState<ApiError | null>(null);
   const deploy = useDeploy();
+
+  // Opnieuw na een mislukte uitrol: de wizard met dezelfde instellingen, en
+  // wachten tot het opruimen klaar is (fase 48, 4.2).
+  const van = search.get("van") ?? "";
+  const failed = useFailedDeploy(van, isAdmin);
+  const cleanJob = useJob(search.get("opruimen") ?? "");
+  const [filledFrom, setFilledFrom] = useState("");
+  if (failed.data && filledFrom !== van) {
+    setFilledFrom(van);
+    setForm(fromRequest(failed.data.request));
+  }
+  const cleaning = !!cleanJob.data && cleanJob.data.status !== "succeeded";
 
   // Wat niet gekozen is, krijgt een startwaarde: de template uit de URL, de
   // eerste Proxmox-koppeling, de eerste golden image en het adres van deze
@@ -228,7 +296,31 @@ function DeployInner() {
   const imageVmid = form.imageVmid || (images[0] ? String(images[0].vmid) : "");
   const origin = agentServerURL();
   const setWhere = (w: Form["where"]) => setForm((f) => ({ ...f, where: w, imageVmid: "", storage: "", placement: {} }));
-  const eff: Form = { ...form, template: template?.name ?? "", proxmoxId, imageVmid, serverUrl: form.serverUrl ?? origin, where };
+  // Fase 48 (4.3): bij het eerste adres VLAN, gateway en DNS van het
+  // subnet, de vrije adressen, en het WAN-adres als publiek adres.
+  const firstIpDeb = useDebounced(form.firstIp.trim(), 500);
+  const net = useNetHint(firstIpDeb, isAdmin);
+  const [netFilled, setNetFilled] = useState("");
+  const hint = net.data;
+  if (hint?.first_ip && netFilled !== hint.prefix) {
+    setNetFilled(hint.prefix ?? "");
+    setForm((f) => ({
+      ...f,
+      vlan: f.vlan || (hint.vlan != null ? String(hint.vlan) : ""),
+      gateway: f.gateway || (hint.gateway ?? ""),
+      dns: f.dns || (hint.dns ?? []).join(", "),
+    }));
+  }
+  const wanDefault = hint?.wan && template?.params.some((p) => p.name === "public_host") && form.params.public_host === undefined;
+  const eff: Form = {
+    ...form,
+    template: template?.name ?? "",
+    proxmoxId,
+    imageVmid,
+    serverUrl: form.serverUrl ?? origin,
+    where,
+    params: wanDefault ? { ...form.params, public_host: hint!.wan! } : form.params,
+  };
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const setParam = (name: string, v: string) => setForm((f) => ({ ...f, params: { ...f.params, [name]: v } }));
@@ -303,6 +395,20 @@ function DeployInner() {
           </Link>
         }
       />
+      {failed.data && (
+        <Alert kind="info">
+          Dezelfde instellingen als de mislukte uitrol van {failed.data.cluster_name}; pas aan wat nodig is.
+          {failed.data.secrets.length > 0 && <> Geheimen staan er niet in: vul {failed.data.secrets.join(", ")} opnieuw in.</>}
+        </Alert>
+      )}
+      {cleanJob.data && cleaning && (
+        <Alert kind={jobActive(cleanJob.data.status) ? "info" : "error"}>
+          {jobActive(cleanJob.data.status) ? "De mislukte uitrol wordt opgeruimd; uitrollen kan zodra dat klaar is. " : "Het opruimen is niet gelukt. "}
+          <Link href={`/taken/detail?id=${cleanJob.data.id}`} className="underline">
+            Bekijk de taak
+          </Link>
+        </Alert>
+      )}
       {error && !error.field && <Alert>{error.message}</Alert>}
       {error?.field && <Alert>Controleer het gemarkeerde veld: {error.message}</Alert>}
 
@@ -372,7 +478,7 @@ function DeployInner() {
           <div className="grid gap-4 sm:grid-cols-2">
             {template.params.map((p) => (
               <FieldRow error={fieldError} key={p.name} field={`params.${p.name}`} label={p.label} hint={paramHint(p)}>
-                <ParamInput p={p} value={paramValue(form, p)} onChange={(v) => setParam(p.name, v)} className={bad(`params.${p.name}`)} />
+                <ParamInput p={p} value={paramValue(eff, p)} onChange={(v) => setParam(p.name, v)} className={bad(`params.${p.name}`)} />
               </FieldRow>
             ))}
           </div>
@@ -638,6 +744,12 @@ function DeployInner() {
                       placeholder="10.0.20.11/24"
                       value={form.firstIp}
                       onChange={(e) => set("firstIp", e.target.value)}
+                      onBlur={() => {
+                        // Zonder prefix: die van het subnet op de firewall.
+                        if (hint?.first_ip && !form.firstIp.includes("/") && hint.first_ip.startsWith(form.firstIp.trim() + "/")) {
+                          set("firstIp", hint.first_ip);
+                        }
+                      }}
                     />
                   </FieldRow>
                   <FieldRow error={fieldError} field="target.gateway" label="Gateway">
@@ -658,6 +770,20 @@ function DeployInner() {
                 <p className="text-sm text-slate-600 dark:text-slate-400">
                   De nodes krijgen hun adres van de DHCP-server. Zorg dat het VIP buiten de DHCP-pool valt.
                 </p>
+              )}
+              {(ct || newct || form.network === "static") && hint?.prefix && (
+                <NetHintBox
+                  hint={hint}
+                  onPick={(a) => set("firstIp", `${a}/${hint.prefix!.split("/")[1]}`)}
+                  onApply={() =>
+                    setForm((f) => ({
+                      ...f,
+                      vlan: hint.vlan != null ? String(hint.vlan) : f.vlan,
+                      gateway: hint.gateway ?? f.gateway,
+                      dns: hint.dns?.length ? hint.dns.join(", ") : f.dns,
+                    }))
+                  }
+                />
               )}
               {!ct && (
                 <FieldRow
@@ -728,7 +854,7 @@ function DeployInner() {
         <Button type="button" variant="secondary" onClick={() => router.push("/clusters")}>
           Annuleren
         </Button>
-        <Button type="submit" disabled={deploy.isPending || !ready}>
+        <Button type="submit" disabled={deploy.isPending || !ready || cleaning}>
           {deploy.isPending ? "Bezig…" : "Uitrollen"}
         </Button>
       </div>
@@ -1089,6 +1215,50 @@ function ExistingNodes({
         </div>
       )}
       {error && <p className="text-xs text-red-700 dark:text-red-300">{error}</p>}
+    </div>
+  );
+}
+
+const sourceLabel: Record<string, string> = { firewall: "firewall", uitrol: "eerdere uitrol", regel: "eerste adres van het subnet" };
+
+// NetHintBox toont wat ClusterForge over het subnet weet (fase 48, 4.3).
+function NetHintBox({
+  hint,
+  onPick,
+  onApply,
+}: {
+  hint: NonNullable<ReturnType<typeof useNetHint>["data"]>;
+  onPick: (addr: string) => void;
+  onApply: () => void;
+}) {
+  const src = (k: string) => (hint.source[k] ? ` (${sourceLabel[hint.source[k]] ?? hint.source[k]})` : "");
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+      <p>
+        Subnet <strong>{hint.prefix}</strong>
+        {hint.interface && <> op de firewall-interface {hint.interface}</>}
+        {hint.vlan != null && <>, VLAN {hint.vlan + src("vlan")}</>}
+        {hint.gateway && <>, gateway {hint.gateway + src("gateway")}</>}
+        {hint.dns && hint.dns.length > 0 && <>, DNS {hint.dns.join(", ") + src("dns")}</>}.{" "}
+        <button type="button" className="text-brand-700 underline dark:text-sky-300" onClick={onApply}>
+          Overnemen
+        </button>
+      </p>
+      <p className="text-slate-600 dark:text-slate-400">
+        Vrij volgens ClusterForge ({hint.free_count} in het subnet; nodes, VIP&apos;s en de firewall tellen mee, een toestel zonder agent niet):
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {hint.free.map((a) => (
+          <button
+            key={a}
+            type="button"
+            onClick={() => onPick(a)}
+            className="rounded border border-slate-300 px-2 py-0.5 font-mono text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            {a}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

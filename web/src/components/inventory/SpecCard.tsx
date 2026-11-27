@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Badge, Button, Card } from "@/components/ui";
+import { useMutation } from "@tanstack/react-query";
+import { Alert, Badge, Button, Card, Input } from "@/components/ui";
+import { copyText } from "@/lib/clipboard";
+import { call } from "@/lib/replace";
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { specSources, useSpecHistory, type SpecRevision } from "@/lib/deploy";
 import { CommitLink } from "@/components/gitops/bits";
@@ -66,7 +69,13 @@ export function SpecCard({ cluster, isAdmin }: { cluster: ClusterDetail; isAdmin
                   <div key={p.name} className="contents">
                     <dt className="text-slate-500">{p.label}</dt>
                     <dd>
-                      {p.secret ? <span className="text-slate-500">versleuteld opgeslagen</span> : p.value === null ? none : <code className="text-xs">{p.value}</code>}
+                      {p.secret ? (
+                        isAdmin ? (
+                          <RevealParam clusterId={clusterId} name={p.name} />
+                        ) : (
+                          <span className="text-slate-500">versleuteld opgeslagen</span>
+                        )
+                      ) : p.value === null ? none : <code className="text-xs">{p.value}</code>}
                     </dd>
                   </div>
                 ))}
@@ -154,5 +163,79 @@ function Changes({ r, first }: { r: SpecRevision; first: boolean }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+// RevealParam toont een versleutelde parameter (fase 48, 4.4), zoals het
+// beheerderswachtwoord van de RustDesk-API: pas na je code (of je
+// wachtwoord zonder tweestapsverificatie), en het komt in het logboek.
+function RevealParam({ clusterId, name }: { clusterId: string; name: string }) {
+  const [asking, setAsking] = useState(false);
+  const [code, setCode] = useState("");
+  const [value, setValue] = useState<string | null>(null);
+  const reveal = useMutation({
+    mutationFn: () =>
+      call<{ name: string; value: string }>(
+        "POST",
+        `/clusters/${clusterId}/params/reveal`,
+        /^\d{6}$/.test(code) ? { name, password: code, totp_code: code } : { name, password: code },
+      ),
+    onSuccess: (r) => {
+      setValue(r.value);
+      setAsking(false);
+      setCode("");
+    },
+  });
+  if (value !== null) {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <code className="break-all text-xs">{value}</code>
+        <Button variant="ghost" onClick={() => void copyText(value)}>
+          Kopiëren
+        </Button>
+        <Button variant="ghost" onClick={() => setValue(null)}>
+          Verbergen
+        </Button>
+      </span>
+    );
+  }
+  if (!asking) {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <span className="text-slate-500">versleuteld opgeslagen</span>
+        <Button variant="secondary" onClick={() => setAsking(true)}>
+          Tonen…
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          reveal.mutate();
+        }}
+      >
+        <Input
+          type="password"
+          autoComplete="off"
+          className="w-48"
+          placeholder="Code of wachtwoord"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          autoFocus
+        />
+        <Button type="submit" disabled={reveal.isPending || code === ""}>
+          Tonen
+        </Button>
+        <Button variant="ghost" type="button" onClick={() => setAsking(false)}>
+          Annuleren
+        </Button>
+      </form>
+      <p className="text-xs text-slate-500">Tonen vraagt je code van tweestapsverificatie (of je wachtwoord) en komt in het logboek.</p>
+      {reveal.error && <Alert>{reveal.error.message}</Alert>}
+    </div>
   );
 }

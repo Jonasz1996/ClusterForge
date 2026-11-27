@@ -425,4 +425,22 @@ func TestPVEBootstrap(t *testing.T) {
 	if st.State != protocol.RunFailed || !strings.Contains(st.Error, "sha256") || len(h.called("pct push")) != 0 {
 		t.Fatalf("stand %s (%s)", st.State, st.Error)
 	}
+	// Fase 48: de CT bereikt NATS niet: stoppen voor er iets in komt.
+	h = &fakeHost{reply: func(cmd string) (string, int) {
+		switch {
+		case cmd == "pct status 102":
+			return "status: running\n", 0
+		case strings.Contains(cmd, "probe 192.168.113.153 4222"):
+			return "", 1
+		}
+		return "", 0
+	}}
+	out, st = pveRun(t, root, h, ex, protocol.PVERun{Action: protocol.PVEBootstrap, Type: "lxc", VMID: 102, Bootstrap: &protocol.PVEBootstrapSpec{
+		Server: "http://192.168.113.153:8080", AllowHTTP: true, Token: "geheim-token-1234567890",
+		SHA256: map[string]string{runtime.GOARCH: hex.EncodeToString(sum[:])}, Reach: []string{"192.168.113.153:8080", "192.168.113.153:4222"},
+	}})
+	if st.State != protocol.RunFailed || !strings.Contains(st.Error, "192.168.113.153:4222") || strings.Contains(st.Error, ":8080") ||
+		len(h.called("pct push")) != 0 || !strings.Contains(out, "✓ de CT bereikt 192.168.113.153:8080") {
+		t.Fatalf("stand %s (%s)\n%s", st.State, st.Error, out)
+	}
 }

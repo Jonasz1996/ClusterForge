@@ -300,20 +300,27 @@ EOF
   echo "  gezond op http://$VIP:8080"
   rm -f "$dir/clusterforge.dump"
   if [ -n "$metrics" ]; then
-    say "Metrics van de oude server meenemen"
-    if curl -fsS -m 3600 -o "$dir/metrics.bin" "${url%/}/selfexport/$tok/metrics"; then
-      echo "  $(du -h "$dir/metrics.bin" | cut -f1)"
-      for a in 127.0.0.1 $PEERS; do
-        if curl -fsS -m 3600 -X POST --data-binary "@$dir/metrics.bin" "http://$a:8428/api/v1/import/native" >/dev/null; then
-          echo "  VictoriaMetrics op $a: ingeladen"
-        else
-          warn "VictoriaMetrics op $a: inladen mislukte (de grafieken van vóór de verhuizing ontbreken daar)"
-        fi
-      done
+    # Fase 48 (4.5): ophalen nu (de oude server stopt straks), inladen op
+    # de achtergrond, op alle nodes tegelijk. De server draait al; de
+    # grafieken van vóór de verhuizing verschijnen zodra een node klaar is.
+    # Volg het bij Instellingen → ClusterForge zelf, of met
+    # clusterforge-ctl.sh metrics-status.
+    say "Metrics van de oude server ophalen"
+    mdir=$STATE/metrics-import
+    rm -rf "$mdir" && mkdir -p "$mdir" && chmod 0700 "$mdir" || fail "map $mdir"
+    if curl -fsS -m 3600 -o "$mdir/metrics.bin" "${url%/}/selfexport/$tok/metrics"; then
+      echo "  $(du -h "$mdir/metrics.bin" | cut -f1); inladen loopt op de achtergrond, per node"
+      if command -v systemd-run >/dev/null 2>&1; then
+        systemctl reset-failed cf-metrics-import 2>/dev/null
+        systemd-run --unit=cf-metrics-import --collect --quiet "$0" metrics-import >/dev/null 2>&1 ||
+          { nohup "$0" metrics-import >/dev/null 2>&1 & }
+      else
+        nohup "$0" metrics-import >/dev/null 2>&1 &
+      fi
     else
       warn "metrics van de oude server ophalen mislukte; de grafieken beginnen opnieuw"
+      rm -rf "$mdir"
     fi
-    rm -f "$dir/metrics.bin"
   fi
   echo
   echo "Overgenomen: ClusterForge draait op het cluster, http://$VIP:8080."
@@ -390,11 +397,48 @@ status() {
   if has_vip; then echo "VIP:         $VIP staat hier"; else echo "VIP:         $VIP staat elders"; fi
   echo "server:      $(systemctl is-active cf-clusterforge 2>/dev/null)$(running && healthy && echo ', gezond')"
   echo "metrics:     $(systemctl is-active cf-clusterforge-vm 2>/dev/null)"
+  metrics_status | sed 's/^/import:      /'
   if can_serve; then echo "verhuisd:    ja, image $(image)"; else echo "verhuisd:    nog niet (Instellingen → ClusterForge zelf → Verhuizen)"; fi
   echo "data:        actueel tot $(when "$(cat "$STAMP" 2>/dev/null || echo 0)")"
   [ -f "$OUT/MANIFEST" ] && echo "verstuurd:   kopie van $(when "$(field created "$OUT/MANIFEST")")"
   [ -f "$IN/MANIFEST" ] && echo "ontvangen:   kopie van $(field host "$IN/MANIFEST") van $(when "$(field created "$IN/MANIFEST")")"
   return 0
+}
+
+# metrics_import laadt de metrics van de oude server in VictoriaMetrics op
+# elke node, tegelijk; per node een statusbestand: bezig <start> <bytes>,
+# klaar <start> <eind>, of mislukt <start> <eind> <reden>.
+metrics_import() {
+  mdir=$STATE/metrics-import
+  bin=$mdir/metrics.bin
+  [ -s "$bin" ] || fail "geen metrics om in te laden ($bin)"
+  size=$(stat -c %s "$bin" 2>/dev/null || echo 0)
+  for a in 127.0.0.1 $PEERS; do
+    (
+      start=$(date +%s)
+      echo "bezig $start $size" > "$mdir/$a"
+      if curl -fsS -m 7200 -X POST --data-binary "@$bin" "http://$a:8428/api/v1/import/native" >/dev/null 2>"$mdir/$a.err"; then
+        echo "klaar $start $(date +%s)" > "$mdir/$a"
+      else
+        echo "mislukt $start $(date +%s) $(tr '\n' ' ' < "$mdir/$a.err" | cut -c1-200)" > "$mdir/$a"
+      fi
+      rm -f "$mdir/$a.err"
+    ) &
+  done
+  wait
+  rm -f "$bin"
+}
+
+# metrics_status zegt per node hoe het inladen staat; één regel per node:
+# <adres> <toestand> <start> <eind of bytes> [reden].
+metrics_status() {
+  mdir=$STATE/metrics-import
+  [ -d "$mdir" ] || return 0
+  for f in "$mdir"/*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.bin|*.err) continue ;; esac
+    echo "$(basename "$f") $(cat "$f")"
+  done
 }
 
 # Voor de server: één regel per veld.
@@ -499,6 +543,8 @@ case "${1:-}" in
     ;;
   status) status ;;
   rol) rol ;;
+  metrics-import) metrics_import ;;
+  metrics-status) metrics_status ;;
   mappen) mappen ;;
   mappen-ok) mappen_ok ;;
   overnemen)
@@ -536,7 +582,7 @@ case "${1:-}" in
     systemctl try-restart cf-clusterforge
     ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|snapshot|status|rol|overnemen|ontvang|pull|set-image|bijwerken" >&2
+    echo "gebruik: $0 up|down|check|master|backup|snapshot|status|rol|overnemen|ontvang|pull|set-image|bijwerken|metrics-status" >&2
     exit 2
     ;;
 esac

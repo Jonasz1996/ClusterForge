@@ -665,10 +665,23 @@ func (s *Server) importRun(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.security.ImportRunStatus(r.Context(), id)
 	if err != nil {
+		var sid *uuid.UUID
+		// Testlijst 3, N18: een run met alleen JSON-bevindingen (zonder nmap).
+		if qerr := s.pool.QueryRow(r.Context(), `SELECT scan_run_id FROM import_findings WHERE run_id = $1`, id).Scan(&sid); qerr == nil && sid == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"run_id": id, "status": "ontvangen", "fixed": []runFixed{}})
+			return
+		}
 		s.securityError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	// Vast schema voor de orchestrator (run_id, status, fixed) naast de
+	// volledige stand.
+	writeJSON(w, http.StatusOK, struct {
+		security.ImportStatus
+		RunID  uuid.UUID  `json:"run_id"`
+		Status string     `json:"status"`
+		Fixed  []runFixed `json:"fixed"`
+	}{st, st.Run.ID, st.Run.Status, fixedOf(st.Findings)})
 }
 
 // importNmap neemt een of meer XML-bestanden van nmap aan, als multipart

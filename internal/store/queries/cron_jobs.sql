@@ -102,14 +102,18 @@ WHERE r.started_at < now() - interval '90 days'
   AND r.id NOT IN (SELECT DISTINCT ON (job_id, node_id) id FROM cron_runs ORDER BY job_id, node_id, started_at DESC);
 
 -- name: ListIncidentCronJobs :many
--- De laatste afgeronde run per beheerde job en node, voor de incidenten;
--- een overgeslagen of gestopte run telt niet.
+-- De laatste afgeronde run per beheerde job en node, voor de incidenten. Een
+-- gestopte run telt niet, en een run die oversloeg omdat de vorige nog liep
+-- (zonder exitcode) ook niet. Een sync die oversloeg omdat deze node niet
+-- stuurt (met exitcode, protocol.SyncBeforeSkip) telt wel: zo blijft een
+-- oude fout van die node, van vóór een failover of van een agent die dat
+-- nog niet kende, niet open.
 SELECT DISTINCT ON (r.job_id, r.node_id) r.job_id, r.node_id, n.hostname, r.result, r.exit_code, r.started_at,
        j.name, j.cluster_id, j.alert, j.enabled
 FROM cron_runs r
 JOIN cron_jobs j ON j.id = r.job_id
 JOIN nodes n ON n.id = r.node_id
-WHERE r.result IN ('ok', 'failed', 'timeout')
+WHERE r.result IN ('ok', 'failed', 'timeout') OR (r.result = 'skipped' AND r.exit_code IS NOT NULL)
 ORDER BY r.job_id, r.node_id, r.started_at DESC;
 
 -- name: ListCronJobRunStarts :many
