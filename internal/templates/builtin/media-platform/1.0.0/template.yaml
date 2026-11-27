@@ -119,6 +119,15 @@ params:
     label: Cookies alleen over https
     help: Aan zodra het platform van buiten via https bereikbaar is.
     default: false
+  - name: trusted_proxies
+    type: string
+    label: Reverse proxy ervoor
+    help: >-
+      De IP-adressen van een reverse proxy zoals Nginx Proxy Manager die het
+      certificaat doet, komma-gescheiden (bij een NPM-cluster ook de nodes zelf).
+      Leeg = geen proxy. Platform 0.8.2 en later.
+    default: ""
+    pattern: '([0-9A-Fa-f.:]+(,[0-9A-Fa-f.:]+)*)?'
   - name: cpu
     type: int
     label: vCPU per node
