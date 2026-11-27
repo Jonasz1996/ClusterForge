@@ -22,7 +22,14 @@ export function useMe() {
   return useQuery({ queryKey: meQueryKey, queryFn: fetchMe, staleTime: 60_000 });
 }
 
-// useRequireMe stuurt naar /login als er geen sessie is.
+// setupPending: na een reset via de CLI moet de gebruiker eerst een nieuw
+// wachtwoord en een nieuwe TOTP instellen; dat gebeurt op /login.
+export function setupPending(me: Me): boolean {
+  return me.user.must_change_password || me.user.must_setup_totp;
+}
+
+// useRequireMe stuurt naar /login als er geen sessie is, of als het account
+// na een reset nog ingesteld moet worden.
 export function useRequireMe() {
   const router = useRouter();
   const q = useMe();
@@ -31,6 +38,8 @@ export function useRequireMe() {
       // Na het inloggen terug naar de pagina waar je was.
       const here = window.location.pathname + window.location.search;
       router.replace(here === "/" ? "/login" : `/login?terug=${encodeURIComponent(here)}`);
+    } else if (q.data && setupPending(q.data)) {
+      router.replace("/login");
     }
   }, [q.isSuccess, q.data, router]);
   return q;
@@ -56,4 +65,25 @@ export function useLogout() {
 export function returnPath(search: string): string {
   const t = new URLSearchParams(search).get("terug") ?? "";
   return t.startsWith("/") && !t.startsWith("//") && !t.startsWith("/\\") && !t.startsWith("/login") ? t : "/";
+}
+
+export const prod2FAKey = ["security", "prod-2fa"] as const;
+
+// useProd2FA zegt of acties op prod tweestapsverificatie vragen (een
+// instelling van de installatie; standaard aan).
+export function useProd2FA() {
+  return useQuery({
+    queryKey: prod2FAKey,
+    queryFn: async () => unwrap(await api.GET("/security/prod-2fa")),
+    staleTime: 60_000,
+  });
+}
+
+// useProdAllowed is true als de gebruiker op prod mag handelen: met
+// tweestapsverificatie, of als de installatie die niet vraagt.
+export function useProdAllowed() {
+  const me = useMe();
+  const req = useProd2FA();
+  if (me.data?.user.totp_enabled) return true;
+  return req.data ? !req.data.required : false;
 }

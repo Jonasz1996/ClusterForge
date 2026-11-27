@@ -96,6 +96,27 @@ func (a *Agent) handleCrowdSec(data []byte) protocol.CrowdSecResponse {
 			return protocol.CrowdSecResponse{Error: err.Error()}
 		}
 		return protocol.CrowdSecResponse{Count: 1}
+	case protocol.CrowdSecOpListImport, protocol.CrowdSecOpListDrop, protocol.CrowdSecOpConsoleOff:
+		if !a.crowdSecInstalled() {
+			return protocol.CrowdSecResponse{Error: "CrowdSec staat niet op deze node"}
+		}
+		var n int
+		var err error
+		switch req.Op {
+		case protocol.CrowdSecOpListImport:
+			if req.List == nil {
+				return protocol.CrowdSecResponse{Error: "list_import zonder lijst"}
+			}
+			n, err = a.crowdSecListImport(ctx, *req.List)
+		case protocol.CrowdSecOpListDrop:
+			n, err = a.crowdSecListDrop(ctx, req.Drop)
+		default:
+			n, err = 1, a.crowdSecConsoleOff(ctx)
+		}
+		if err != nil {
+			return protocol.CrowdSecResponse{Error: err.Error()}
+		}
+		return protocol.CrowdSecResponse{Count: n}
 	}
 	return protocol.CrowdSecResponse{Error: "onbekend CrowdSec-verzoek " + req.Op}
 }
@@ -367,6 +388,31 @@ func blocklistCount(out []byte) int {
 	return int(n)
 }
 
+// listCounts telt de actieve bans per tag van een centrale lijst in het blok
+// decisions van cscli metrics; nil als dat blok er niet is.
+func listCounts(out []byte) map[string]int {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(out, &raw) != nil {
+		return nil
+	}
+	var dec map[string]map[string]map[string]any
+	if json.Unmarshal(raw["decisions"], &dec) != nil {
+		return nil
+	}
+	res := map[string]int{}
+	for reason, origins := range dec {
+		if !protocol.ValidListTag(reason) {
+			continue
+		}
+		for _, actions := range origins {
+			for _, v := range actions {
+				res[reason] += int(num(v))
+			}
+		}
+	}
+	return res
+}
+
 func isListOrigin(o string) bool {
 	switch strings.ToLower(o) {
 	case "capi", "lists":
@@ -434,13 +480,29 @@ func (a *Agent) crowdSecPoll(ctx context.Context, since time.Time) (protocol.Cro
 		return protocol.CrowdSecPoll{}, fmt.Errorf("alerts lezen: %w", err)
 	}
 	p := protocol.CrowdSecPoll{Alerts: parseCscliAlerts(out), Blocklist: -1}
-	out, err = a.stdout(ctx, "cscli", "decisions", "list", "-o", "json")
-	if err != nil {
-		return protocol.CrowdSecPoll{}, fmt.Errorf("bans lezen: %w", err)
+	// Alleen de bans van scenario's en met de hand: de centrale lijsten
+	// (cscli-import) kunnen tienduizenden bans in één alert hebben.
+	p.Decisions = []protocol.CrowdSecActive{}
+	seen := map[int64]bool{}
+	for _, origin := range []string{"crowdsec", "cscli"} {
+		out, err = a.stdout(ctx, "cscli", "decisions", "list", "-o", "json", "--origin", origin)
+		if err != nil {
+			// Een CrowdSec zonder --origin: alles lezen.
+			if out, err = a.stdout(ctx, "cscli", "decisions", "list", "-o", "json"); err != nil {
+				return protocol.CrowdSecPoll{}, fmt.Errorf("bans lezen: %w", err)
+			}
+		}
+		for _, d := range parseCscliDecisions(out, now) {
+			if !seen[d.ID] {
+				seen[d.ID] = true
+				p.Decisions = append(p.Decisions, d)
+			}
+		}
 	}
-	p.Decisions = parseCscliDecisions(out, now)
+	sort.Slice(p.Decisions, func(i, j int) bool { return p.Decisions[i].ID < p.Decisions[j].ID })
 	if out, err := a.stdout(ctx, "cscli", "metrics", "-o", "json"); err == nil {
 		p.Blocklist = blocklistCount(out)
+		p.Lists = listCounts(out)
 	}
 	return p, nil
 }
@@ -455,7 +517,7 @@ func parseCscliAlerts(out []byte) []protocol.CrowdSecAlert {
 		if !localScope(r.Source.Scope) {
 			continue // community-blocklist en lijsten
 		}
-		list := false
+		list := strings.HasPrefix(r.Scenario, protocol.CrowdSecListPrefix)
 		for _, d := range r.Decisions {
 			list = list || isListOrigin(d.Origin)
 		}
@@ -482,7 +544,7 @@ func parseCscliDecisions(out []byte, now time.Time) []protocol.CrowdSecActive {
 	res := []protocol.CrowdSecActive{}
 	for _, r := range raw {
 		for _, d := range r.Decisions {
-			if isListOrigin(d.Origin) {
+			if isListOrigin(d.Origin) || strings.HasPrefix(d.Scenario, protocol.CrowdSecListPrefix) {
 				continue
 			}
 			dur, err := time.ParseDuration(d.Duration)
@@ -555,6 +617,78 @@ func (a *Agent) crowdSecEnroll(ctx context.Context, e protocol.CrowdSecEnroll) e
 	}
 	if _, err := a.stdout(ctx, "systemctl", "restart", "crowdsec"); err != nil {
 		return fmt.Errorf("aangemeld, maar CrowdSec herstarten mislukte: %w", err)
+	}
+	return nil
+}
+
+// crowdSecListImport zet een stuk van een centrale lijst met cscli
+// decisions import: één bestand per scope (ip en range).
+func (a *Agent) crowdSecListImport(ctx context.Context, c protocol.CrowdSecListChunk) (int, error) {
+	if err := c.Validate(); err != nil {
+		return 0, err
+	}
+	byScope := map[string][]string{}
+	for _, v := range c.Values {
+		scope, norm, _ := protocol.ListValue(v)
+		byScope[scope] = append(byScope[scope], norm)
+	}
+	n := 0
+	for _, scope := range []string{"ip", "range"} {
+		vals := byScope[scope]
+		if len(vals) == 0 {
+			continue
+		}
+		f, err := os.CreateTemp("", "cf-list-*.txt")
+		if err != nil {
+			return n, err
+		}
+		_, werr := f.WriteString(strings.Join(vals, "\n") + "\n")
+		cerr := f.Close()
+		if err := errors.Join(werr, cerr); err != nil {
+			_ = os.Remove(f.Name())
+			return n, err
+		}
+		ictx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		_, err = a.stdout(ictx, "cscli", "decisions", "import", "-i", f.Name(), "--format", "values",
+			"--scope", scope, "--duration", c.Duration, "--reason", c.Tag, "--type", "ban")
+		cancel()
+		_ = os.Remove(f.Name())
+		if err != nil {
+			return n, fmt.Errorf("lijst importeren: %w", err)
+		}
+		n += len(vals)
+	}
+	return n, nil
+}
+
+// crowdSecListDrop haalt de bans van oude generaties van centrale lijsten
+// weg; alleen tags van ClusterForge en alleen met origin cscli-import.
+func (a *Agent) crowdSecListDrop(ctx context.Context, tags []string) (int, error) {
+	n := 0
+	for _, t := range tags {
+		if !protocol.ValidListTag(t) {
+			return n, fmt.Errorf("ongeldige lijst-tag %q", t)
+		}
+		out, err := a.stdout(ctx, "cscli", "decisions", "delete", "--origin", "cscli-import", "--scenario", t)
+		if err != nil {
+			return n, fmt.Errorf("lijst weghalen: %w", err)
+		}
+		if m := deletedCount.FindStringSubmatch(string(out)); m != nil {
+			k, _ := strconv.Atoi(m[1])
+			n += k
+		}
+	}
+	return n, nil
+}
+
+// crowdSecConsoleOff zet het delen met de CrowdSec Console uit. De
+// community-blocklist (CAPI) blijft werken.
+func (a *Agent) crowdSecConsoleOff(ctx context.Context) error {
+	if _, err := a.stdout(ctx, "cscli", "console", "disable", "--all"); err != nil {
+		return fmt.Errorf("console uitzetten: %w", err)
+	}
+	if _, err := a.stdout(ctx, "systemctl", "restart", "crowdsec"); err != nil {
+		return fmt.Errorf("console uitgezet, maar CrowdSec herstarten mislukte: %w", err)
 	}
 	return nil
 }

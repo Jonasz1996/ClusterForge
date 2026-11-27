@@ -14,6 +14,9 @@ Type=simple
 User=vaultx
 Group=vaultx
 WorkingDirectory=/opt/vaultx/backend
+# Vóór de overname wordt cf-vaultx overgeslagen in plaats van elke 15 s te
+# falen (geen herstartlus); de check van keepalived start hem daarna.
+ExecCondition=+/usr/local/lib/clusterforge/vaultx-ctl.sh wacht
 # Als root: markering en sleutel controleren, /etc/vaultx/vaultx.env schrijven.
 ExecStartPre=+/usr/local/lib/clusterforge/vaultx-ctl.sh voorstart
 EnvironmentFile=-/etc/vaultx/vaultx.env

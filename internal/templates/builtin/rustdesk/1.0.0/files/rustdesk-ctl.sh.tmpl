@@ -119,6 +119,37 @@ fingerprint() {
 }
 pubkey() { cat "$KEY.pub" 2>/dev/null; }
 
+# hbbs luistert op 0.0.0.0 (host-netwerk). Een UDP-antwoord vertrekt dan van
+# het IP van de node in plaats van het VIP, en de client (via het VIP of de
+# NAT) blijft "not ready". Op de VIP-node zet nft het bronadres van UDP
+# 21116 op het VIP, zonder conntrack (die zou de omzetting verwarren).
+udp_vip_on() {
+  if ! command -v nft >/dev/null 2>&1; then
+    warn "nft ontbreekt (pakket nftables): UDP 21116 antwoordt van het IP van de node in plaats van $VIP"
+    return 0
+  fi
+  if ! nft -f - <<NFT
+table ip cf_rustdesk
+delete table ip cf_rustdesk
+table ip cf_rustdesk {
+  chain pre {
+    type filter hook prerouting priority raw; policy accept;
+    ip daddr $VIP udp dport 21116 notrack
+  }
+  chain out {
+    type filter hook output priority raw; policy accept;
+    oifname != "lo" udp sport 21116 ip saddr != $VIP notrack ip saddr set $VIP
+  }
+}
+NFT
+  then
+    log "nft-regel voor UDP 21116 via $VIP niet gezet"
+  fi
+  return 0
+}
+udp_vip_off() { command -v nft >/dev/null 2>&1 && nft delete table ip cf_rustdesk >/dev/null 2>&1; return 0; }
+udp_vip_set() { command -v nft >/dev/null 2>&1 && nft list table ip cf_rustdesk >/dev/null 2>&1; }
+
 # Kan deze node RustDesk bedienen? Met een sleutel, een ontvangen kopie, of
 # als node 1 (die neemt de oude containers over of begint nieuw).
 can_serve() {
@@ -294,6 +325,7 @@ case "${1:-}" in
         echo "Nieuw cluster: hbbs maakt een nieuwe sleutel."
       fi
     fi
+    udp_vip_on
     fingerprint > "$HASH"
     date +%s > "$STARTED"
     rm -f "$UNHEALTHY"
@@ -302,6 +334,7 @@ case "${1:-}" in
   down)
     if any_running; then date +%s > "$STAMP"; fi
     compose stop
+    has_vip || udp_vip_off
     rm -f "$HASH"
     ;;
   snapshot)
@@ -328,6 +361,7 @@ case "${1:-}" in
       rm -f "$YIELD"
     fi
     if ! has_vip; then
+      udp_vip_off
       if systemctl is-active --quiet cf-rustdesk; then
         log "RustDesk draait hier zonder het VIP; stoppen"
         systemctl stop --no-block cf-rustdesk
@@ -347,6 +381,8 @@ case "${1:-}" in
       rm -f "$UNHEALTHY"
       exit 0
     fi
+    # Een herladen firewall kan de tabel weghalen: opnieuw zetten.
+    udp_vip_set || udp_vip_on
     if healthy; then
       rm -f "$UNHEALTHY"
       admin_password
@@ -361,11 +397,13 @@ case "${1:-}" in
     exit 0
     ;;
   master)
+    udp_vip_on
     systemctl reset-failed cf-rustdesk 2>/dev/null
     [ -z "$(foreign)" ] && systemctl start --no-block cf-rustdesk
     exit 0
     ;;
   backup)
+    udp_vip_off
     systemctl stop --no-block cf-rustdesk
     rm -f "$UNHEALTHY"
     systemctl reset-failed cf-rustdesk 2>/dev/null

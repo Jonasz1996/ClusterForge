@@ -152,7 +152,9 @@ function Logs() {
       loadView(view);
     } else if (node && nodeById.has(node)) {
       const n = nodeById.get(node)!;
-      const kind = (params.get("kind") as LogKind | null) ?? undefined;
+      // De GUI noemt docker "Container"; zelf samengestelde links met
+      // kind=container (of unit/service voor het journaal) mogen ook.
+      const kind = urlKind(params.get("kind"));
       const name = params.get("name") ?? "";
       const cluster =
         params.get("cluster") === "1" && n.cluster_id ? nodes.filter((x) => x.cluster_id === n.cluster_id && x.supported) : [n];
@@ -1446,4 +1448,22 @@ function Fields({
       </div>
     </Card>
   );
+}
+
+// urlKind leest de soort bron uit de URL, ook met de namen uit de GUI.
+function urlKind(k: string | null): LogKind | undefined {
+  switch ((k ?? "").toLowerCase()) {
+    case "docker":
+    case "container":
+      return "docker";
+    case "journal":
+    case "journaal":
+    case "unit":
+    case "service":
+      return "journal";
+    case "file":
+    case "bestand":
+      return "file";
+  }
+  return undefined;
 }

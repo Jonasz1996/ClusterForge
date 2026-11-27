@@ -28,9 +28,19 @@ type Settings struct {
 	// bewaren.
 	ConsoleAvailable bool `json:"console_available"`
 
+	// AutoRules zijn de regels voor automatisch blokkeren (fase 47).
+	AutoRules AutoRules `json:"auto_rules"`
+	// Notify zijn de meldingen; de adressen van de kanalen staan
+	// versleuteld apart en gaan nooit naar de browser.
+	Notify NotifySettings `json:"notify"`
+	// ConsoleOff: het delen met de CrowdSec Console staat uit.
+	ConsoleOff bool `json:"console_off"`
+
 	consoleKeyEnc  []byte
 	consoleKeyID   string
 	consoleKeyHash string
+	notifyEnc      []byte
+	notifyKeyID    string
 }
 
 // Node is een node met een agent, met zijn CrowdSec-stand.
@@ -71,6 +81,10 @@ type Node struct {
 	ConsoleEnrolledAt *time.Time `json:"console_enrolled_at"`
 	ConsoleError      string     `json:"console_error"`
 	ConsoleFailedAt   *time.Time `json:"console_failed_at"`
+	// ConsoleOffDone: de Console is op deze node uitgezet.
+	ConsoleOffDone bool `json:"console_off_done"`
+	// Lists: aantal bans per tag van een centrale lijst (laatste poll).
+	Lists map[string]int `json:"-"`
 
 	consoleHash string
 	facts       *protocol.Facts
@@ -104,12 +118,24 @@ func (n Node) Config() NodeConfig {
 
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	var st Settings
+	var rules, notify []byte
 	err := s.pool.QueryRow(ctx, `SELECT auto_apply, bouncer_default, share_bans, whitelist, updated_at, updated_by,
-		console_key_enc, console_key_id, console_key_hash FROM crowdsec_settings`).
+		console_key_enc, console_key_id, console_key_hash, auto_rules, notify, notify_enc, notify_key_id, console_off FROM crowdsec_settings`).
 		Scan(&st.AutoApply, &st.BouncerDefault, &st.ShareBans, &st.Whitelist, &st.UpdatedAt, &st.UpdatedBy,
-			&st.consoleKeyEnc, &st.consoleKeyID, &st.consoleKeyHash)
+			&st.consoleKeyEnc, &st.consoleKeyID, &st.consoleKeyHash, &rules, &notify, &st.notifyEnc, &st.notifyKeyID, &st.ConsoleOff)
 	if errors.Is(err, pgx.ErrNoRows) {
 		st, err = Settings{AutoApply: true, BouncerDefault: true, ShareBans: "all", Whitelist: DefaultWhitelist}, nil
+	}
+	st.AutoRules = DefaultAutoRules
+	if len(rules) > 2 {
+		_ = json.Unmarshal(rules, &st.AutoRules)
+	}
+	st.Notify = DefaultNotify
+	if len(notify) > 2 {
+		_ = json.Unmarshal(notify, &st.Notify)
+	}
+	if st.Notify.Channels == nil {
+		st.Notify.Channels = []Channel{}
 	}
 	st.ConsoleKeySet = len(st.consoleKeyEnc) > 0
 	st.ConsoleAvailable = s.Box != nil
@@ -127,7 +153,8 @@ SELECT n.id, n.hostname, n.cluster_id,
        coalesce(cn.apply_error, ''), cn.apply_failed_at, coalesce(cn.blocklist, -1),
        cn.poll_at, coalesce(cn.poll_error, ''), cn.last_alert_at,
        coalesce(cn.console_hash, ''), cn.console_enrolled_at, coalesce(cn.console_error, ''), cn.console_failed_at,
-       coalesce((SELECT console_key_hash FROM crowdsec_settings), '')
+       coalesce((SELECT console_key_hash FROM crowdsec_settings), ''),
+       cn.lists, coalesce(cn.console_off_done, false)
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN clusters c ON c.id = n.cluster_id
@@ -169,13 +196,14 @@ func (s *Service) nodes(ctx context.Context, sql string, args ...any) ([]Node, e
 		var n Node
 		var proto int32
 		var hb *time.Time
-		var facts, st, plan []byte
+		var facts, st, plan, lists []byte
 		var curKey string
 		if err := rows.Scan(&n.NodeID, &n.Hostname, &n.ClusterID, &n.ClusterName, &n.ClusterSlug, &n.ClusterEnv, &n.Template,
 			&proto, &hb, &facts, &n.Enabled, &n.Managed, &n.Bouncer, &n.ExtraProfiles, &n.DisabledProfiles,
 			&st, &n.StatusAt, &plan, &n.PlanHash, &n.AppliedHash, &n.AppliedAt, &n.ApplyJobID, &n.ApplyRunning,
 			&n.ApplyError, &n.ApplyFailedAt, &n.Blocklist, &n.PollAt, &n.PollError, &n.lastAlertAt,
-			&n.consoleHash, &n.ConsoleEnrolledAt, &n.ConsoleError, &n.ConsoleFailedAt, &curKey); err != nil {
+			&n.consoleHash, &n.ConsoleEnrolledAt, &n.ConsoleError, &n.ConsoleFailedAt, &curKey,
+			&lists, &n.ConsoleOffDone); err != nil {
 			return nil, err
 		}
 		n.Protocol = int(proto)
@@ -199,6 +227,9 @@ func (s *Service) nodes(ctx context.Context, sql string, args ...any) ([]Node, e
 			if json.Unmarshal(plan, &p) == nil {
 				n.Plan = &p
 			}
+		}
+		if len(lists) > 0 {
+			_ = json.Unmarshal(lists, &n.Lists)
 		}
 		if n.ExtraProfiles == nil {
 			n.ExtraProfiles = []string{}

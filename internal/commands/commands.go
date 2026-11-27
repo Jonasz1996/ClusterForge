@@ -215,6 +215,9 @@ type Target struct {
 	Nodes []updates.Node
 	// Prod zijn de prodclusters erin, op slug.
 	Prod []string
+	// Skipped zijn de nodes van het cluster die offline zijn of een te oude
+	// agent hebben; bij een heel cluster worden die overgeslagen (2.3).
+	Skipped []string
 }
 
 // Select kiest de nodes, in de volgorde van de run.
@@ -233,6 +236,10 @@ func (s *Service) Select(ctx context.Context, req RunRequest) (Target, error) {
 			continue
 		case len(req.NodeIDs) > 0 && !slices.Contains(req.NodeIDs, n.NodeID):
 			continue
+		case req.ClusterID != nil && (!n.Supported || !n.Online):
+			// Een heel cluster: offline nodes staan standaard uit (2.3).
+			t.Skipped = append(t.Skipped, n.Hostname)
+			continue
 		case !n.Supported:
 			return Target{}, &ConflictError{fmt.Sprintf("de agent op %s heeft protocol %d en kan nog geen commando's draaien (vanaf %d); werk de agents eerst bij", n.Hostname, n.Protocol, protocol.RunSince)}
 		case !n.Online:
@@ -247,6 +254,9 @@ func (s *Service) Select(ctx context.Context, req RunRequest) (Target, error) {
 		return Target{}, &ConflictError{"niet elke gevraagde node heeft een agent"}
 	}
 	if len(t.Nodes) == 0 {
+		if len(t.Skipped) > 0 {
+			return Target{}, &ConflictError{"geen node van dit cluster is verbonden (" + strings.Join(t.Skipped, ", ") + ")"}
+		}
 		return Target{}, &ConflictError{"dit cluster heeft geen nodes met een agent"}
 	}
 	t.Nodes = updates.Order(t.Nodes)
@@ -261,7 +271,11 @@ type params struct {
 	RunAs           string    `json:"run_as"`
 	TimeoutSeconds  int       `json:"timeout_seconds"`
 	ContinueOnError bool      `json:"continue_on_error,omitempty"`
-	Nodes           []node    `json:"nodes"`
+	// Once: een eenmalig commando, zonder eigen commando erachter.
+	Once  bool   `json:"once,omitempty"`
+	Nodes []node `json:"nodes"`
+	// Skipped: nodes van het cluster die offline waren bij het starten.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 type node struct {
@@ -285,6 +299,38 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, id uuid.UUID, r
 		CommandID: c.ID, Name: c.Name, Revision: int(c.Revision), Script: c.Script, RunAs: c.RunAs,
 		TimeoutSeconds: int(c.TimeoutSeconds), ContinueOnError: req.ContinueOnError,
 	}
+	return s.enqueue(ctx, actor, p, t)
+}
+
+// Once is een eenmalig commando (fase 47): het draait zoals een eigen
+// commando, met live uitvoer en een regel in het logboek per node, maar
+// komt niet in de lijst met eigen commando's. De tekst staat in de taak.
+type Once struct {
+	// Name is de titel van de taak; leeg wordt "Eenmalig commando".
+	Name           string
+	Script         string
+	RunAs          string
+	TimeoutSeconds int
+}
+
+// StartOnce zet een eenmalig commando in de wachtrij.
+func (s *Service) StartOnce(ctx context.Context, actor events.Actor, o Once, req RunRequest, t Target) (store.Job, error) {
+	in := Input{Name: o.Name, Script: o.Script, RunAs: o.RunAs, TimeoutSeconds: o.TimeoutSeconds}
+	if strings.TrimSpace(in.Name) == "" {
+		in.Name = "Eenmalig commando"
+	}
+	if err := in.normalize(); err != nil {
+		return store.Job{}, err
+	}
+	p := params{
+		Name: in.Name, Script: in.Script, RunAs: in.RunAs, TimeoutSeconds: in.TimeoutSeconds,
+		ContinueOnError: req.ContinueOnError, Once: true,
+	}
+	return s.enqueue(ctx, actor, p, t)
+}
+
+func (s *Service) enqueue(ctx context.Context, actor events.Actor, p params, t Target) (store.Job, error) {
+	p.Skipped = t.Skipped
 	var cluster *uuid.UUID
 	same := true
 	for i, n := range t.Nodes {
@@ -299,16 +345,17 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, id uuid.UUID, r
 	spec := jobs.Spec{Kind: Kind, Params: p, Actor: actor}
 	switch {
 	case len(t.Nodes) == 1:
-		spec.Title, spec.NodeID = fmt.Sprintf("%s op %s", c.Name, t.Nodes[0].Hostname), &t.Nodes[0].NodeID
+		spec.Title, spec.NodeID = fmt.Sprintf("%s op %s", p.Name, t.Nodes[0].Hostname), &t.Nodes[0].NodeID
 	case same && cluster != nil:
-		spec.Title = fmt.Sprintf("%s in %s", c.Name, t.Nodes[0].ClusterName)
+		spec.Title = fmt.Sprintf("%s in %s", p.Name, t.Nodes[0].ClusterName)
 	default:
-		spec.Title = fmt.Sprintf("%s op %d nodes", c.Name, len(t.Nodes))
+		spec.Title = fmt.Sprintf("%s op %d nodes", p.Name, len(t.Nodes))
 	}
 	if same {
 		spec.ClusterID = cluster
 	}
 	var j store.Job
+	var err error
 	if spec.ClusterID != nil {
 		j, err = s.runner.EnqueueForCluster(ctx, spec)
 	} else {
@@ -336,27 +383,64 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	}
 	hash := Hash(p.Script)
 	var failed []string
+	// Een leescommando loopt op alle nodes door en meldt de fouten aan het
+	// eind (2.2), met een korte tijdslimiet per node (2.3).
+	readOnly := ReadOnly(p.Script)
+	cont := p.ContinueOnError || readOnly
+	timeout := p.TimeoutSeconds
+	if readOnly && (timeout <= 0 || timeout > ReadTimeoutSeconds) {
+		timeout = ReadTimeoutSeconds
+	}
+	if len(p.Skipped) > 0 || readOnly {
+		_ = j.Step(ctx, "Voorbereiden", func(ctx context.Context, st *jobs.Step) error {
+			if len(p.Skipped) > 0 {
+				st.Logf("overgeslagen, niet verbonden: %s", strings.Join(p.Skipped, ", "))
+			}
+			if readOnly {
+				st.Logf("leescommando: loopt door op alle nodes, hoogstens %d seconden per node", timeout)
+			}
+			return nil
+		})
+	}
 	for i, n := range p.Nodes {
 		name := n.Hostname
 		if n.VIPHolder {
 			name += " (VIP-houder)"
 		}
+		title := fmt.Sprintf("%s (revisie %d) op %s als %s", p.Name, p.Revision, n.Hostname, p.RunAs)
+		if p.Once {
+			title = fmt.Sprintf("%s (eenmalig) op %s als %s", p.Name, n.Hostname, p.RunAs)
+		}
 		spec := protocol.RunSpec{
 			ID: fmt.Sprintf("%s-%d-%d-cmd", j.ID, j.Attempts, i), Kind: protocol.RunScript,
-			Title:  fmt.Sprintf("%s (revisie %d) op %s als %s", p.Name, p.Revision, n.Hostname, p.RunAs),
-			Script: p.Script, User: p.RunAs, TimeoutSeconds: p.TimeoutSeconds,
+			Title:  title,
+			Script: Strict(p.Script), User: p.RunAs, TimeoutSeconds: timeout,
 		}
 		err := j.Step(ctx, name, func(ctx context.Context, st *jobs.Step) error {
-			res, err := s.Run.Do(ctx, st, n.ID, spec)
+			// De agent bewaakt de tijdslimiet zelf; dit vangt een node die
+			// niet meer antwoordt, zodat de volgende nodes niet blijven wachten.
+			nctx, cancel := context.WithTimeout(ctx, spec.Timeout()+2*time.Minute)
+			defer cancel()
+			res, err := s.Run.Do(nctx, st, n.ID, spec)
+			if err != nil && ctx.Err() == nil && nctx.Err() != nil {
+				return fmt.Errorf("geen antwoord binnen %s; de node hangt of is offline", spec.Timeout()+2*time.Minute)
+			}
 			if err != nil {
 				return err
 			}
 			rt, _ := s.q.GetNodeRuntime(ctx, n.ID)
+			payload := map[string]any{
+				"command": p.Name, "command_id": p.CommandID.String(), "revision": p.Revision, "sha256": hash,
+				"hostname": n.Hostname, "result": res.State, "exit": res.Exit, "job_id": j.ID.String(),
+			}
+			if p.Once {
+				// Geen eigen commando: de tekst zelf in het logboek.
+				delete(payload, "command_id")
+				delete(payload, "revision")
+				payload["once"], payload["script"] = true, clipScript(p.Script)
+			}
 			_ = s.ev.Write(ctx, nil, events.Event{Actor: actor, SubjectType: "node", SubjectID: n.ID.String(), ClusterID: rt.ClusterID,
-				Action: "node.command_ran", Payload: map[string]any{
-					"command": p.Name, "command_id": p.CommandID.String(), "revision": p.Revision, "sha256": hash,
-					"hostname": n.Hostname, "result": res.State, "exit": res.Exit, "job_id": j.ID.String(),
-				}})
+				Action: "node.command_ran", Payload: payload})
 			if res.State != protocol.RunOK {
 				return errors.New(noderun.Describe(res))
 			}
@@ -366,9 +450,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		case err == nil:
 		case ctx.Err() != nil:
 			return err
-		case p.ContinueOnError && i < len(p.Nodes)-1:
+		case cont && i < len(p.Nodes)-1:
 			failed = append(failed, n.Hostname)
-		case p.ContinueOnError:
+		case cont:
 			failed = append(failed, n.Hostname)
 			return fmt.Errorf("mislukt op %s", strings.Join(failed, ", "))
 		case i < len(p.Nodes)-1:
@@ -381,4 +465,30 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		return fmt.Errorf("mislukt op %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// clipScript houdt het logboek klein: de eerste 2000 tekens.
+func clipScript(s string) string {
+	if r := []rune(s); len(r) > 2000 {
+		return string(r[:2000]) + "…"
+	}
+	return s
+}
+
+// shellShebang herkent een #!-regel van sh, bash of dash.
+var shellShebang = regexp.MustCompile(`^#!\s*(/usr)?/bin/(env\s+)?(ba|da)?sh(\s|$)`)
+
+// Strict zet set -e voor een shellscript, zodat een commando dat faalt het
+// script stopt en de taak mislukt (en niet "Gelukt" toont omdat de laatste
+// regel lukte). Wie fouten wil negeren, zet zelf set +e in het script. Een
+// script met een andere interpreter (python, ...) blijft zoals het is.
+func Strict(script string) string {
+	if !strings.HasPrefix(script, "#!") {
+		return "set -e\n" + script
+	}
+	first, rest, _ := strings.Cut(script, "\n")
+	if !shellShebang.MatchString(first) {
+		return script
+	}
+	return first + "\nset -e\n" + rest
 }

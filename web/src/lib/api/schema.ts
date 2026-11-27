@@ -89,6 +89,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een herstelcode aanvragen die de beheerder in de CLI plakt
+         * @description Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server user reset <code>` zoekt het account op.
+         */
+        post: operations["accountRecoveryHelp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/reset/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen) */
+        post: operations["completeResetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/sessions": {
         parameters: {
             query?: never;
@@ -150,6 +187,41 @@ export interface paths {
         /** Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu */
         get: operations["getAttention"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nav/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Welke onderdelen in gebruik zijn, zodat het menu de rest kan verbergen (fase 47) */
+        get: operations["getNavUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/prod-2fa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Of acties op prodclusters tweestapsverificatie vragen */
+        get: operations["getProd2FA"];
+        /** Tweestapsverificatie voor prodacties aan of uit zetten (admin; uitzetten vraagt je wachtwoord of code) */
+        put: operations["setProd2FA"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3954,6 +4026,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/updates/resume/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Waar een gestopte clusterupdate kan hervatten (fase 47) */
+        get: operations["getUpdateResume"];
+        put?: never;
+        /**
+         * Een gestopte clusterupdate hervatten (admin, fase 47)
+         * @description Dezelfde keuzes als de gestopte update, vanaf from_node_id (leeg: de node waar ze stopte). skip_projects slaat die
+         *     Compose-projecten deze keer over. Op prod tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["resumeUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Alles bijwerken, één cluster na het andere (admin, fase 47); één taak updates.queue
+         * @description Elk cluster krijgt een gewone clusterupdate (rollend, de VIP-houder als laatste); het volgende cluster begint pas
+         *     als het vorige gelukt is en bij een fout stopt de rij. Lab en test eerst, prod als laatste en alleen met
+         *     include_prod (dan tweestapsverificatie en confirm "prod"), daarna de nodes zonder cluster. Proxmox-hosts doen niet
+         *     mee: die werk je bij via Proxmox → Host-updates. Met dry_run komt alleen het plan terug.
+         */
+        post: operations["startUpdatesAll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/updates/policies": {
         parameters: {
             query?: never;
@@ -4595,6 +4714,217 @@ export interface paths {
          * @description Zonder node_ids of cluster_id op alle nodes met CrowdSec. delete haalt alle bans op het adres weg.
          */
         post: operations["decideCrowdSec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Centrale blocklists (fase 47) met hun stand op de nodes, en de catalogus met publieke lijsten */
+        get: operations["listCrowdSecLists"];
+        put?: never;
+        /**
+         * Publieke lijst aanzetten - uit de catalogus of een eigen https-URL (admin)
+         * @description De lijst wordt bij de volgende ronde (meteen) opgehaald en naar de nodes gebracht. Privé-, multicast- en eigen
+         *     netwerken laat ClusterForge altijd weg.
+         */
+        post: operations["addCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een publieke lijst ophalen zonder te bewaren - aantal en wat wegvalt (admin) */
+        post: operations["previewCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Lijst aan/uit, naam, bereik of verversing (admin) */
+        put: operations["updateCrowdSecList"];
+        post?: never;
+        /** Publieke lijst weghalen; de nodes verliezen de bans bij de volgende ronde (admin) */
+        delete: operations["deleteCrowdSecList"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        /** Waarden van een lijst, nieuwste eerst */
+        get: operations["listCrowdSecListEntries"];
+        put?: never;
+        /** Waarden toevoegen of weghalen in de eigen of de automatische lijst; dry_run geeft het voorbeeld (admin) */
+        post: operations["changeCrowdSecListEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publieke lijst nu ophalen; zet een vastgezette lijst weer op automatisch (admin) */
+        post: operations["refreshCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        /** Bewaarde versies van een lijst, nieuwste eerst */
+        get: operations["listCrowdSecListVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/lists/{listId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lijst terugdraaien naar een versie; dry_run geeft het voorbeeld (admin) */
+        post: operations["rollbackCrowdSecList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/auto-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Regels voor automatisch blokkeren over alle nodes (admin) */
+        put: operations["updateCrowdSecAutoRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Meldingen en kanalen (ntfy, Discord, Slack, Telegram, webhook) (admin)
+         * @description Adressen en tokens worden versleuteld bewaard en nooit teruggegeven; leeg bij een bestaand kanaal houdt ze.
+         */
+        put: operations["updateCrowdSecNotify"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/notify/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Testmelding naar alle kanalen (admin) */
+        post: operations["testCrowdSecNotify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/console/off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * CrowdSec Console loskoppelen (on) of weer toelaten (admin)
+         * @description Loskoppelen haalt de enroll-sleutel weg en zet op elke node het delen met de Console uit (agent protocol 57).
+         *     Detectie, bans en de community-blocklist blijven lokaal werken.
+         */
+        put: operations["setCrowdSecConsoleOff"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5524,6 +5854,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publish/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert) */
+        get: operations["getPublishChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/publish/adopt": {
         parameters: {
             query?: never;
@@ -5573,6 +5920,74 @@ export interface paths {
         put?: never;
         /** Een host niet langer beheren; hij blijft in NPM staan (admin) */
         post: operations["releasePublishHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet */
+        get: operations["getPublishAuto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin) */
+        put: operations["savePublishAutoRule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een mislukte automatische publicatie opnieuw laten proberen (admin) */
+        post: operations["retryPublishAuto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin) */
+        get: operations["getPublishAutoBackup"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6543,6 +6958,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/commands/once": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een eenmalig commando draaien zonder het te bewaren (admin, fase 47); taak command.run
+         * @description Zoals een eigen commando draaien, maar de tekst komt niet in de lijst met eigen commando's: hij staat in de taak
+         *     en per node in het logboek. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["runCommandOnce"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-upgrades": {
         parameters: {
             query?: never;
@@ -6610,6 +7046,23 @@ export interface paths {
          *     vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
          */
         put: operations["setAgentUpgradeProdAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-upgrades/night-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin) */
+        put: operations["setAgentUpgradeNightOnly"];
         post?: never;
         delete?: never;
         options?: never;
@@ -8026,6 +8479,8 @@ export interface components {
             /** @description Leeg = alle clusters */
             cluster_ids: string[];
             cluster_names: string[];
+            /** @description Leeg = alle lees-routes; anders alleen de genoemde capabilities */
+            scopes: ("pentest" | "dashboard")[];
             /** Format: date-time */
             expires_at: string | null;
             /** Format: date-time */
@@ -8039,6 +8494,8 @@ export interface components {
             name: string;
             /** @description Leeg of weg = alle clusters */
             cluster_ids?: string[];
+            /** @description Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege. */
+            scopes?: ("pentest" | "dashboard")[];
             /** @description 0 of weg = verloopt nooit */
             ttl_days?: number;
         };
@@ -10864,6 +11321,32 @@ export interface components {
             created_at: string;
             /** @description De leermodus in het dashboard Kubernetes staat aan */
             kube_learning: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden */
+            must_change_password: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden */
+            must_setup_totp: boolean;
+        };
+        RecoveryRequest: {
+            username: string;
+        };
+        RecoveryHelp: {
+            /** @description Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Tot wanneer de beheerder de code kan gebruiken
+             */
+            expires_at: string;
+            commands: components["schemas"]["RecoveryCommand"][];
+            /** @description Hoe lang het tijdelijke wachtwoord geldig is */
+            ttl_minutes: number;
+        };
+        RecoveryCommand: {
+            label: string;
+            command: string;
+        };
+        ResetPasswordRequest: {
+            new_password: string;
         };
         Me: {
             user: components["schemas"]["User"];
@@ -10896,6 +11379,54 @@ export interface components {
             count: number;
             /** @description Wat kun je doen, in gewone taal (fase 41) */
             help?: string;
+            /**
+             * @description Wat gebruikers ervan merken (fase 47): de dienst werkt nog, of ligt plat
+             * @enum {string}
+             */
+            impact?: "service_ok" | "service_down";
+            /** @description Acties bij de regel zelf (fase 47), zoals de logs van de dienst of herstarten */
+            actions?: components["schemas"]["AttentionAction"][];
+        };
+        AttentionAction: {
+            /**
+             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
+             * @enum {string}
+             */
+            kind: "link" | "restart_service" | "run_command";
+            label: string;
+            href?: string;
+            unit?: string;
+            /** @description Naam van het eenmalige commando bij run_command */
+            title?: string;
+            /** @description Het script bij run_command */
+            script?: string;
+            node_ids?: string[];
+        };
+        NavUsage: {
+            kubernetes: boolean;
+            gitops: boolean;
+            /** @description Er zijn afhankelijkheden tussen diensten (Kaart) */
+            dependencies: boolean;
+            proxmox: boolean;
+            docker: boolean;
+            pbs: boolean;
+            truenas: boolean;
+            opnsense: boolean;
+            zabbix: boolean;
+            aiverslag: boolean;
+        };
+        Prod2FA: {
+            /** @description Acties op prodclusters vragen een account met tweestapsverificatie. Het intikken van de clusternaam blijft altijd. */
+            required: boolean;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        Prod2FAInput: {
+            required: boolean;
+            /** @description Om uit te zetten: je wachtwoord (zonder tweestapsverificatie) */
+            password?: string;
+            /** @description Om uit te zetten: je code (met tweestapsverificatie) */
+            totp_code?: string;
         };
         DiskWatchSettings: {
             /** @description Vanaf deze bezetting: let op (oranje) */
@@ -12421,7 +12952,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job";
+            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job" | "unit";
             /** Format: uuid */
             id: string;
             name: string;
@@ -12870,6 +13401,8 @@ export interface components {
             severity: components["schemas"]["RiskSeverity"];
             subject: components["schemas"]["RiskSubject"];
             text: string;
+            /** @description De korte naam van de check (fase 47), om per oorzaak te groeperen */
+            title?: string;
             /** @description Het scherm waar je het oplost */
             link: string;
             /** @description Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is */
@@ -13940,6 +14473,13 @@ export interface components {
             auto: boolean;
             /** @description Ook agents op prod vanzelf bijwerken */
             prod_auto: boolean;
+            /** @description Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent */
+            night_only?: boolean;
+            /**
+             * Format: date-time
+             * @description Begin van het volgende nachtvenster
+             */
+            next_window?: string;
             /** @description Een update op prod mislukte; vanzelf bijwerken op prod staat stil */
             prod_halted: boolean;
             /** @description De node waar de update op prod mislukte */
@@ -13996,6 +14536,8 @@ export interface components {
             nodes: components["schemas"]["UpdateNode"][];
         };
         UpdateNode: {
+            /** @description De node is een Proxmox-host; Alles bijwerken slaat hem over (fase 47) */
+            pve_host: boolean;
             /** Format: uuid */
             node_id: string;
             hostname: string;
@@ -14056,6 +14598,8 @@ export interface components {
             docker?: {
                 /** @description Leeg is elk Compose-project */
                 projects?: string[];
+                /** @description Fase 47: deze Compose-projecten deze keer overslaan */
+                skip?: string[];
                 prune?: boolean;
                 /** @description Ook zonder nieuw image down en up -d */
                 always?: boolean;
@@ -14075,6 +14619,60 @@ export interface components {
             failover?: boolean;
             /** @description De slug van het prodcluster */
             confirm?: string;
+            /**
+             * Format: uuid
+             * @description Fase 47: een clusterupdate hervatten vanaf deze node; de nodes ervoor zijn al bijgewerkt. Alleen met cluster_id
+             */
+            start_from?: string;
+        };
+        UpdateResumeHint: {
+            /**
+             * Format: uuid
+             * @description De node waar de update stopte
+             */
+            node_id: string;
+            hostname: string;
+            /** @description De nodes die al bijgewerkt waren */
+            done: string[];
+            /** @description De Compose-projecten die op die node mislukten */
+            projects: string[];
+            cluster_slug: string;
+            prod: boolean;
+        };
+        UpdateResumeInput: {
+            /** Format: uuid */
+            from_node_id?: string;
+            skip_projects?: string[];
+            confirm?: string;
+        };
+        UpdateAllInput: {
+            apt?: {
+                full?: boolean;
+                autoremove?: boolean;
+            };
+            docker?: {
+                prune?: boolean;
+                always?: boolean;
+                health_seconds?: number;
+                rollback?: boolean;
+            };
+            reboot?: boolean;
+            failover?: boolean;
+            include_prod?: boolean;
+            /** @description Met include_prod: prod, ter bevestiging */
+            confirm?: string;
+            dry_run?: boolean;
+        };
+        UpdateAllResult: {
+            job?: components["schemas"]["Job"];
+            /** @description De clusters in de rij */
+            clusters: string[];
+            /** @description Wat niet meedoet */
+            skipped: string[];
+            /** @description Proxmox-hosts */
+            hosts: string[];
+            /** @description De prodclusters in de rij (slug) */
+            prod: string[];
         };
         DockerReport: {
             /** Format: uuid */
@@ -14220,6 +14818,21 @@ export interface components {
             /** Format: uuid */
             cluster_id?: string;
             /** @description Ook op de volgende nodes draaien als het op een node mislukt */
+            continue_on_error?: boolean;
+            /** @description De slug van het prodcluster */
+            confirm?: string;
+        };
+        CommandOnceInput: {
+            /** @description De titel van de taak; leeg is Eenmalig commando */
+            name?: string;
+            script: string;
+            /** @description Leeg is root */
+            run_as?: string;
+            /** @description Nul is 30 minuten */
+            timeout_seconds?: number;
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
             continue_on_error?: boolean;
             /** @description De slug van het prodcluster */
             confirm?: string;
@@ -15548,6 +16161,10 @@ export interface components {
             console_key_set: boolean;
             /** @description De server heeft een masterkey om de sleutel te bewaren */
             console_available: boolean;
+            auto_rules: components["schemas"]["CrowdSecAutoRules"];
+            notify: components["schemas"]["CrowdSecNotify"];
+            /** @description Het delen met de CrowdSec Console staat uit (fase 47) */
+            console_off: boolean;
         };
         CrowdSecConsoleKeyInput: {
             /** @description Leeg haalt de sleutel weg */
@@ -15592,11 +16209,201 @@ export interface components {
             node_ids?: string[];
             /** Format: uuid */
             cluster_id?: string;
+            /** @description Ook in de eigen blocklist (blijft, ook op nieuwe nodes) */
+            central?: boolean;
+            /** @description Met central - zonder einddatum */
+            permanent?: boolean;
         };
         CrowdSecBanResult: {
             count: number;
             nodes: string[];
             errors: string[];
+        };
+        CrowdSecAutoRules: {
+            enabled: boolean;
+            /** @description IP met alerts op zoveel nodes (0 is uit) */
+            multi_nodes: number;
+            multi_window_minutes: number;
+            /** @description IP met zoveel alerts (0 is uit) */
+            repeat_alerts: number;
+            repeat_window_hours: number;
+            duration_hours: number;
+            /** @description Duur verdubbelt bij elke herhaling */
+            escalate: boolean;
+            max_hours: number;
+        };
+        CrowdSecNotifyChannel: {
+            id: string;
+            /** @enum {string} */
+            kind: "ntfy" | "discord" | "slack" | "telegram" | "webhook";
+            name: string;
+            /** @description Adres zonder geheim deel */
+            target: string;
+        };
+        CrowdSecNotify: {
+            channels: components["schemas"]["CrowdSecNotifyChannel"][];
+            auto_block: boolean;
+            new_alerts: boolean;
+            /** @description Zoveel alerts in 10 minuten (0 is uit) */
+            alert_burst: number;
+            node_problems: boolean;
+            list_problems: boolean;
+            manual_bans: boolean;
+        };
+        CrowdSecNotifyChannelInput: {
+            id?: string;
+            /** @enum {string} */
+            kind: "ntfy" | "discord" | "slack" | "telegram" | "webhook";
+            name?: string;
+            /** @description Adres (Telegram: chat-id); leeg bij een bestaand kanaal houdt het */
+            url?: string;
+            /** @description ntfy/webhook: bearer-token; Telegram: bot-token */
+            token?: string;
+        };
+        CrowdSecNotifyInput: {
+            channels: components["schemas"]["CrowdSecNotifyChannelInput"][];
+            auto_block: boolean;
+            new_alerts: boolean;
+            alert_burst: number;
+            node_problems: boolean;
+            list_problems: boolean;
+            manual_bans: boolean;
+        };
+        CrowdSecNotifyTest: {
+            /** @description Kanaal → fout (leeg is gelukt) */
+            results: {
+                [key: string]: string;
+            };
+        };
+        CrowdSecConsoleOffInput: {
+            on: boolean;
+        };
+        CrowdSecNodeError: {
+            hostname: string;
+            error: string;
+        };
+        CrowdSecList: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @enum {string} */
+            kind: "own" | "auto" | "public";
+            name: string;
+            source: string;
+            url: string;
+            enabled: boolean;
+            /** @enum {string} */
+            scope: "all" | "cluster";
+            /** Format: uuid */
+            cluster_id: string | null;
+            refresh_minutes: number;
+            /** @description Teruggedraaid; haalt niet vanzelf op */
+            pinned: boolean;
+            /** Format: int64 */
+            generation: number;
+            /** @description Waarden die echt op de nodes komen */
+            count: number;
+            /** @description Weggelaten (whitelist, eigen of speciaal netwerk) */
+            dropped: number;
+            /** Format: date-time */
+            fetched_at: string | null;
+            fetch_error: string;
+            /** Format: date-time */
+            fetch_failed_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+            info: string;
+            nodes_wanted: number;
+            nodes_synced: number;
+            failed: components["schemas"]["CrowdSecNodeError"][];
+        };
+        CrowdSecPublicSource: {
+            key: string;
+            name: string;
+            url: string;
+            info: string;
+            default_minutes: number;
+            min_minutes: number;
+            format: string;
+        };
+        CrowdSecLists: {
+            items: components["schemas"]["CrowdSecList"][];
+            catalog: components["schemas"]["CrowdSecPublicSource"][];
+        };
+        CrowdSecListInput: {
+            /** @description Sleutel uit de catalogus of custom */
+            source?: string;
+            url?: string;
+            name?: string;
+            enabled?: boolean;
+            /** @enum {string} */
+            scope?: "all" | "cluster";
+            /** Format: uuid */
+            cluster_id?: string;
+            refresh_minutes?: number;
+        };
+        CrowdSecListEntry: {
+            value: string;
+            reason: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            added_by: string;
+        };
+        CrowdSecListEntries: {
+            items: components["schemas"]["CrowdSecListEntry"][];
+            total: number;
+        };
+        CrowdSecListEntryInput: {
+            value: string;
+            reason?: string;
+            /** @description 0 of leeg is nooit */
+            expires_hours?: number;
+        };
+        CrowdSecListEntriesInput: {
+            add?: components["schemas"]["CrowdSecListEntryInput"][];
+            remove?: string[];
+            dry_run?: boolean;
+        };
+        CrowdSecDropped: {
+            value: string;
+            why: string;
+        };
+        CrowdSecListDiff: {
+            /** @description Hoogstens 50 */
+            added: string[];
+            removed: string[];
+            updated: string[];
+            refused: components["schemas"]["CrowdSecDropped"][];
+            added_count: number;
+            removed_count: number;
+            updated_count: number;
+            refused_count: number;
+            count: number;
+            nodes: number;
+            applied: boolean;
+            /** Format: int64 */
+            version_id?: number;
+        };
+        CrowdSecListVersion: {
+            /** Format: int64 */
+            id: number;
+            count: number;
+            added: number;
+            removed: number;
+            note: string;
+            actor: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CrowdSecListVersions: {
+            items: components["schemas"]["CrowdSecListVersion"][];
+        };
+        CrowdSecRollbackInput: {
+            /** Format: int64 */
+            version_id: number;
+            dry_run?: boolean;
         };
         CrowdSecProfile: {
             key: string;
@@ -15892,6 +16699,8 @@ export interface components {
             console_error: string;
             /** Format: date-time */
             console_failed_at: string | null;
+            /** @description Het delen met de Console is op deze node uitgezet */
+            console_off_done: boolean;
         };
         CrowdSecAlert: {
             /** Format: int64 */
@@ -16514,6 +17323,58 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
+    accountRecoveryHelp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryHelp"];
+                };
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    completeResetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Ingesteld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     listMySessions: {
         parameters: {
             query?: never;
@@ -16606,6 +17467,75 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getNavUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavUsage"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getProd2FA: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prod2FA"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setProd2FA: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Prod2FAInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prod2FA"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     getDiskWatchSettings: {
@@ -19461,6 +20391,9 @@ export interface operations {
                 node_id?: string;
                 cluster_id?: string;
                 proxmox_id?: string;
+                /** @description Fase 47: me is wat jij startte, people wat een gebruiker startte (geen automatische taken), all is alles */
+                who?: "me" | "people" | "all";
+                status?: components["schemas"]["JobStatus"];
                 limit?: number;
             };
             header?: never;
@@ -22571,6 +23504,88 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getUpdateResume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateResumeHint"];
+                };
+            };
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    resumeUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateResumeInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    startUpdatesAll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAllInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt, of het plan bij dry_run */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateAllResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     getUpdatePolicies: {
         parameters: {
             query?: never;
@@ -23613,6 +24628,386 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecLists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecLists"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    addCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    previewCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecListEntries: {
+        parameters: {
+            query?: {
+                q?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListEntries"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    changeCrowdSecListEntries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecListEntriesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    refreshCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecListVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListVersions"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    rollbackCrowdSecList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecRollbackInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecListDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecAutoRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecAutoRules"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecNotifyInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    testCrowdSecNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecNotifyTest"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setCrowdSecConsoleOff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecConsoleOffInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listPveHosts: {
@@ -25056,6 +26451,29 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getPublishChanges: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     adoptPublishHosts: {
         parameters: {
             query?: never;
@@ -25123,6 +26541,106 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getPublishAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    savePublishAutoRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description De regel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    retryPublishAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description De volgende beurt probeert opnieuw */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getPublishAutoBackup: {
+        parameters: {
+            query: {
+                service_key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De host als JSON */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
@@ -26747,6 +28265,34 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    runCommandOnce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommandOnceInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     listAgentUpgrades: {
         parameters: {
             query?: never;
@@ -26856,6 +28402,35 @@ export interface operations {
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeNightOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     clearAgentUpgradeProdQueue: {

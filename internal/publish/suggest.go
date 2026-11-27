@@ -59,14 +59,15 @@ func suggestTarget(domain string, oldPort int, services []ServiceRow) *TargetSug
 		i     int
 		score int
 		why   string
+		exact bool
 	}
 	var best []cand
-	add := func(i, score int, why string) {
+	add := func(i, score int, why string, exact bool) {
 		switch {
 		case len(best) == 0 || score > best[0].score:
-			best = []cand{{i, score, why}}
+			best = []cand{{i, score, why, exact}}
 		case score == best[0].score:
-			best = append(best, cand{i, score, why})
+			best = append(best, cand{i, score, why, exact})
 		}
 	}
 	for i, r := range services {
@@ -102,13 +103,16 @@ func suggestTarget(domain string, oldPort int, services []ServiceRow) *TargetSug
 		if r.Kind == "https" {
 			score++
 		}
-		add(i, score, why)
+		add(i, score, why, strings.HasPrefix(why, "naam "+label))
 	}
 	if len(best) == 0 {
 		return nil
 	}
 	r := services[best[0].i]
-	sure := len(best) == 1 && best[0].score >= 60
+	// Zeker is alleen één dienst met precies dezelfde naam. Een naam die
+	// erop lijkt of dezelfde poort is een gok (testlijst 2, 1.1: zo wezen
+	// ±16 hosts naar de verkeerde app); die gaat nooit in bulk.
+	sure := len(best) == 1 && best[0].exact
 	why := best[0].why
 	if len(best) > 1 {
 		why += fmt.Sprintf(" (%d kandidaten, de eerste gekozen)", len(best))

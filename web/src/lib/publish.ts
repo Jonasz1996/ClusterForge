@@ -101,7 +101,17 @@ export type PublishHost = {
   themed?: boolean;
   css?: string;
   css_set?: string;
+  // Testlijst 3: wat het doel zelf antwoordde, en "opruimen?" als het dood is.
+  target_probe?: { status?: number; title?: string; error?: string; at: string };
+  target_alive?: boolean;
+  cleanup?: boolean;
+  // N29: de host toont de pagina van een andere dienst; revert_change zet
+  // de laatste wijziging van ClusterForge aan het doel terug.
+  other_app?: string;
+  revert_change?: string;
 };
+
+export type PublishDeadNet = { prefix: string; hosts: number[]; names: string[] };
 
 export type PublishSuggestion = {
   forward_scheme: string;
@@ -178,6 +188,8 @@ export type PublishOverview = {
     error?: string;
     checked_at?: string;
     services: number;
+    npm_standby?: boolean;
+    npm_copied_at?: string;
   }[];
   npm: PublishReadState;
   authentik: PublishReadState;
@@ -204,6 +216,7 @@ export type PublishOverview = {
   certs?: PublishCert[];
   outpost?: string;
   protocol: number;
+  dead_nets?: PublishDeadNet[];
 };
 
 export type PublishActionKind =
@@ -217,7 +230,10 @@ export type PublishActionKind =
   | "restore"
   | "rename"
   | "theme_many"
-  | "ak_repair";
+  | "ak_repair"
+  | "move_address"
+  | "delete_dead"
+  | "revert";
 
 export type PublishAction = {
   action: PublishActionKind;
@@ -236,6 +252,7 @@ export type PublishAction = {
   authentik_group?: string;
   confirm?: string;
   hosts?: number[];
+  net?: string;
   old_domain?: string;
   new_domain?: string;
   keep_old?: boolean;
@@ -243,7 +260,36 @@ export type PublishAction = {
   ssl_forced?: boolean;
   domains?: string[];
   theme?: boolean;
+  // De host mag daarna een andere app tonen (anders draait de controle terug).
+  allow_other_app?: boolean;
+  change_id?: string;
 };
+
+// Een wijziging die ClusterForge aan een proxy host deed (testlijst 2, 1.1).
+export type PublishChange = {
+  id: string;
+  job_id?: string;
+  host_id: number;
+  domain: string;
+  action: string;
+  created: boolean;
+  deleted: boolean;
+  title_before?: string;
+  title_after?: string;
+  changed_by?: string;
+  changed_at: string;
+  reverted_at?: string;
+  reverted_by?: string;
+  summary: string[];
+};
+
+export function usePublishChanges(hours = 24) {
+  return useQuery({
+    queryKey: ["publish", "changes", hours],
+    queryFn: async () =>
+      unwrap(await api.GET("/publish/changes", { params: { query: { hours } } })) as unknown as PublishChange[],
+  });
+}
 
 export type PublishPlan = {
   title: string;
@@ -520,6 +566,77 @@ export function useSetHostCss() {
       unwrap(
         await api.PUT("/publish/theme/hosts/{hostId}", { params: { path: { hostId } }, body: { css } as unknown as Body }),
       ) as unknown as PublishTheme,
+    onSuccess: done,
+  });
+}
+
+// Fase 48: automatisch publiceren per cluster of dienst. Nooit een gok:
+// alleen diensten met een exact doel (VIP of de enige node) en een vrije
+// naam; de rest staat met de reden in de lijst.
+export type AutoRule = {
+  id: string;
+  cluster_id?: string;
+  cluster_name?: string;
+  service_key?: string;
+  enabled: boolean;
+  cleanup: boolean;
+  updated_at: string;
+};
+
+export type AutoItem = {
+  service_key: string;
+  domain: string;
+  cluster_id?: string;
+  cluster_name?: string;
+  state: "publishing" | "published" | "failed" | "removing" | "removed";
+  job_id?: string;
+  npm_host_id?: number;
+  cleanup: boolean;
+  tries: number;
+  error?: string;
+  has_backup: boolean;
+  tried_at?: string;
+  updated_at: string;
+};
+
+export type AutoCandidate = {
+  service_key: string;
+  cluster_name?: string;
+  name: string;
+  domain?: string;
+  target: string;
+  authentik: boolean;
+  skip?: string;
+};
+
+export type AutoView = {
+  rules: AutoRule[];
+  items: AutoItem[];
+  candidates: AutoCandidate[];
+  ready?: string;
+};
+
+export function usePublishAuto() {
+  return useQuery({
+    queryKey: ["publish", "auto"],
+    queryFn: async () => unwrap(await api.GET("/publish/auto")) as unknown as AutoView,
+    refetchInterval: 20_000,
+  });
+}
+
+export function useSaveAutoRule() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: { cluster_id?: string; service_key?: string; enabled: boolean; cleanup?: boolean }) =>
+      unwrap(await api.PUT("/publish/auto/rules", { body: body as unknown as Body })) as unknown as AutoRule,
+    onSuccess: done,
+  });
+}
+
+export function useRetryAuto() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (service_key: string) => unwrap(await api.POST("/publish/auto/retry", { body: { service_key } as Body })),
     onSuccess: done,
   });
 }

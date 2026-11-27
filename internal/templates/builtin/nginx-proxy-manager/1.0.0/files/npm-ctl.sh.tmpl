@@ -85,6 +85,18 @@ better_has_vip() {
 healthy() { running && curl -fsS -m 4 -o /dev/null "http://127.0.0.1:$ADMIN/api/" 2>/dev/null; }
 log() { logger -t cf-npm "$*" 2>/dev/null; echo "$*" >&2; }
 integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
+# Poort 80 of 443 bezet door iets anders dan NPM (zoals nginx op de host):
+# dan kan cf-npm hier niet starten ("Created") en mag deze node het VIP niet
+# nemen. Geeft wie de poort heeft; leeg (en 1) als niets.
+ports_taken() {
+  out=$(ss -ltnpH '( sport = :80 or sport = :443 )' 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  # Met cf-npm aan houdt docker-proxy de poorten voor NPM vast.
+  if running; then out=$(echo "$out" | grep -v '"docker-proxy"'); fi
+  [ -n "$out" ] || return 1
+  echo "$out" | sed -n 's/.*users:((\("[^"]*"\).*/\1/p' | sort -u | tr '\n' ' '
+  return 0
+}
 # De containers van een andere NPM op deze machine (zoals de NPM die je nog
 # moet overnemen); die houdt poort 80 en 443 vast.
 foreign() {
@@ -217,6 +229,9 @@ status() {
 
 case "${1:-}" in
   up)
+    if who=$(ports_taken); then
+      fail "poort 80/443 is bezet door ${who:-een ander proces}; NPM kan hier niet starten. Stop dat eerst (bv. systemctl disable --now nginx)"
+    fi
     # Een andere NPM hier (nog niet overgenomen) houdt de poorten vast en
     # bedient het VIP zelf: niet starten.
     if [ -n "$(foreign)" ]; then
@@ -244,6 +259,12 @@ case "${1:-}" in
     ;;
   check)
     systemctl is-active --quiet docker || exit 1
+    # Iets anders (nginx op de host) houdt poort 80/443 vast: NPM kan hier
+    # niet starten, dus deze node neemt het VIP niet.
+    if who=$(ports_taken); then
+      log "poort 80/443 is bezet door ${who:-een ander proces} (niet NPM); deze node neemt het VIP niet. Stop dat (bv. systemctl disable --now nginx)"
+      exit 1
+    fi
     # Een gefaalde cf-npm telt alleen op de node met het VIP: die geeft het
     # VIP af. Een standby (bv. na een herstart, of nadat hij zelf het VIP
     # afgaf) wist de fout en blijft BACKUP, zodat failover mogelijk blijft;

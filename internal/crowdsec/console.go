@@ -45,7 +45,7 @@ func (s *Service) SetConsoleKey(ctx context.Context, actor events.Actor, userID 
 		return Settings{}, &FieldError{"dat lijkt geen enroll-sleutel: alleen letters, cijfers, - en _ (zoals in cscli console enroll <sleutel>)"}
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE crowdsec_settings SET console_key_enc = $1, console_key_id = $2, console_key_hash = $3,
-		updated_at = now(), updated_by = $4`, s.Box.Seal([]byte(key), consoleAAD), s.Box.KeyID, s.consoleHash(key), userID); err != nil {
+		console_off = false, updated_at = now(), updated_by = $4`, s.Box.Seal([]byte(key), consoleAAD), s.Box.KeyID, s.consoleHash(key), userID); err != nil {
 		return Settings{}, err
 	}
 	// Een nieuwe sleutel: eerdere fouten tellen niet meer.

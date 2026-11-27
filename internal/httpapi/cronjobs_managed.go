@@ -153,7 +153,7 @@ func (s *Server) CreateCronJob(w http.ResponseWriter, r *http.Request) {
 		s.cronJobError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een cronjob maken") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een cronjob maken") {
 		return
 	}
 	uid := p.User.ID
@@ -218,7 +218,7 @@ func (s *Server) UpdateCronJob(w http.ResponseWriter, r *http.Request, jobID uui
 	if !ok {
 		return
 	}
-	if !confirmProd(w, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob wijzigen") {
+	if !s.confirmProd(w, r, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob wijzigen") {
 		return
 	}
 	if _, err := s.cronjobs.UpdateJob(r.Context(), events.User(p.User.ID), jobID, jobInput(in)); err != nil {
@@ -237,7 +237,7 @@ func (s *Server) DeleteCronJob(w http.ResponseWriter, r *http.Request, jobID uui
 	if !ok {
 		return
 	}
-	if !confirmProd(w, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, params.Confirm, "een cronjob weghalen") {
+	if !s.confirmProd(w, r, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, params.Confirm, "een cronjob weghalen") {
 		return
 	}
 	if err := s.cronjobs.DeleteJob(r.Context(), events.User(p.User.ID), jobID); err != nil {
@@ -260,7 +260,7 @@ func (s *Server) RunCronJob(w http.ResponseWriter, r *http.Request, jobID uuid.U
 	if !ok {
 		return
 	}
-	if !confirmProd(w, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob uitvoeren") {
+	if !s.confirmProd(w, r, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob uitvoeren") {
 		return
 	}
 	nodes, err := s.cronjobs.RunJob(r.Context(), events.User(p.User.ID), jobID)
@@ -321,7 +321,7 @@ func (s *Server) StopCronRun(w http.ResponseWriter, r *http.Request, runID uuid.
 	if !ok {
 		return
 	}
-	if !confirmProd(w, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob stoppen") {
+	if !s.confirmProd(w, r, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob stoppen") {
 		return
 	}
 	if err := s.cronjobs.StopRun(r.Context(), events.User(p.User.ID), runID); err != nil {

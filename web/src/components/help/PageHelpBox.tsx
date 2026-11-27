@@ -1,19 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { Term } from "@/components/help/Term";
 import { helpFor } from "@/lib/help";
-import { useHelpOn } from "@/lib/helpPrefs";
+import { closeHelp, useHelpClosed, useHelpOn } from "@/lib/helpPrefs";
 
 /** "Wat is dit?" bovenaan elke pagina (fase 41), uit lib/help. */
 export function PageHelpBox({ pathname }: { pathname: string }) {
   const [on, setOn] = useHelpOn();
   const help = helpFor(pathname);
-  // Per pagina dichtgeklapt, alleen voor dit bezoek: de volgende keer staat
-  // de uitleg er weer, tenzij je ze overal uitzet.
-  const [closedAt, setClosedAt] = useState<string | null>(null);
-  if (!on || !help || closedAt === pathname) return null;
+  // Per pagina gesloten blijft gesloten (fase 47); de ?-knop bovenaan
+  // brengt ze terug.
+  const closed = useHelpClosed();
+  if (!on || !help || closed.includes(pathname)) return null;
   return (
     <aside
       aria-label="Uitleg bij deze pagina"
@@ -52,7 +51,7 @@ export function PageHelpBox({ pathname }: { pathname: string }) {
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1 text-xs">
-          <button type="button" onClick={() => setClosedAt(pathname)} className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-white/60 dark:hover:bg-slate-800" aria-label="Uitleg sluiten">
+          <button type="button" onClick={() => closeHelp(pathname)} className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-white/60 dark:hover:bg-slate-800" aria-label="Uitleg sluiten" title="Sluiten; de ?-knop bovenaan brengt ze terug">
             ×
           </button>
           <button type="button" onClick={() => setOn(false)} className="whitespace-nowrap text-slate-500 underline-offset-2 hover:underline">

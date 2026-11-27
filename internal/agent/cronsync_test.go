@@ -179,7 +179,7 @@ func TestSync(t *testing.T) {
 	(cronSpool{filepath.Join(srcRoot, protocol.CronStateDir, "spool")}).sent(runs)
 
 	// Faalt de voorbereiding, dan kopieert rsync niets.
-	job.Sync.Before = "echo kapot > '" + src + "half.txt'; exit 3"
+	job.Sync.Before = "echo kapot > '" + src + "half.txt'; exit 2"
 	writeJob(t, srcRoot, job)
 	if code := r.Main(ctx, jobA); code == 0 {
 		t.Error("een mislukte voorbereiding gaf 0")
@@ -203,6 +203,128 @@ func TestSync(t *testing.T) {
 	auth, _ = os.ReadFile(filepath.Join(dstRoot, protocol.SyncAuthorizedKeys))
 	if string(auth) != "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEigen jonas@pc\n" {
 		t.Errorf("na het weghalen:\n%s", auth)
+	}
+}
+
+// fakeRsync zet een rsync in PATH dat alleen opschrijft dat het draaide, en
+// geeft het bestand met zijn aanroepen.
+func fakeRsync(t *testing.T) string {
+	t.Helper()
+	bin, calls := t.TempDir(), filepath.Join(t.TempDir(), "rsync.log")
+	script := "#!/bin/sh\necho \"$*\" >> '" + calls + "'\necho 'Number of regular files transferred: 1'\n"
+	if err := os.WriteFile(filepath.Join(bin, "rsync"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return calls
+}
+
+// TestSyncBefore: de voorbereiding beslist of rsync draait. Met 0 wel; met
+// protocol.SyncBeforeSkip stuurt deze node niet en slaat de run over (exit
+// 0, geen herhaling, niets gekopieerd); met elke andere code mislukt de run
+// zonder rsync.
+func TestSyncBefore(t *testing.T) {
+	ctx := context.Background()
+	skip := fmt.Sprintf("echo geen VIP >&2; exit %d", protocol.SyncBeforeSkip)
+	skipLine := fmt.Sprintf("Voorbereiding: deze node stuurt niet (code %d). Overgeslagen, niets gekopieerd.\n", protocol.SyncBeforeSkip)
+
+	for _, tc := range []struct {
+		before string
+		code   int
+		want   beforeResult
+		out    string
+	}{
+		{"", 0, beforeOK, ""},
+		{"true", 0, beforeOK, "== voorbereiding: true ==\n\n"},
+		{protocol.SyncPausePrefix + "web", 0, beforeOK, ""},
+		{skip, protocol.SyncBeforeSkip, beforeSkipped, "== voorbereiding: " + skip + " ==\ngeen VIP\n" + skipLine},
+		{"exit 1", 1, beforeFailed, "Voorbereiding stopte met code 1. Niets gekopieerd.\n"},
+		{"exit 2", 2, beforeFailed, "Voorbereiding stopte met code 2. Niets gekopieerd.\n"},
+	} {
+		var out strings.Builder
+		code, got := syncBefore(ctx, &protocol.SyncSpec{Before: tc.before}, &out)
+		if code != tc.code || got != tc.want || !strings.HasSuffix(out.String(), tc.out) || tc.out == "" && out.Len() != 0 {
+			t.Errorf("%q: %d %d %q", tc.before, code, got, out.String())
+		}
+	}
+
+	// De run van cron-run: rsync alleen na een gelukte voorbereiding.
+	calls := fakeRsync(t)
+	rsyncRan := func() bool {
+		_, err := os.Stat(calls)
+		return err == nil
+	}
+	root := t.TempDir()
+	r := &CronRunner{Root: root, Addresses: func() []string { return nil }, Stderr: &strings.Builder{}, SSH: "ssh"}
+	sp := cronSpool{filepath.Join(root, protocol.CronStateDir, "spool")}
+	job := testJob(jobA, "")
+	job.User, job.Kind, job.RunOn, job.VIPs = "root", protocol.CronKindSync, protocol.CronOnNode, nil
+	job.Retries, job.RetryDelaySeconds = 1, 1
+	job.Sync = &protocol.SyncSpec{Source: "/var/lib/bron/", Target: "/var/lib/bron/", Delete: true, Before: skip,
+		Targets: []protocol.SyncTarget{{NodeID: nodeDst, Hostname: "nc2", Address: "127.0.0.1"}}}
+
+	// Deze node stuurt niet: overgeslagen, exit 0, één run zonder herhaling.
+	writeJob(t, root, job)
+	if code := r.Main(ctx, jobA); code != 0 {
+		t.Fatalf("overgeslagen gaf %d: %+v", code, sp.next())
+	}
+	runs := sp.next()
+	if len(runs) != 1 || runs[0].Result != protocol.CronSkipped || runs[0].Exit == nil || *runs[0].Exit != 0 ||
+		runs[0].Reason != protocol.CronReasonSchedule || len(runs[0].Sync) != 0 || !strings.Contains(runs[0].Output, skipLine) {
+		t.Fatalf("overgeslagen: %+v", runs)
+	}
+	if rsyncRan() {
+		t.Fatal("rsync draaide na een overgeslagen voorbereiding")
+	}
+	sp.sent(runs)
+
+	// Met de hand (Nu draaien) ook overgeslagen, niet mislukt.
+	writeTree(t, root, map[string]string{"/var/lib/clusterforge/cron/manual/" + jobA: "nu"}, 0o600)
+	if code := r.Main(ctx, jobA); code != 0 {
+		t.Fatalf("met de hand gaf %d", code)
+	}
+	runs = sp.next()
+	if len(runs) != 1 || runs[0].Result != protocol.CronSkipped || runs[0].Reason != protocol.CronReasonManual || rsyncRan() {
+		t.Fatalf("met de hand: %+v", runs)
+	}
+	sp.sent(runs)
+
+	// De proefrun zegt het ook, zonder rsync.
+	a := &Agent{Root: root, SyncSSH: "ssh"}
+	if dry := a.cronDryRun(ctx, jobA, nodeDst); !strings.Contains(dry.Error, "deze node niet stuurt") ||
+		!slices.Contains(dry.Output, "geen VIP") || rsyncRan() {
+		t.Errorf("proefrun: %+v", dry)
+	}
+
+	// Een echte fout: mislukt, herhaald, en ook dan geen rsync.
+	job.Sync.Before = "echo kapot >&2; exit 1"
+	writeJob(t, root, job)
+	if code := r.Main(ctx, jobA); code != 1 {
+		t.Fatalf("mislukt gaf %d", code)
+	}
+	runs = sp.next()
+	if len(runs) != 2 || runs[1].Reason != protocol.CronReasonRetry || rsyncRan() {
+		t.Fatalf("mislukt: %+v", runs)
+	}
+	for _, run := range runs {
+		if run.Result != protocol.CronFailed || run.Exit == nil || *run.Exit != 1 || !strings.Contains(run.Output, "Voorbereiding stopte met code 1. Niets gekopieerd.") {
+			t.Errorf("mislukt: %+v", run)
+		}
+	}
+	sp.sent(runs)
+
+	// Gelukt: rsync draait.
+	job.Sync.Before = "true"
+	writeJob(t, root, job)
+	if code := r.Main(ctx, jobA); code != 0 {
+		t.Fatalf("gelukt gaf %d: %+v", code, sp.next())
+	}
+	runs = sp.next()
+	if len(runs) != 1 || runs[0].Result != protocol.CronOK || len(runs[0].Sync) != 1 || runs[0].Sync[0].Result != protocol.SyncOK {
+		t.Fatalf("gelukt: %+v", runs)
+	}
+	if b, _ := os.ReadFile(calls); !strings.Contains(string(b), "--stats --delete /var/lib/bron/ root@127.0.0.1:/var/lib/bron/") {
+		t.Errorf("rsync: %q", b)
 	}
 }
 

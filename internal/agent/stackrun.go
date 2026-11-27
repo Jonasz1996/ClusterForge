@@ -163,7 +163,7 @@ func (r *RunExecutor) stackOne(ctx context.Context, dir string, s protocol.Stack
 	// plaatsing vip): alleen de nieuwe images ophalen, zodat een failover
 	// meteen de nieuwe versie start.
 	if s.Pull && (s.Want == protocol.StackFiles || s.Want == protocol.StackStop) {
-		if _, err := r.step(ctx, out, nil, append(slices.Clone(base), "pull", "--ignore-buildable")...); err != nil {
+		if err := r.composePull(ctx, out, base, nil); err != nil {
 			return fail("docker compose pull mislukte")
 		}
 	}
@@ -196,7 +196,7 @@ func (r *RunExecutor) stackOne(ctx context.Context, dir string, s protocol.Stack
 		}
 		if s.Pull {
 			// Diensten met build: hebben geen image om op te halen.
-			if _, err := r.step(ctx, out, nil, append(append(slices.Clone(base), "pull", "--ignore-buildable"), svc...)...); err != nil {
+			if err := r.composePull(ctx, out, base, svc); err != nil {
 				return fail("docker compose pull mislukte; er is niets veranderd")
 			}
 		}

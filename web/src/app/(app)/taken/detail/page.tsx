@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
 import { jobDuration, JobStatusBadge } from "@/components/jobs/JobList";
+import { FailedDeploy } from "@/components/jobs/FailedDeploy";
+import { ResumeUpdate } from "@/components/jobs/ResumeUpdate";
 import { Steps } from "@/components/jobs/Steps";
 import { QueryState } from "@/components/inventory/bits";
 import { Alert, Button, Card, PageHeader } from "@/components/ui";
@@ -58,10 +60,21 @@ function JobDetailInner() {
                       variant="secondary"
                       disabled={cancel.isPending}
                       onClick={async () => {
-                        if (await askConfirm("Taak annuleren? Een lopende Proxmox-taak wordt gestopt.")) cancel.mutate(job.data!.id);
+                        // Testlijst 3, N24: de knoppen zeggen wat ze doen; "Annuleren" in
+                        // het venster liet de taak vroeger gewoon doorlopen.
+                        if (
+                          await askConfirm("Deze taak stoppen? Een lopende Proxmox-taak wordt ook gestopt.", {
+                            title: "Taak stoppen",
+                            confirmLabel: "Taak echt stoppen",
+                            cancelLabel: "Laten lopen",
+                            danger: true,
+                            undo: "Nee, maar Opnieuw proberen gaat daarna verder bij de stap die misliep.",
+                          })
+                        )
+                          cancel.mutate(job.data!.id);
                       }}
                     >
-                      Annuleren
+                      Taak stoppen
                     </Button>
                   )
                 : job.data.retryable && (
@@ -78,6 +91,12 @@ function JobDetailInner() {
             </p>
           )}
           {retry.error && <Alert>{retry.error.message}</Alert>}
+          {isAdmin && job.data.kind === "cluster.deploy" && (job.data.status === "failed" || job.data.status === "canceled") && (
+            <FailedDeploy job={job.data} />
+          )}
+          {isAdmin && job.data.kind === "updates.run" && job.data.cluster_id && (job.data.status === "failed" || job.data.status === "canceled") && (
+            <ResumeUpdate job={job.data} />
+          )}
           <Card>
             <dl className={dlClass}>
               <dt className={dtClass}>Gevraagd door</dt>

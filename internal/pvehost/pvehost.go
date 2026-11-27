@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -327,6 +329,39 @@ type Request struct {
 	// ServerURL is bij bootstrap het adres waarmee de CT ClusterForge
 	// bereikt.
 	ServerURL string
+	// NATS is bij bootstrap het NATS-adres van de agents (tls://host:4222);
+	// de CT moet dat en ServerURL bereiken vóór de installatie (fase 48).
+	NATS string
+}
+
+// ReachList zijn de host:poort-adressen die een CT moet bereiken: het adres
+// van ClusterForge en NATS.
+func ReachList(serverURL, nats string) []string {
+	var out []string
+	add := func(raw string, def string) {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Hostname() == "" {
+			return
+		}
+		port := u.Port()
+		if port == "" {
+			port = def
+		}
+		if port == "" {
+			return
+		}
+		a := net.JoinHostPort(u.Hostname(), port)
+		if !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	def := "443"
+	if strings.HasPrefix(serverURL, "http://") {
+		def = "80"
+	}
+	add(serverURL, def)
+	add(nats, "4222")
+	return out
 }
 
 type params struct {
@@ -387,6 +422,7 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request) (s
 			if op.Bootstrap, err = s.bootstrapSpec(ctx, actor, req.ServerURL, g, nil); err != nil {
 				return store.Job{}, err
 			}
+			op.Bootstrap.Reach = ReachList(req.ServerURL, req.NATS)
 		}
 	}
 	if err := op.Validate(); err != nil {
@@ -547,4 +583,34 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 func int32p(n int) *int32 {
 	v := int32(n)
 	return &v
+}
+
+// FindGuest zoekt de host met een agent waarop een gast van een
+// Proxmox-koppeling staat (fase 48: de oude installatie opruimen).
+func (s *Service) FindGuest(ctx context.Context, connID uuid.UUID, vmid int) (uuid.UUID, string, protocol.PVEGuest, error) {
+	hosts, err := s.ForConnection(ctx, connID)
+	if err != nil {
+		return uuid.Nil, "", protocol.PVEGuest{}, err
+	}
+	var why []string
+	for name, h := range hosts {
+		if r := h.Ready(); r != "" {
+			why = append(why, r)
+			continue
+		}
+		inv, err := s.Inventory(ctx, h.NodeID)
+		if err != nil {
+			why = append(why, h.Hostname+": "+err.Error())
+			continue
+		}
+		for _, g := range inv.Guests {
+			if g.VMID == vmid {
+				return h.NodeID, name, g, nil
+			}
+		}
+	}
+	if len(why) > 0 {
+		return uuid.Nil, "", protocol.PVEGuest{}, fmt.Errorf("gast %d niet gevonden (%s)", vmid, strings.Join(why, "; "))
+	}
+	return uuid.Nil, "", protocol.PVEGuest{}, fmt.Errorf("gast %d staat op geen host met een agent", vmid)
 }

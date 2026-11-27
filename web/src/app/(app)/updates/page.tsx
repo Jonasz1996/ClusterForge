@@ -3,7 +3,7 @@
 import { Tabs } from "@/components/Tabs";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Answer, LiveAnswer, useStream } from "@/components/assistant/parts";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
@@ -18,6 +18,7 @@ import {
   useSetClusterPolicy,
   useSetEnvPolicy,
   useStartUpdates,
+  useUpdateAll,
   useUpdatePolicies,
   useUpdates,
   useWriteCompose,
@@ -85,8 +86,18 @@ function NowTab() {
   }
   const smart = updates.data?.smart_protocol ?? 29;
 
+  const [all, setAll] = useState(false);
   return (
     <>
+      {isAdmin && groups.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Alles in één keer: elk cluster rollend, het ene na het andere, Proxmox-hosts uitgezonderd.
+          </p>
+          <Button onClick={() => setAll(true)}>Alles bijwerken</Button>
+        </div>
+      )}
+      {all && <UpdateAllDialog onClose={() => setAll(false)} />}
       {updates.isError && <Alert>Updates laden mislukte.</Alert>}
       {updates.data && groups.length === 0 && <p className="text-sm text-slate-500">Nog geen nodes met een agent.</p>}
       {groups.map((g) => {
@@ -278,6 +289,45 @@ function UpdateDialog({ target, onClose }: { target: Target; onClose: () => void
   const [failover, setFailover] = useState(true);
   const [confirm, setConfirm] = useState("");
   const blocked = (!apt && !docker) || (!!target.prodSlug && !prodConfirmed(target.prodSlug, confirm, totp));
+  const backups = target.nodes.filter((n) => !n.vip_holder);
+  const masters = target.nodes.filter((n) => n.vip_holder);
+  // De standaarden van Veilig; elke afwijking is "Eigen keuzes".
+  const safe = { apt: !tags, full: true, autoremove: false, docker: hasDocker || !!tags, prune: false, rollback: true, always: false, health: "120", reboot: false, failover: true };
+  const custom =
+    apt !== safe.apt ||
+    full !== safe.full ||
+    autoremove !== safe.autoremove ||
+    docker !== safe.docker ||
+    prune !== safe.prune ||
+    rollback !== safe.rollback ||
+    always !== safe.always ||
+    health !== safe.health ||
+    reboot !== safe.reboot ||
+    failover !== safe.failover;
+  const reset = () => {
+    setApt(safe.apt);
+    setFull(safe.full);
+    setAutoremove(safe.autoremove);
+    setDocker(safe.docker);
+    setPrune(safe.prune);
+    setRollback(safe.rollback);
+    setAlways(safe.always);
+    setHealth(safe.health);
+    setReboot(safe.reboot);
+    setFailover(safe.failover);
+  };
+  const summary = [
+    apt && (full ? "pakketten bijwerken (full-upgrade)" : "pakketten bijwerken"),
+    apt && autoremove && "daarna opruimen",
+    docker && (smart && rollback ? `Docker-images bijwerken, ${health} s testen en bij een fout terugzetten` : "Docker-images bijwerken"),
+    docker && prune && "oude images opruimen",
+    target.nodes.length > 1 && "één node tegelijk, de VIP-houder als laatste" + (failover && masters.length > 0 ? " na een failover" : ""),
+    "stoppen bij de eerste node die niet gezond terugkomt",
+    reboot ? "herstarten als de node erom vraagt" : "niet herstarten",
+  ]
+    .filter(Boolean)
+    .join("; ")
+    .replace(/^./, (c) => c.toUpperCase()) + ".";
 
   const submit = () =>
     start.mutate({
@@ -297,8 +347,6 @@ function UpdateDialog({ target, onClose }: { target: Target; onClose: () => void
       ...(target.prodSlug ? { confirm } : {}),
     });
 
-  const backups = target.nodes.filter((n) => !n.vip_holder);
-  const masters = target.nodes.filter((n) => n.vip_holder);
   const order =
     backups.map((n) => n.hostname).join(" → ") +
     (masters.length > 0
@@ -338,56 +386,84 @@ function UpdateDialog({ target, onClose }: { target: Target; onClose: () => void
               ))}
             </p>
           )}
-          <fieldset className="space-y-1">
-            <Check checked={apt} onChange={setApt}>
-              Pakketten (apt)
-            </Check>
-            {apt && (
-              <div className="ml-6 space-y-1">
-                <Check checked={full} onChange={setFull}>
-                  full-upgrade (standaard; pakketten mogen erbij komen of weggaan)
-                </Check>
-                <Check checked={autoremove} onChange={setAutoremove}>
-                  daarna autoremove
-                </Check>
-                <p className="text-xs text-slate-500">Nooit een vraag: je eigen configuratiebestanden blijven staan, een slot van een andere apt wacht tot 10 minuten, een onderbroken dpkg wordt eerst hersteld.</p>
-              </div>
-            )}
-            <Check checked={docker} onChange={setDocker}>
-              Docker Compose (pull; bij een nieuw image down en up -d)
-            </Check>
-            {docker && (
-              <div className="ml-6 space-y-1">
-                {smart ? (
-                  <>
-                    <Check checked={rollback} onChange={setRollback}>
-                      terugzetten naar de vorige versie als de test mislukt
-                    </Check>
-                    <Check checked={always} onChange={setAlways}>
-                      ook zonder nieuw image opnieuw opstarten
-                    </Check>
-                    <label className="flex items-center gap-2">
-                      test hoogstens
-                      <Input className="w-20" inputMode="numeric" value={health} onChange={(e) => setHealth(e.target.value)} /> seconden
-                    </label>
-                  </>
-                ) : (
-                  <p className="text-xs text-amber-700 dark:text-amber-300">Niet elke agent heeft protocol 29: alleen pull en up -d, zonder test en terugzetten.</p>
-                )}
-                <Check checked={prune} onChange={setPrune}>
-                  daarna ongebruikte images opruimen
-                </Check>
-              </div>
-            )}
-            <Check checked={reboot} onChange={setReboot}>
-              Herstarten als de node erom vraagt
-            </Check>
-            {target.nodes.length > 1 && masters.length > 0 && (
-              <Check checked={failover} onChange={setFailover}>
-                De master eerst failoveren (keepalived uit, VIP naar een bijgewerkte node)
+          {/* Fase 47: één keuze, Veilig, met de standaarden; de vinkjes
+              staan onder Geavanceerd. */}
+          <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+            <p className="font-medium text-emerald-900 dark:text-emerald-200">{custom ? "Eigen keuzes" : "Veilig (aanbevolen)"}</p>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{summary}</p>
+          </div>
+          <details className="group rounded-md border border-slate-200 dark:border-slate-800">
+            <summary className="cursor-pointer list-none px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800/50 [&::-webkit-details-marker]:hidden">
+              <span aria-hidden className="mr-1 inline-block text-slate-400 transition group-open:rotate-90">
+                ›
+              </span>
+              Geavanceerd
+              {custom && (
+                <button
+                  type="button"
+                  className="ml-3 text-xs text-brand-700 underline dark:text-sky-300"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    reset();
+                  }}
+                >
+                  terug naar Veilig
+                </button>
+              )}
+            </summary>
+            <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+            <fieldset className="space-y-1">
+              <Check checked={apt} onChange={setApt}>
+                Pakketten (apt)
               </Check>
-            )}
-          </fieldset>
+              {apt && (
+                <div className="ml-6 space-y-1">
+                  <Check checked={full} onChange={setFull}>
+                    full-upgrade (standaard; pakketten mogen erbij komen of weggaan)
+                  </Check>
+                  <Check checked={autoremove} onChange={setAutoremove}>
+                    daarna autoremove
+                  </Check>
+                  <p className="text-xs text-slate-500">Nooit een vraag: je eigen configuratiebestanden blijven staan, een slot van een andere apt wacht tot 10 minuten, een onderbroken dpkg wordt eerst hersteld.</p>
+                </div>
+              )}
+              <Check checked={docker} onChange={setDocker}>
+                Docker Compose (pull; bij een nieuw image down en up -d)
+              </Check>
+              {docker && (
+                <div className="ml-6 space-y-1">
+                  {smart ? (
+                    <>
+                      <Check checked={rollback} onChange={setRollback}>
+                        terugzetten naar de vorige versie als de test mislukt
+                      </Check>
+                      <Check checked={always} onChange={setAlways}>
+                        ook zonder nieuw image opnieuw opstarten
+                      </Check>
+                      <label className="flex items-center gap-2">
+                        test hoogstens
+                        <Input className="w-20" inputMode="numeric" value={health} onChange={(e) => setHealth(e.target.value)} /> seconden
+                      </label>
+                    </>
+                  ) : (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">Niet elke agent heeft protocol 29: alleen pull en up -d, zonder test en terugzetten.</p>
+                  )}
+                  <Check checked={prune} onChange={setPrune}>
+                    daarna ongebruikte images opruimen
+                  </Check>
+                </div>
+              )}
+              <Check checked={reboot} onChange={setReboot}>
+                Herstarten als de node erom vraagt
+              </Check>
+              {target.nodes.length > 1 && masters.length > 0 && (
+                <Check checked={failover} onChange={setFailover}>
+                  De master eerst failoveren (keepalived uit, VIP naar een bijgewerkte node)
+                </Check>
+              )}
+            </fieldset>
+            </div>
+          </details>
           {target.prodSlug && <ProdConfirm slug={target.prodSlug} value={confirm} onChange={setConfirm} />}
           {start.error && <Alert>{errText(start.error, "Starten mislukte")}</Alert>}
           <div className="flex justify-end gap-2">
@@ -396,6 +472,104 @@ function UpdateDialog({ target, onClose }: { target: Target; onClose: () => void
             </Button>
             <Button disabled={blocked || start.isPending} onClick={submit}>
               Bijwerken
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// UpdateAllDialog is "Alles bijwerken (rollend, behalve hosts)" (fase 47):
+// één taak die de clusters één na één bijwerkt met de keuzes van Veilig.
+// Eerst het plan, zodat je ziet wat meedoet en wat niet.
+function UpdateAllDialog({ onClose }: { onClose: () => void }) {
+  const totp = useProdTotp();
+  const plan = useUpdateAll();
+  const start = useUpdateAll();
+  const [prod, setProd] = useState(false);
+  const [confirm, setConfirm] = useState("");
+  const [reboot, setReboot] = useState(false);
+  const body = { apt: { full: true }, docker: { rollback: true, health_seconds: 120 }, failover: true, reboot, include_prod: prod };
+  const planned = plan.data;
+  const { mutate } = plan;
+  useEffect(() => {
+    mutate({ ...body, dry_run: true });
+    // Alleen opnieuw plannen als prod aan of uit gaat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prod, mutate]);
+  const needProd = (planned?.prod.length ?? 0) > 0;
+  const blocked = !planned || planned.clusters.length === 0 || start.isPending || (needProd && !prodConfirmed("prod", confirm, totp));
+  return (
+    <Modal title="Alles bijwerken" onClose={onClose}>
+      {start.data?.job ? (
+        <div className="space-y-3 text-sm">
+          <Alert kind="success">Gestart: {start.data.clusters.length} clusters, één na één.</Alert>
+          <p>
+            <Link href={`/taken/detail?id=${start.data.job.id}`} className="font-medium text-brand-700 underline dark:text-sky-300">
+              {start.data.job.title}
+            </Link>{" "}
+            (per cluster een eigen taak met de uitvoer)
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={onClose}>Sluiten</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4 text-sm">
+          <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+            <p className="font-medium text-emerald-900 dark:text-emerald-200">Veilig (aanbevolen)</p>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+              Per cluster: pakketten (full-upgrade) en Docker-images, één node tegelijk, de VIP-houder als laatste na een failover; een
+              Docker-image dat de test niet haalt, gaat terug. Het volgende cluster begint pas als het vorige gelukt is; bij een fout stopt
+              alles en kun je vanaf die node verder gaan.
+            </p>
+          </div>
+          {plan.isPending && <p className="text-slate-500">Plan maken…</p>}
+          {plan.error && <Alert>{plan.error.message}</Alert>}
+          {planned && (
+            <>
+              <div>
+                <p className="font-medium">Volgorde ({planned.clusters.length})</p>
+                {planned.clusters.length === 0 ? (
+                  <p className="text-slate-500">Niets om bij te werken.</p>
+                ) : (
+                  <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-slate-700 dark:text-slate-300">
+                    {planned.clusters.map((c) => (
+                      <li key={c}>{c}</li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+              {(planned.skipped.length > 0 || planned.hosts.length > 0) && (
+                <div className="text-xs text-slate-500">
+                  <p className="font-medium">Doen niet mee</p>
+                  <ul className="mt-0.5 list-disc pl-5">
+                    {planned.hosts.length > 0 && <li>Proxmox-hosts ({planned.hosts.join(", ")}): via Proxmox → Host-updates</li>}
+                    {planned.skipped.map((x) => (
+                      <li key={x}>{x}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+          <fieldset className="space-y-1">
+            <Check checked={prod} onChange={setProd}>
+              Ook de prodclusters, als laatste
+            </Check>
+            <Check checked={reboot} onChange={setReboot}>
+              Herstarten als een node erom vraagt
+            </Check>
+          </fieldset>
+          {needProd && <ProdConfirm slug="prod" value={confirm} onChange={setConfirm} />}
+          {start.error && <Alert>{errText(start.error, "Starten mislukte")}</Alert>}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              Annuleren
+            </Button>
+            <Button disabled={blocked} onClick={() => start.mutate({ ...body, ...(needProd ? { confirm } : {}) })}>
+              Alles bijwerken
             </Button>
           </div>
         </div>

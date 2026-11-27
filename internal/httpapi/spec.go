@@ -78,7 +78,7 @@ func (s *Server) ApplyClusterSpec(w http.ResponseWriter, r *http.Request, id uui
 		s.gitError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "de specificatie wijzigen") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "de specificatie wijzigen") {
 		return
 	}
 	a, err := s.git.ApplyEdit(ctx, events.User(p.User.ID), id, gitops.Edit{Version: deref(in.Version), Params: in.Params}, in.Hash, deref(in.ServerUrl))

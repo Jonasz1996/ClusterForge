@@ -87,7 +87,7 @@ func (s *Server) SetComponentUserPassword(w http.ResponseWriter, r *http.Request
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een nieuw wachtwoord geven") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een nieuw wachtwoord geven") {
 		return
 	}
 	np, err := s.components.SetPassword(ctx, events.User(p.User.ID), clusterID, componentID, user)
@@ -129,7 +129,7 @@ func (s *Server) dropInComponent(w http.ResponseWriter, r *http.Request, cluster
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, what) {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, what) {
 		return
 	}
 	if err := drop(events.User(p.User.ID), in.Name); err != nil {

@@ -60,18 +60,20 @@ func (q *Queries) DeleteAgentUpgradeProdQueue(ctx context.Context, clusterID uui
 
 const getAgentUpgradeSettings = `-- name: GetAgentUpgradeSettings :one
 SELECT coalesce((SELECT auto FROM agent_upgrade_settings LIMIT 1), true)::boolean AS auto,
-       coalesce((SELECT prod_auto FROM agent_upgrade_settings LIMIT 1), false)::boolean AS prod_auto
+       coalesce((SELECT prod_auto FROM agent_upgrade_settings LIMIT 1), false)::boolean AS prod_auto,
+       coalesce((SELECT night_only FROM agent_upgrade_settings LIMIT 1), true)::boolean AS night_only
 `
 
 type GetAgentUpgradeSettingsRow struct {
-	Auto     bool
-	ProdAuto bool
+	Auto      bool
+	ProdAuto  bool
+	NightOnly bool
 }
 
 func (q *Queries) GetAgentUpgradeSettings(ctx context.Context) (GetAgentUpgradeSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getAgentUpgradeSettings)
 	var i GetAgentUpgradeSettingsRow
-	err := row.Scan(&i.Auto, &i.ProdAuto)
+	err := row.Scan(&i.Auto, &i.ProdAuto, &i.NightOnly)
 	return i, err
 }
 
@@ -277,6 +279,21 @@ type SetAgentUpgradeAutoParams struct {
 
 func (q *Queries) SetAgentUpgradeAuto(ctx context.Context, arg SetAgentUpgradeAutoParams) error {
 	_, err := q.db.Exec(ctx, setAgentUpgradeAuto, arg.Auto, arg.UpdatedBy)
+	return err
+}
+
+const setAgentUpgradeNightOnly = `-- name: SetAgentUpgradeNightOnly :exec
+INSERT INTO agent_upgrade_settings (night_only, updated_by) VALUES ($1, $2)
+ON CONFLICT ((true)) DO UPDATE SET night_only = EXCLUDED.night_only, updated_by = EXCLUDED.updated_by, updated_at = now()
+`
+
+type SetAgentUpgradeNightOnlyParams struct {
+	NightOnly bool
+	UpdatedBy *uuid.UUID
+}
+
+func (q *Queries) SetAgentUpgradeNightOnly(ctx context.Context, arg SetAgentUpgradeNightOnlyParams) error {
+	_, err := q.db.Exec(ctx, setAgentUpgradeNightOnly, arg.NightOnly, arg.UpdatedBy)
 	return err
 }
 

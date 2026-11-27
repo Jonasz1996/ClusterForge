@@ -118,6 +118,23 @@ func (s *Server) SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request)
 	s.writeAgentUpgrades(w, r, http.StatusOK)
 }
 
+// SetAgentUpgradeNightOnly: vanzelf bijwerken alleen 's nachts (2.10).
+func (s *Server) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.SetAgentUpgradeNightOnlyJSONRequestBody
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.upgrades.SetNightOnly(r.Context(), events.User(p.User.ID), &p.User.ID, in.Enabled); err != nil {
+		s.upgradeError(w, r, err)
+		return
+	}
+	s.writeAgentUpgrades(w, r, http.StatusOK)
+}
+
 // ClearAgentUpgradeProdQueue stopt de rij van "ook productie".
 func (s *Server) ClearAgentUpgradeProdQueue(w http.ResponseWriter, r *http.Request) {
 	p, ok := requireAdmin(w, r)
@@ -178,7 +195,7 @@ func (s *Server) upgradeError(w http.ResponseWriter, r *http.Request, err error)
 func toAPIAgentUpgrades(ov agentupgrade.Overview) gen.AgentUpgradeOverview {
 	out := gen.AgentUpgradeOverview{
 		Version: ov.Offer.Version, Protocol: ov.Offer.Protocol, Archs: []string{}, Auto: ov.Auto, OffClusterIds: ov.Off,
-		ProdAuto: ov.ProdAuto, ProdHalted: ov.ProdHalted, HaltedBy: ov.HaltedBy,
+		ProdAuto: ov.ProdAuto, ProdHalted: ov.ProdHalted, HaltedBy: ov.HaltedBy, NightOnly: &ov.NightOnly, NextWindow: &ov.NextWindow,
 		Agents: make([]gen.AgentUpgradeAgent, 0, len(ov.Agents)),
 	}
 	if out.OffClusterIds == nil {

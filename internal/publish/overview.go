@@ -78,6 +78,18 @@ type HostView struct {
 	Typo string `json:"typo,omitempty"`
 	// TypoDomains: alle namen met de tikfout rechtgezet (voor één klik).
 	TypoDomains []string `json:"typo_domains,omitempty"`
+	// Testlijst 3: wat het doel zelf antwoordde (vanaf de NPM-node).
+	TargetProbe *Probe `json:"target_probe,omitempty"`
+	TargetAlive bool   `json:"target_alive,omitempty"`
+	// Cleanup: het doel antwoordt niet en er is geen dienst met dezelfde
+	// naam; opruimen is het voorstel, geen gegokt nieuw doel (N14).
+	Cleanup bool `json:"cleanup,omitempty"`
+	// OtherApp: de host toont de pagina van een andere dienst (N29), met
+	// de wijziging van ClusterForge om terug te zetten als die er is.
+	OtherApp     string     `json:"other_app,omitempty"`
+	RevertChange *uuid.UUID `json:"revert_change,omitempty"`
+	// guess is de gok vóór de titelcontrole (voor ProbeTargets).
+	guess *TargetSuggestion
 }
 
 // CertView is een certificaat in NPM, om te kiezen bij een host.
@@ -120,6 +132,8 @@ type Overview struct {
 	// Outpost is het adres van de Authentik-outpost voor sjablonen (fase 42b).
 	Outpost  string `json:"outpost,omitempty"`
 	Protocol int    `json:"protocol"`
+	// DeadNets: netten waar geen enkel doel nog antwoordt (192.168.0.x).
+	DeadNets []DeadNet `json:"dead_nets"`
 	// rawHosts zijn de hosts zoals NPM ze gaf (met de volledige Advanced).
 	rawHosts []NPMHost
 }
@@ -141,6 +155,10 @@ type NodeState struct {
 	Error       string     `json:"error,omitempty"`
 	CheckedAt   *time.Time `json:"checked_at,omitempty"`
 	Services    int        `json:"services"`
+	// Standby: NPM-node zonder het VIP; NPM staat daar bewust uit en neemt
+	// de laatste kopie over bij een failover (testlijst 3, N19).
+	Standby  bool       `json:"npm_standby,omitempty"`
+	CopiedAt *time.Time `json:"npm_copied_at,omitempty"`
 }
 
 // ReadState zegt wanneer en van waar NPM of Authentik laatst gelezen is.
@@ -269,6 +287,14 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 			at := f.at
 			ns.CheckedAt = &at
 		}
+		if st.NPMClusterID != nil && n.ClusterID != nil && *n.ClusterID == *st.NPMClusterID && len(n.VIPs) == 0 {
+			ns.Standby = true
+			var at *time.Time
+			if err := s.pool.QueryRow(ctx, `SELECT max(r.ended_at) FROM cron_runs r JOIN cron_jobs j ON j.id = r.job_id
+				WHERE j.cluster_id = $1 AND j.name = 'NPM-configuratie' AND r.node_id = $2 AND r.result = 'ok'`, *st.NPMClusterID, n.ID).Scan(&at); err == nil {
+				ns.CopiedAt = at
+			}
+		}
 		ov.Nodes = append(ov.Nodes, ns)
 	}
 	ov.NPM = ReadState{Linked: st.NPMLinked(), Error: npmErr, Hostname: npm.Hostname, Version: npm.Version}
@@ -286,7 +312,12 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 	if st.AuthentikLinked() {
 		ov.Outpost, _ = s.outpostFor(ctx, st)
 	}
-	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now(), ov.Outpost)
+	ov.Hosts = buildHosts(st, nodes, clusters, ov.Services, npm, ak, akRead, managed, s.Now(), ov.Outpost, s.probes(ctx))
+	s.revertFor(ctx, ov.Hosts)
+	ov.DeadNets = deadNets(ov.Hosts, nodes)
+	if ov.DeadNets == nil {
+		ov.DeadNets = []DeadNet{}
+	}
 	ov.rawHosts = npm.Hosts
 	ov.Apps = buildApps(npm, ak)
 	if th, err := s.Theme(ctx); err == nil {
@@ -377,7 +408,7 @@ func targetIndex(nodes []nodeRow, services []ServiceRow) (map[string]int, map[st
 }
 
 func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []ServiceRow, npm NPMRead, ak AKRead, akRead bool,
-	managed map[int]managedHost, now time.Time, outpost string) []HostView {
+	managed map[int]managedHost, now time.Time, outpost string, probes Probes) []HostView {
 	idx, known := targetIndex(nodes, services)
 	for _, c := range clusters {
 		for _, v := range c.VIPs {
@@ -428,6 +459,11 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 		if m, ok := managed[h.ID]; ok {
 			v.Managed, v.CreatedByCF, v.AuthentikByCF = true, m.CreatedByCF, m.AKCreated
 			for k, val := range diffFields(h.fields(), m.Desired) {
+				// Testlijst 3: de gewenste naam met een tikfout (proxmox50.bogaert.be)
+				// is geen drift als NPM de rechtgezette naam heeft.
+				if k == "domain_names" && typoOnly(val, h.DomainNames, st.Domain) {
+					continue
+				}
 				v.Drift = append(v.Drift, driftText(k, h.fields()[k], val))
 			}
 			sort.Strings(v.Drift)
@@ -479,15 +515,53 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 				add("naar_node", "warn", "wijst naar één node (%s) terwijl %s op het VIP %s draait", h.ForwardHost, r.Name, r.Target)
 			}
 		} else {
-			if known[fh] && v.Enabled {
-				add("doel_weg", "crit", "op %s:%d draait niets dat ClusterForge kent (dienst gestopt of verhuisd?)", h.ForwardHost, h.ForwardPort)
+			var cur *Probe
+			if p, ok := probes[targetURL(h.ForwardScheme, h.ForwardHost, h.ForwardPort)]; ok {
+				cur = &p
+				v.TargetProbe = &p
+				v.TargetAlive = p.Alive()
 			}
-			if len(h.DomainNames) > 0 {
-				v.Suggest = suggestTarget(h.DomainNames[0], h.ForwardPort, services)
-			}
-			if v.Suggest != nil && !known[fh] {
-				add("oud_doel", "warn", "wijst naar %s:%d, een adres dat ClusterForge niet kent; voorstel: %s://%s:%d (%s)",
-					h.ForwardHost, h.ForwardPort, v.Suggest.Scheme, v.Suggest.Host, v.Suggest.Port, v.Suggest.ServiceName)
+			if v.TargetAlive {
+				// Er antwoordt iets dat de ontdekking niet zag: geen alarm en
+				// geen voorstel (testlijst 3: authentik op .103.244:9000).
+				what := fmt.Sprintf("HTTP %d", cur.Status)
+				if cur.Title != "" {
+					what += fmt.Sprintf(", titel %q", cur.Title)
+				}
+				add("doel_onbekend", "info", "op %s:%d antwoordt een dienst (%s) die ClusterForge niet ontdekte; niets aan te doen", h.ForwardHost, h.ForwardPort, what)
+			} else {
+				dead := cur != nil
+				if known[fh] && v.Enabled {
+					if dead {
+						add("doel_weg", "crit", "op %s:%d antwoordt niets (%s): dienst gestopt of verhuisd?", h.ForwardHost, h.ForwardPort, trimText(cur.Error, 80))
+					} else {
+						add("doel_weg", "crit", "op %s:%d draait niets dat ClusterForge kent (dienst gestopt of verhuisd?)", h.ForwardHost, h.ForwardPort)
+					}
+				}
+				var sg *TargetSuggestion
+				if len(h.DomainNames) > 0 {
+					sg = suggestTarget(h.DomainNames[0], h.ForwardPort, services)
+				}
+				if sg != nil && !sg.Sure {
+					// Een gok alleen tonen als de pagina van het nieuwe doel
+					// bij de naam past.
+					v.guess = sg
+					p, ok := probes[targetURL(sg.Scheme, sg.Host, sg.Port)]
+					if ok && p.Alive() && p.Status < 400 && titleFits(p.Title, h.DomainNames[0], "") {
+						sg.Why += fmt.Sprintf("; de pagina daar heet %q", p.Title)
+					} else {
+						sg = nil
+					}
+				}
+				v.Suggest = sg
+				switch {
+				case v.Suggest != nil && !known[fh]:
+					add("oud_doel", "warn", "wijst naar %s:%d, een adres dat ClusterForge niet kent; voorstel: %s://%s:%d (%s)",
+						h.ForwardHost, h.ForwardPort, v.Suggest.Scheme, v.Suggest.Host, v.Suggest.Port, v.Suggest.ServiceName)
+				case v.Suggest == nil && dead && v.Enabled:
+					v.Cleanup = true
+					add("doel_dood", "warn", "op %s:%d antwoordt niets en geen enkele dienst heet zo: opruimen?", h.ForwardHost, h.ForwardPort)
+				}
 			}
 		}
 		if len(h.DomainNames) > 0 {
@@ -530,7 +604,70 @@ func buildHosts(st Settings, nodes []nodeRow, clusters []clusterRow, services []
 		}
 		out = append(out, v)
 	}
+	// Testlijst 2, 1.1: meerdere hosts naar hetzelfde host:poort.
+	for i, v := range out {
+		if !v.Enabled || len(v.Domains) == 0 {
+			continue
+		}
+		if others := sameTarget(npm.Hosts, v.ID, v.ForwardHost, v.ForwardPort); len(others) > 0 {
+			out[i].Problems = append(out[i].Problems, Problem{Code: "zelfde_doel", Level: "warn",
+				Text: fmt.Sprintf("wijst naar hetzelfde doel %s:%d als %s; kijk na of dat de juiste app is", v.ForwardHost, v.ForwardPort, strings.Join(others, ", "))})
+		}
+	}
+	otherApps(out, probes)
 	return out
+}
+
+// otherApps markeert hosts die de pagina van een andere dienst tonen
+// (testlijst 3, N29): meerdere hosts wijzen naar hetzelfde doel, de titel
+// van dat doel (of de naam van de dienst) past bij de naam van minstens één
+// van die hosts en niet bij deze.
+func otherApps(out []HostView, probes Probes) {
+	groups := map[string][]int{}
+	for i, v := range out {
+		if !v.Enabled || len(v.Domains) == 0 || v.ForwardHost == "" {
+			continue
+		}
+		k := strings.ToLower(v.ForwardHost) + ":" + fmt.Sprint(v.ForwardPort)
+		groups[k] = append(groups[k], i)
+	}
+	for _, idx := range groups {
+		if len(idx) < 2 {
+			continue
+		}
+		first := out[idx[0]]
+		title := ""
+		if p, ok := probes[targetURL(first.ForwardScheme, first.ForwardHost, first.ForwardPort)]; ok && p.Alive() && p.Status < 400 {
+			title = p.Title
+		}
+		fits := func(v HostView) bool {
+			if title != "" && titleFits(title, v.Domains[0], "") {
+				return true
+			}
+			return v.ServiceName != "" && titleFits(v.ServiceName, v.Domains[0], "")
+		}
+		var good []string
+		for _, i := range idx {
+			if fits(out[i]) {
+				good = append(good, out[i].Domains[0])
+			}
+		}
+		if len(good) == 0 || len(good) == len(idx) {
+			continue
+		}
+		shows := title
+		if shows == "" {
+			shows = first.ServiceName
+		}
+		for _, i := range idx {
+			if fits(out[i]) {
+				continue
+			}
+			out[i].OtherApp = shows
+			out[i].Problems = append(out[i].Problems, Problem{Code: "andere_dienst", Level: "crit",
+				Text: fmt.Sprintf("toont de pagina van %q, de dienst van %s; terugzetten of opruimen?", shows, strings.Join(good, ", "))})
+		}
+	}
 }
 
 func driftText(field string, have, want any) string {
@@ -591,9 +728,21 @@ func buildApps(npm NPMRead, ak AKRead) []AKAppView {
 func notices(ov *Overview) []Notice {
 	var out []Notice
 	href := "/publicatie/npm"
+	// Hosts in een verdwenen net staan in één melding per net (N14).
+	inDead := map[int]bool{}
+	for _, d := range ov.DeadNets {
+		for _, id := range d.Hosts {
+			inDead[id] = true
+		}
+		out = append(out, Notice{ID: "publish-net-" + strings.TrimSuffix(d.Prefix, ".x"), Title: fmt.Sprintf("Net %s bestaat niet meer: %d proxy hosts wijzen ernaar (opruimen?)", d.Prefix, len(d.Hosts)),
+			Names: d.Names, Href: href + "?net=" + d.Prefix, Count: len(d.Hosts)})
+	}
 	group := func(code string) []string {
 		var names []string
 		for _, h := range ov.Hosts {
+			if inDead[h.ID] && (code == "doel_weg" || code == "doel_dood" || code == "zelfde_doel") {
+				continue
+			}
 			for _, p := range h.Problems {
 				if p.Code == code && len(h.Domains) > 0 {
 					names = append(names, h.Domains[0])
@@ -618,8 +767,11 @@ func notices(ov *Overview) []Notice {
 		{"cert_verloopt", "Certificaat verloopt binnenkort", false},
 		{"naar_node", "Proxy host wijst naar één node in plaats van het VIP", false},
 		{"oud_doel", "Proxy host wijst naar een oud adres (voorstel klaar)", false},
+		{"doel_dood", "Proxy host naar een adres dat niet antwoordt (opruimen?)", false},
 		{"advanced_oud", "Advanced van een proxy host wijst naar een oud adres (voorstel klaar)", false},
 		{"domein_tikfout", "Proxy host onder een domein dat op het hoofddomein lijkt (tikfout?)", false},
+		{"andere_dienst", "Proxy host toont de pagina van een andere dienst (terugzetten?)", true},
+		{"zelfde_doel", "Meerdere proxy hosts wijzen naar hetzelfde doel", false},
 		{"authentik_half", "Authentik half ingesteld", false},
 	} {
 		if names := group(g.code); len(names) > 0 {
@@ -645,4 +797,20 @@ func (s *Service) Notices(ctx context.Context) ([]Notice, error) {
 		return nil, err
 	}
 	return append(ov.Notices, s.feedNotices(ctx)...), nil
+}
+
+// revertFor zoekt voor hosts die een andere dienst tonen de laatste
+// wijziging van ClusterForge aan hun doel (NPM-historiek) om terug te zetten.
+func (s *Service) revertFor(ctx context.Context, hosts []HostView) {
+	for i, h := range hosts {
+		if h.OtherApp == "" {
+			continue
+		}
+		var id uuid.UUID
+		err := s.pool.QueryRow(ctx, `SELECT id FROM publish_changes WHERE npm_host_id = $1 AND reverted_at IS NULL AND NOT created AND NOT deleted
+			AND (old ? 'forward_host' OR old ? 'forward_port') ORDER BY changed_at DESC LIMIT 1`, h.ID).Scan(&id)
+		if err == nil {
+			hosts[i].RevertChange = &id
+		}
+	}
 }

@@ -125,7 +125,7 @@ func (s *Server) ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeID u
 		if req.Enabled {
 			what = "een cronjob weer aanzetten"
 		}
-		if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, req.Confirm, what) {
+		if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, req.Confirm, what) {
 			return
 		}
 	}

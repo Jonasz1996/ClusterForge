@@ -108,7 +108,7 @@ func (q *Queries) DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSe
 }
 
 const getSessionWithUser = `-- name: GetSessionWithUser :one
-SELECT sessions.id, sessions.user_id, sessions.csrf_token, sessions.ip, sessions.user_agent, sessions.created_at, sessions.last_seen_at, sessions.expires_at, users.id, users.username, users.password_hash, users.role, users.totp_secret, users.totp_enabled_at, users.totp_last_step, users.disabled_at, users.created_at, users.updated_at, users.kube_learning
+SELECT sessions.id, sessions.user_id, sessions.csrf_token, sessions.ip, sessions.user_agent, sessions.created_at, sessions.last_seen_at, sessions.expires_at, users.id, users.username, users.password_hash, users.role, users.totp_secret, users.totp_enabled_at, users.totp_last_step, users.disabled_at, users.created_at, users.updated_at, users.kube_learning, users.temp_password_expires_at, users.temp_password_used_at, users.must_change_password, users.must_setup_totp
 FROM sessions
 JOIN users ON users.id = sessions.user_id
 WHERE sessions.id = $1
@@ -144,6 +144,10 @@ func (q *Queries) GetSessionWithUser(ctx context.Context, id []byte) (GetSession
 		&i.User.CreatedAt,
 		&i.User.UpdatedAt,
 		&i.User.KubeLearning,
+		&i.User.TempPasswordExpiresAt,
+		&i.User.TempPasswordUsedAt,
+		&i.User.MustChangePassword,
+		&i.User.MustSetupTotp,
 	)
 	return i, err
 }

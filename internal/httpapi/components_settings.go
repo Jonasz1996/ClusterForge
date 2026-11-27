@@ -47,7 +47,7 @@ func (s *Server) ChangeClusterComponentSettings(w http.ResponseWriter, r *http.R
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "de instellingen van een database wijzigen") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "de instellingen van een database wijzigen") {
 		return
 	}
 	j, err := s.components.ChangeSettings(ctx, events.User(p.User.ID), clusterID, componentID, components.SettingsInput{Settings: deref(in.Settings), Hash: in.Hash})
@@ -88,7 +88,7 @@ func (s *Server) UpgradeClusterComponent(w http.ResponseWriter, r *http.Request,
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database bijwerken") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database bijwerken") {
 		return
 	}
 	j, err := s.components.Update(ctx, events.User(p.User.ID), clusterID, componentID, in.Hash)
@@ -173,7 +173,7 @@ func (s *Server) JoinClusterComponent(w http.ResponseWriter, r *http.Request, cl
 		s.componentError(w, r, err)
 		return
 	}
-	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een node aan een database toevoegen") {
+	if !s.confirmProd(w, r, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een node aan een database toevoegen") {
 		return
 	}
 	j, err := s.components.Join(ctx, events.User(p.User.ID), clusterID, componentID, in.NodeId, in.Hash)

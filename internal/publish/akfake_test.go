@@ -179,16 +179,6 @@ func (f *fakeAuthentik) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func toInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	}
-	return 0
-}
-
 func (f *fakeAuthentik) counts() (apps, providers, inOutpost int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

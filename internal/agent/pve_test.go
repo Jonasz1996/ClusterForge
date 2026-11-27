@@ -319,6 +319,35 @@ func TestPVETemplate(t *testing.T) {
 	}
 }
 
+// Testlijst 2.4: een extra kolom (Z2mini) en een template die al op de
+// host staat gaat voor op een download.
+func TestPVETemplateLocalFirstExtraColumn(t *testing.T) {
+	root := pveRoot(t)
+	arch := runtime.GOARCH
+	local := "debian-13-standard_13.0-1_" + arch + ".tar.zst"
+	h := &fakeHost{reply: func(cmd string) (string, int) {
+		switch cmd {
+		case "pveam list local":
+			return "NAME FORMAT SIZE\nlocal:vztmpl/" + local + " tzst 120MB\n", 0
+		case "pveam available --section system":
+			return "system  mail  debian-13-standard_13.1-2_" + arch + ".tar.zst\n", 0
+		}
+		return "", 0
+	}}
+	_, st := pveRun(t, root, h, nil, protocol.PVERun{Action: protocol.PVETemplate,
+		Template: &protocol.PVETemplateSpec{Storage: "local", Match: protocol.PVEDefaultTemplate}})
+	if st.State != protocol.RunOK || st.PVE == nil || st.PVE.Volid != "local:vztmpl/"+local || !st.PVE.Existed {
+		t.Fatalf("stand %s (%s) %+v", st.State, st.Error, st.PVE)
+	}
+	if got := h.called("pveam download"); len(got) != 0 {
+		t.Fatalf("download %v", got)
+	}
+	got := parsePveamAvailable([]byte("system  extra  debian-13-standard_13.1-2_amd64.tar.zst\nsystem debian-12-standard_12.7-1_amd64.tar.zst\n"))
+	if len(got) != 2 || got[0].File != "debian-13-standard_13.1-2_amd64.tar.zst" || got[1].File != "debian-12-standard_12.7-1_amd64.tar.zst" {
+		t.Fatalf("parse %+v", got)
+	}
+}
+
 func TestPVEBootstrap(t *testing.T) {
 	root := pveRoot(t)
 	bin := []byte("nep-agent")
@@ -395,5 +424,23 @@ func TestPVEBootstrap(t *testing.T) {
 	}})
 	if st.State != protocol.RunFailed || !strings.Contains(st.Error, "sha256") || len(h.called("pct push")) != 0 {
 		t.Fatalf("stand %s (%s)", st.State, st.Error)
+	}
+	// Fase 48: de CT bereikt NATS niet: stoppen voor er iets in komt.
+	h = &fakeHost{reply: func(cmd string) (string, int) {
+		switch {
+		case cmd == "pct status 102":
+			return "status: running\n", 0
+		case strings.Contains(cmd, "probe 192.168.113.153 4222"):
+			return "", 1
+		}
+		return "", 0
+	}}
+	out, st = pveRun(t, root, h, ex, protocol.PVERun{Action: protocol.PVEBootstrap, Type: "lxc", VMID: 102, Bootstrap: &protocol.PVEBootstrapSpec{
+		Server: "http://192.168.113.153:8080", AllowHTTP: true, Token: "geheim-token-1234567890",
+		SHA256: map[string]string{runtime.GOARCH: hex.EncodeToString(sum[:])}, Reach: []string{"192.168.113.153:8080", "192.168.113.153:4222"},
+	}})
+	if st.State != protocol.RunFailed || !strings.Contains(st.Error, "192.168.113.153:4222") || strings.Contains(st.Error, ":8080") ||
+		len(h.called("pct push")) != 0 || !strings.Contains(out, "✓ de CT bereikt 192.168.113.153:8080") {
+		t.Fatalf("stand %s (%s)\n%s", st.State, st.Error, out)
 	}
 }

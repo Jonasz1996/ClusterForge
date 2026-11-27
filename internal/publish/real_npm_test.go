@@ -513,6 +513,21 @@ func TestRealNPM(t *testing.T) {
 		t.Fatal(err)
 	}
 	alive()
+	// Testlijst 3: een gok (webapp2 → zelfde container, andere naam) komt
+	// pas als de <title> van het nieuwe doel bij de naam past.
+	for s.probing.Load() {
+		time.Sleep(50 * time.Millisecond)
+	}
+	ov, _ = s.Overview(ctx)
+	for _, h := range ov.Hosts {
+		if len(old) == 2 && h.ID == old[1] && h.Suggest != nil {
+			t.Fatalf("gok zonder passende titel: %+v", h.Suggest)
+		}
+	}
+	probes := s.probes(ctx)
+	probes[targetURL("http", gateway, backend)] = Probe{Status: 200, Title: "WebApp", At: s.Now()}
+	s.saveRead(ctx, "probes", probes, nil)
+	alive()
 	ov, _ = s.Overview(ctx)
 	sugg := 0
 	for _, h := range ov.Hosts {
@@ -532,11 +547,17 @@ func TestRealNPM(t *testing.T) {
 		}
 		t.Fatalf("%d voorstellen (oud %v)", sugg, old)
 	}
+	// Alleen een exacte naam is zeker (testlijst 1.1): webapp.example.test
+	// gaat mee in bulk, webapp2 (zelfde container, andere naam) is een gok
+	// en wordt per host gezet.
 	plan, err := s.Plan(ctx, Action{Action: ActRetargetMany})
-	if err != nil || len(plan.Hosts) != 2 {
+	if err != nil || len(plan.Hosts) != 1 || plan.Hosts[0].HostID != old[0] {
 		t.Fatalf("plan: %v %+v", err, plan)
 	}
 	run(Action{Action: ActRetargetMany}, store.JobStatusSucceeded)
+	alive()
+	s.Refresh(ctx)
+	run(Action{Action: ActUpdate, HostID: old[1], ForwardHost: gateway, ForwardPort: backend}, store.JobStatusSucceeded)
 	for _, hid := range old {
 		if c := conf(hid); !strings.Contains(c, gateway) || !strings.Contains(c, fmt.Sprint(backend)) {
 			t.Fatalf("host %d niet omgezet:\n%s", hid, c)

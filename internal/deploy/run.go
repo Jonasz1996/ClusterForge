@@ -277,6 +277,7 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		}); err != nil {
 			return err
 		}
+		r.s.noteClonedFrom(ctx, st, n.ID, "VM-template "+r.p.ImageName)
 		vs.Phase = "config"
 		if vs.CloneHost != "" {
 			vs.Phase = "migrate"
@@ -783,6 +784,25 @@ func (s *Service) Check(ctx context.Context, clusterID uuid.UUID, tpl *templates
 				return fmt.Errorf("na %s is niet elke node Ready in Kubernetes (%s); kijk op een server met sudo kubectl get nodes", seconds(within), last)
 			}
 			logf("alle %d nodes zijn Ready (na %s)", len(want), seconds(time.Since(start)))
+		case ch.UDP != nil:
+			logf("UDP-vraag (%s) naar %s", ch.UDP.Probe, ch.UDP.Addr)
+			flush()
+			last := ""
+			err := s.poll(ctx, within, func(ctx context.Context) (bool, error) {
+				if s.UDPProbe == nil {
+					return true, nil
+				}
+				if err := s.UDPProbe(ctx, ch.UDP.Addr, templates.UDPProbes[ch.UDP.Probe]); err != nil {
+					last = err.Error()
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				return fmt.Errorf("%s antwoordt na %s niet over UDP (%s). Komt het antwoord van het IP van de node in plaats van het VIP, "+
+					"of laat een firewall UDP niet door?", ch.UDP.Addr, seconds(within), last)
+			}
+			logf("%s antwoordt over UDP vanaf het VIP (na %s)", ch.UDP.Addr, seconds(time.Since(start)))
 		}
 		flush()
 	}

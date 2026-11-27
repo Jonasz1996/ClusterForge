@@ -407,6 +407,7 @@ type AgentUpgradeSetting struct {
 	UpdatedBy *uuid.UUID
 	UpdatedAt time.Time
 	ProdAuto  bool
+	NightOnly bool
 }
 
 type ApiToken struct {
@@ -420,6 +421,7 @@ type ApiToken struct {
 	CreatedBy  *uuid.UUID
 	LastUsedAt *time.Time
 	LastUsedIp string
+	Scopes     []string
 }
 
 type AssistantConversation struct {
@@ -705,6 +707,62 @@ type CrowdsecDecision struct {
 	FirstSeen  time.Time
 }
 
+type CrowdsecList struct {
+	ID             uuid.UUID
+	Slug           string
+	Kind           string
+	Name           string
+	Source         string
+	Url            string
+	Enabled        bool
+	Scope          string
+	ClusterID      *uuid.UUID
+	RefreshMinutes int32
+	Pinned         bool
+	Generation     int64
+	Hash           string
+	Count          int32
+	Dropped        int32
+	FetchedAt      *time.Time
+	FetchEtag      string
+	FetchModified  string
+	FetchError     string
+	FetchFailedAt  *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type CrowdsecListEntry struct {
+	ListID    uuid.UUID
+	Value     string
+	Reason    string
+	ExpiresAt *time.Time
+	AddedBy   *uuid.UUID
+	CreatedAt time.Time
+}
+
+type CrowdsecListNode struct {
+	NodeID    uuid.UUID
+	ListID    uuid.UUID
+	Tag       string
+	Count     int32
+	AppliedAt *time.Time
+	Error     string
+	FailedAt  *time.Time
+}
+
+type CrowdsecListVersion struct {
+	ID        int64
+	ListID    uuid.UUID
+	Count     int32
+	Added     int32
+	Removed   int32
+	Entries   []byte
+	Note      string
+	Actor     *uuid.UUID
+	CreatedAt time.Time
+}
+
 type CrowdsecNode struct {
 	NodeID            uuid.UUID
 	Managed           bool
@@ -729,6 +787,14 @@ type CrowdsecNode struct {
 	ConsoleEnrolledAt *time.Time
 	ConsoleError      string
 	ConsoleFailedAt   *time.Time
+	Lists             []byte
+	ConsoleOffDone    bool
+}
+
+type CrowdsecOffender struct {
+	Value    string
+	Offenses int32
+	LastAt   time.Time
 }
 
 type CrowdsecSetting struct {
@@ -742,6 +808,11 @@ type CrowdsecSetting struct {
 	ConsoleKeyEnc  []byte
 	ConsoleKeyID   string
 	ConsoleKeyHash string
+	AutoRules      []byte
+	Notify         []byte
+	NotifyEnc      []byte
+	NotifyKeyID    string
+	ConsoleOff     bool
 }
 
 type CrowdsecShared struct {
@@ -1212,6 +1283,15 @@ type HomeAppDoubt struct {
 	DecidedAt  time.Time
 }
 
+type ImportFinding struct {
+	RunID      uuid.UUID
+	NodeID     *uuid.UUID
+	TokenName  string
+	Findings   []byte
+	ScanRunID  *uuid.UUID
+	ReceivedAt time.Time
+}
+
 type Incident struct {
 	ID               uuid.UUID
 	Number           int32
@@ -1505,6 +1585,17 @@ type NodeLinkProposal struct {
 	DecidedBy    *uuid.UUID
 }
 
+type NodePentest struct {
+	NodeID          uuid.UUID
+	NodeType        string
+	ClonedFrom      string
+	PentestAllowed  bool
+	PentestWindow   string
+	RollbackAllowed bool
+	UpdatedBy       *uuid.UUID
+	UpdatedAt       time.Time
+}
+
 type NodeStatus struct {
 	NodeID        uuid.UUID
 	HeartbeatAt   time.Time
@@ -1591,6 +1682,16 @@ type OpnsenseFlowRead struct {
 	Skipped int64
 	Dropped int64
 	Error   string
+}
+
+type PasswordResetRequest struct {
+	ID        uuid.UUID
+	CodeHash  []byte
+	Username  string
+	Ip        string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
 }
 
 type ProxmoxBackup struct {
@@ -1699,6 +1800,51 @@ type PublishAuthEvent struct {
 	Country  string
 	City     string
 	Reason   string
+}
+
+type PublishAutoItem struct {
+	ServiceKey  string
+	Domain      string
+	ClusterID   *uuid.UUID
+	ClusterName string
+	State       string
+	JobID       *uuid.UUID
+	NpmHostID   *int32
+	Cleanup     bool
+	Tries       int32
+	Error       string
+	Backup      []byte
+	TriedAt     *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type PublishAutoRule struct {
+	ID         uuid.UUID
+	ClusterID  *uuid.UUID
+	ServiceKey *string
+	Enabled    bool
+	Cleanup    bool
+	UpdatedBy  *uuid.UUID
+	UpdatedAt  time.Time
+}
+
+type PublishChange struct {
+	ID          uuid.UUID
+	JobID       *uuid.UUID
+	NpmHostID   int32
+	Domain      string
+	Action      string
+	Created     bool
+	Deleted     bool
+	Old         []byte
+	New         []byte
+	TitleBefore string
+	TitleAfter  string
+	ChangedBy   *uuid.UUID
+	ChangedAt   time.Time
+	RevertedAt  *time.Time
+	RevertedBy  *uuid.UUID
 }
 
 type PublishConnection struct {
@@ -1818,6 +1964,30 @@ type RecoveryReport struct {
 	Month       pgtype.Date
 	Report      []byte
 	GeneratedAt time.Time
+}
+
+type Replacement struct {
+	ID          uuid.UUID
+	ClusterID   uuid.UUID
+	OldNodeID   *uuid.UUID
+	OldHostname string
+	OldAddress  netip.Addr
+	Vip         *netip.Addr
+	Reason      string
+	KeepDays    int32
+	State       string
+	JobID       *uuid.UUID
+	CleanupJob  *uuid.UUID
+	Note        string
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ResourcesSetting struct {
+	ID         bool
+	Thresholds []byte
+	UpdatedAt  time.Time
 }
 
 type RiskAcceptance struct {
@@ -2009,6 +2179,13 @@ type SecurityScope struct {
 	UpdatedBy   *uuid.UUID
 }
 
+type SecuritySetting struct {
+	ID             bool
+	ProdRequire2fa bool
+	UpdatedAt      *time.Time
+	UpdatedBy      *uuid.UUID
+}
+
 type SecurityTool struct {
 	NodeID    uuid.UUID
 	Tool      string
@@ -2141,18 +2318,50 @@ type UpdatePolicy struct {
 	UpdatedBy     *uuid.UUID
 }
 
+type UpkeepPolicy struct {
+	Scope     string
+	ClusterID *uuid.UUID
+	Policy    []byte
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
+}
+
+type UpkeepResult struct {
+	ID        int64
+	JobID     uuid.UUID
+	NodeID    uuid.UUID
+	ClusterID *uuid.UUID
+	Hostname  string
+	Mode      string
+	At        time.Time
+	Ok        bool
+	Freed     int64
+	Result    []byte
+}
+
+type UpkeepRun struct {
+	Scope     string
+	StartedAt time.Time
+	JobID     *uuid.UUID
+	Note      string
+}
+
 type User struct {
-	ID            uuid.UUID
-	Username      string
-	PasswordHash  string
-	Role          UserRole
-	TotpSecret    *string
-	TotpEnabledAt *time.Time
-	TotpLastStep  *int64
-	DisabledAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	KubeLearning  bool
+	ID                    uuid.UUID
+	Username              string
+	PasswordHash          string
+	Role                  UserRole
+	TotpSecret            *string
+	TotpEnabledAt         *time.Time
+	TotpLastStep          *int64
+	DisabledAt            *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	KubeLearning          bool
+	TempPasswordExpiresAt *time.Time
+	TempPasswordUsedAt    *time.Time
+	MustChangePassword    bool
+	MustSetupTotp         bool
 }
 
 type Vip struct {

@@ -284,7 +284,7 @@ func (s *Service) Approve(ctx context.Context, actor events.Actor, id uuid.UUID)
 // geen node iets verandert en alles al toegepast was. Nieuwe nodes houden
 // hun plan-id tot writeSpec ze in de inventory zet.
 func (s *Service) rolloutPlan(ctx context.Context, c store.Cluster, plan Plan, pd *planned, changeID *uuid.UUID, commit, serverURL string) (*rollout.Plan, error) {
-	full := c.AppliedRevision < c.SpecRevision || pd.oldTpl == nil
+	full := c.AppliedRevision < c.SpecRevision || pd.oldTpl == nil || pd.rebuild
 	if plan.NoSteps && !full {
 		return nil, nil
 	}
