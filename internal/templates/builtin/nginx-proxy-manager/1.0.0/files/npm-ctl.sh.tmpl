@@ -265,8 +265,14 @@ case "${1:-}" in
       log "poort 80/443 is bezet door ${who:-een ander proces} (niet NPM); deze node neemt het VIP niet. Stop dat (bv. systemctl disable --now nginx)"
       exit 1
     fi
-    # Draait NPM hier maar faalt het, dan geeft deze node het VIP af.
-    systemctl is-failed --quiet cf-npm && exit 1
+    # Een gefaalde cf-npm telt alleen op de node met het VIP: die geeft het
+    # VIP af. Een standby (bv. na een herstart, of nadat hij zelf het VIP
+    # afgaf) wist de fout en blijft BACKUP, zodat failover mogelijk blijft;
+    # bij het volgende MASTER start hij het opnieuw.
+    if systemctl is-failed --quiet cf-npm; then
+      has_vip && exit 1
+      systemctl reset-failed cf-npm 2>/dev/null || true
+    fi
     # Een andere NPM terwijl hier al een configuratie van het cluster staat:
     # een overblijfsel (bv. de oude NPM na een herstart). Die houdt de poorten
     # vast met oude data; deze node mag het VIP dan niet hebben.
@@ -323,6 +329,7 @@ case "${1:-}" in
     exit 0
     ;;
   master)
+    systemctl reset-failed cf-npm 2>/dev/null
     [ -z "$(foreign)" ] && systemctl start --no-block cf-npm
     exit 0
     ;;

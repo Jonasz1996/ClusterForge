@@ -454,8 +454,14 @@ case "${1:-}" in
     systemctl is-active --quiet cf-platform-mount || exit 1
     mountpoint -q "$DATA" || exit 1
     [ -f "$ACTIVE" ] || exit 0
-    # Draait het platform hier maar faalt het, dan geeft deze node het VIP af.
-    systemctl is-failed --quiet cf-platform && exit 1
+    # Een gefaalde cf-platform telt alleen op de node met het VIP: die geeft het
+    # VIP af. Een standby (bv. na een herstart, of nadat hij zelf het VIP
+    # afgaf) wist de fout en blijft BACKUP, zodat failover mogelijk blijft;
+    # bij het volgende MASTER start hij het opnieuw.
+    if systemctl is-failed --quiet cf-platform; then
+      has_vip && exit 1
+      systemctl reset-failed cf-platform 2>/dev/null || true
+    fi
     # Na de overstap (of na een herstart) start de node met het VIP het zelf.
     if has_vip && ! systemctl is-active --quiet cf-platform; then
       systemctl start --no-block cf-platform
@@ -463,6 +469,7 @@ case "${1:-}" in
     exit 0
     ;;
   master)
+    systemctl reset-failed cf-platform 2>/dev/null
     [ -f "$ACTIVE" ] && systemctl start --no-block cf-platform
     exit 0
     ;;
