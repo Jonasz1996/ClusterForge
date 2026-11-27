@@ -18,14 +18,18 @@ ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh mount
 ExecStopPost=-/bin/fusermount3 -uz /srv/platform-data
 Restart=always
 RestartSec=5
-# Geheugen (fixlijst 26-11, punt 5; was de drop-in geheugen.conf). Boven
-# MemoryHigh haalt de kernel eerst de cache van de bestanden van de mount
-# terug; GOMEMLIMIT laat Go zijn heap opruimen voor MemoryMax bereikt is.
-# Wordt hij toch gedood (OOM), dan start hij na 5 s opnieuw, en herstart
-# keepalived (platform-ctl.sh check) het platform op de VIP-node.
-MemoryHigh=2G
-MemoryMax=3G
-Environment=GOMEMLIMIT=1536MiB
+# Geheugen (fixlijst 26-11, punt 5; storing 27-11). Een harde grens, geen
+# MemoryHigh: boven MemoryHigh remt de kernel het proces af en duwt het naar
+# swap, en dan hangt elke stat op de mount (en het platform met hem) zonder
+# dat er iets stopt; zo gaf media.jbogaert.be op 27-11 uren 504. Geen swap
+# (MemorySwapMax=0): de mount groeide de swap vol. GOMEMLIMIT laat Go zijn
+# heap ruim onder de grens opruimen. Ruim voor de grens herstart
+# platform-ctl.sh check de mount en het platform zelf, netjes (verfris);
+# komt hij toch aan MemoryMax, dan doodt de kernel hem, start systemd hem na
+# 5 s opnieuw en herstart check het platform (de oude mount is dan dood).
+MemoryMax=2G
+MemorySwapMax=0
+Environment=GOMEMLIMIT=1280MiB
 
 [Install]
 WantedBy=multi-user.target
