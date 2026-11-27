@@ -87,7 +87,7 @@ func TestRenderMediaPlatform(t *testing.T) {
 		"/etc/systemd/system/cf-platform.service": {"ConditionPathExists=/var/lib/cf-platform/actief\n", "\nBindsTo=keepalived.service\n",
 			"\nAfter=docker.service cf-platform-mount.service keepalived.service\n", "\nSuccessExitStatus=3\n"},
 		"/etc/systemd/system/cf-platform-mount.service": {"\nExecStart=/usr/local/lib/clusterforge/platform-ctl.sh mount\n",
-			"\nMemoryHigh=2G\n", "\nMemoryMax=3G\n", "\nEnvironment=GOMEMLIMIT=1536MiB\n"},
+			"\nMemoryMax=2G\n", "\nMemorySwapMax=0\n", "\nEnvironment=GOMEMLIMIT=1280MiB\n"},
 		"/etc/keepalived/keepalived.conf": {"\n    timeout 30\n    fall 6\n", "priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n", "include /etc/keepalived/conf.d/*.conf\n"},
 	} {
 		got, ok := files[path]
@@ -213,6 +213,9 @@ func newMPNode(t *testing.T, files map[string]string) *mpNode {
 		"/run/cf-platform.hash", dir+"/hash",
 		"/run/cf-platform-arr.", dir+"/run-arr.",
 		"/run/cf-platform-backup.", dir+"/run-backup.",
+		"/run/cf-platform-gezond", dir+"/run-gezond",
+		"/run/cf-platform-verfris", dir+"/run-verfris",
+		"/sys/fs/cgroup", dir+"/cg",
 		"/var/backups/cf-platform", dir+"/backups",
 		"/var/lib/clusterforge", dir+"/varlib",
 		"/var/lib/cf-platform", dir+"/cfp",
@@ -244,12 +247,14 @@ func newMPNode(t *testing.T, files map[string]string) *mpNode {
 case "$*" in
 *ExecMainStartTimestampMonotonic*) cat "$CF_TEST_DIR/mount-start" 2>/dev/null; exit 0;;
 *ActiveEnterTimestampMonotonic*) cat "$CF_TEST_DIR/platform-start" 2>/dev/null; exit 0;;
+*ControlGroup*) cat "$CF_TEST_DIR/mount-cg" 2>/dev/null; exit 0;;
 "show "*) exit 0;;
 "stop cf-platform-mount") rm -f "$CF_TEST_DIR/mounted";;
 "start --no-block cf-platform-mount") : > "$CF_TEST_DIR/mounted";;
 esac
 echo "systemctl $*" >> "$CF_TEST_DIR/log"`,
 		"hostname":    `echo media-02`,
+		"pg_isready":  `[ -f "$CF_TEST_DIR/db-weg" ] && exit 2; exit 0`,
 		"systemd-run": `echo "systemd-run $*" >> "$CF_TEST_DIR/log"`,
 		"stat": `if [ "$1 $2" = "-c %u" ] && [ -f "$CF_TEST_DIR/uid" ]; then cat "$CF_TEST_DIR/uid"; exit 0; fi
 exec ` + realStat + ` "$@"`,
@@ -1361,5 +1366,95 @@ func TestMediaPlatformLidarrYoutube(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(n.dir, "data", d)); err != nil {
 			t.Errorf("geen %s", d)
 		}
+	}
+}
+
+// TestMediaPlatformWaakhond: check geeft het VIP af als de app hangt (maar
+// niet tijdens een start, en niet als de database weg is), en herstart weed
+// mount netjes als hij te veel geheugen gebruikt (storing 27-11).
+func TestMediaPlatformWaakhond(t *testing.T) {
+	tpl, c := mpContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newMPNode(t, files)
+	var ee *exec.ExitError
+	gezond := filepath.Join(n.dir, "run-gezond")
+	n.set(map[string]*string{
+		"active-cf-platform-mount": on(""), "mounted": on(""), "vip": on(""), "active-cf-platform": on(""),
+		"data/.cf-platform-active": on("x\n"), "platform-start": on("500\n"), "mount-start": on("400\n"),
+	})
+	lees := func() string { b, _ := os.ReadFile(gezond); return strings.TrimSpace(string(b)) }
+
+	// Nog nooit gezond sinds de start (migraties): geen fout, geen klok.
+	if out, err := n.run("check"); err != nil || lees() != "" {
+		t.Fatalf("check tijdens de start: %v %s %q", err, out, lees())
+	}
+	// Gezond.
+	n.set(map[string]*string{"healthy": on(""), "app-up": on("")})
+	if out, err := n.run("check"); err != nil || lees() != "500 ok" {
+		t.Fatalf("check gezond: %v %s %q", err, out, lees())
+	}
+	// Eerste fout: de klok start, het VIP blijft.
+	n.set(map[string]*string{"healthy": nil})
+	if out, err := n.run("check"); err != nil || !strings.HasPrefix(lees(), "500 fout ") {
+		t.Fatalf("check eerste fout: %v %s %q", err, out, lees())
+	}
+	// Al 2 min geen antwoord: VIP afgeven.
+	oud := fmt.Sprintf("500 fout %d\n", time.Now().Unix()-120)
+	n.set(map[string]*string{"run-gezond": on(oud)})
+	if out, err := n.run("check"); !errors.As(err, &ee) || ee.ExitCode() != 1 || !strings.Contains(out, "/health") {
+		t.Fatalf("check met een hangende app: %v %s", err, out)
+	}
+	// De database is weg: verhuizen helpt niet, de klok start opnieuw.
+	n.set(map[string]*string{"run-gezond": on(oud), "db-weg": on("")})
+	if out, err := n.run("check"); err != nil || lees() == strings.TrimSpace(oud) {
+		t.Fatalf("check zonder database: %v %s %q", err, out, lees())
+	}
+	n.set(map[string]*string{"db-weg": nil})
+	// Een nieuwe start van het platform: de oude fout telt niet.
+	n.set(map[string]*string{"run-gezond": on(oud), "platform-start": on("600\n")})
+	if out, err := n.run("check"); err != nil {
+		t.Fatalf("check na een nieuwe start: %v %s", err, out)
+	}
+
+	// Geheugen van de mount: veel cache is goed, veel anon niet.
+	cg := "cg/system.slice/cf-platform-mount.service/"
+	n.set(map[string]*string{
+		"mount-cg":         on("/system.slice/cf-platform-mount.service\n"),
+		cg + "memory.stat": on("anon 104857600\nfile 5000000000\n"), cg + "memory.swap.current": on("0\n"),
+	})
+	if out, err := n.run("check"); err != nil || strings.Contains(n.log(), "verfris") {
+		t.Fatalf("check met veel cache: %v %s\n%s", err, out, n.log())
+	}
+	n.set(map[string]*string{cg + "memory.stat": on("anon 1073741824\nfile 0\n"), cg + "memory.swap.current": on("1073741824\n")})
+	if out, err := n.run("check"); err != nil || !strings.Contains(n.log(), "systemd-run --no-block --unit=cf-platform-verfris") {
+		t.Fatalf("check met te veel anon en swap: %v %s\n%s", err, out, n.log())
+	}
+	// Hoogstens eens per 30 min.
+	if out, err := n.run("check"); err != nil || strings.Contains(n.log(), "verfris") {
+		t.Fatalf("tweede verfris binnen 30 min: %v %s\n%s", err, out, n.log())
+	}
+	// Tijdens de verfris: check doet niets (VIP blijft).
+	n.set(map[string]*string{"active-cf-platform-verfris": on(""), "mounted": nil})
+	if out, err := n.run("check"); err != nil || n.log() != "" {
+		t.Fatalf("check tijdens een verfris: %v %s\n%s", err, out, n.log())
+	}
+	n.set(map[string]*string{"active-cf-platform-verfris": nil, "mounted": on("")})
+
+	// verfris zelf: platform stoppen, mount herstarten, platform starten.
+	out, err := n.run("verfris")
+	l := n.log()
+	if err != nil || !strings.Contains(l, "systemctl stop cf-platform\nsystemctl restart cf-platform-mount\nsystemctl start --no-block cf-platform\n") {
+		t.Fatalf("verfris: %v %s\n%s", err, out, l)
+	}
+	// Zonder het platform hier: alleen de mount.
+	n.set(map[string]*string{"active-cf-platform": nil})
+	if out, err := n.run("verfris"); err != nil || n.log() != "systemctl restart cf-platform-mount\n" {
+		t.Fatalf("verfris zonder platform: %v %s\n%s", err, out, n.log())
+	}
+
+	// De status meldt een ontbrekende geheugengrens.
+	n.set(map[string]*string{cg + "memory.max": on("max\n")})
+	if out, _ := n.run("status"); !strings.Contains(out, "MemoryMax werkt niet") {
+		t.Errorf("status zonder geheugengrens:\n%s", out)
 	}
 }

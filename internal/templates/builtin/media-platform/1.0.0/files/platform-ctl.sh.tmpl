@@ -32,6 +32,9 @@
 #                                    op de Proxmox-host) en daarna terug
 #   platform-ctl.sh mappen           de mappen van het platform op de gedeelde data
 #                                    (arr/ van uid 10001)
+#   platform-ctl.sh verfris          weed mount (en het platform als het hier draait)
+#                                    netjes herstarten; check doet het zelf als de
+#                                    mount te veel geheugen gebruikt
 #
 # Mediabeheer (fase 11, ARR=aan en een versie met compose.arr.yaml): up start
 # na de app ook qBittorrent en Prowlarr, down stopt ze; alleen op de node met
@@ -58,6 +61,18 @@ ACTIVE_LOCAL=/var/lib/cf-platform/actief
 # (hoogstens 6 uur). Het slot op de gedeelde map laat één node tegelijk los.
 PAUZE=/run/cf-platform-backup.pauze
 PAUZE_SLOT=$DATA/.cf-backup-pauze
+# Waakhond van de app (storing 27-11): check vraagt op de node met het VIP
+# /health (hoogstens 4 s). Antwoordt de app GEZOND_WACHT s lang niet (en is de
+# database wel bereikbaar), dan geeft deze node het VIP af. Pas nadat de app
+# sinds zijn start één keer gezond was: een start met migraties telt niet.
+GEZOND=/run/cf-platform-gezond
+GEZOND_WACHT=60
+# Geheugen van weed mount (anon en swap, niet de cache van de bestanden):
+# boven VERFRIS_MB herstart check de mount en het platform netjes, hoogstens
+# eens per 30 min. Ruim onder MemoryMax (2G) van cf-platform-mount.
+VERFRIS=/run/cf-platform-verfris
+VERFRIS_MB=1536
+CGROUP=/sys/fs/cgroup
 HASH=/run/cf-platform.hash
 ENV=/etc/clusterforge/platform.env
 VIP='{{ .params.vip }}'
@@ -537,9 +552,16 @@ mount_start() {
   set -- -filer=127.0.0.1:8888 -filer.path=/ -dir="$DATA" -allowOthers \
     -cacheDir="$MOUNT_CACHE" -cacheDirWrite="$MOUNT_CACHE/write" \
     -concurrentWriters=8 -cacheCapacityMB=512
-  if /usr/local/bin/weed help mount 2>&1 | grep -q -- -writeBufferSizeMB; then
-    set -- "$@" -writeBufferSizeMB=1024
-  fi
+  hulp=$(/usr/local/bin/weed help mount 2>&1)
+  case "$hulp" in *-writeBufferSizeMB*) set -- "$@" -writeBufferSizeMB=1024 ;; esac
+  # De buffers van het lezen in het geheugen (standaard 256 MB, 4.47+).
+  case "$hulp" in *-readerCacheSizeMB*) set -- "$@" -readerCacheSizeMB=128 ;; esac
+  # Staat de grens van de unit (MemoryMax, MemorySwapMax) echt op deze
+  # cgroup? In een CT zonder memory-controller doet systemd het stil niet.
+  cg=$CGROUP$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null)
+  max=$(cat "$cg/memory.max" 2>/dev/null); swap=$(cat "$cg/memory.swap.max" 2>/dev/null)
+  echo "weed mount: geheugengrens ${max:-onbekend}, swap ${swap:-onbekend} ($cg)"
+  case "$max" in '' | max) echo "LET OP: geen geheugengrens op weed mount (MemoryMax werkt niet in deze CT); de waakhond van check (verfris) vangt het op" >&2 ;; esac
   exec /usr/local/bin/weed mount "$@"
 }
 mount_pid() {
@@ -552,6 +574,87 @@ mount_rss() {
   pid=$(mount_pid) || return 0
   awk '/^VmRSS:/ { print $2 * 1024 }' "/proc/$pid/status" 2>/dev/null
 }
+# De cgroup van cf-platform-mount (leeg als systemd hem niet kent).
+mount_cg() {
+  c=$(systemctl show -p ControlGroup --value cf-platform-mount 2>/dev/null)
+  [ -n "$c" ] && [ -r "$CGROUP$c/memory.stat" ] && echo "$CGROUP$c"
+}
+# Het eigen geheugen van weed mount in bytes: anon (in het RAM) plus wat er
+# in swap staat; niet de cache van de bestanden, die geeft de kernel zelf
+# terug. Zonder cgroup: de RSS en VmSwap van het proces.
+mount_anon() {
+  if cg=$(mount_cg); then
+    a=$(awk '$1 == "anon" { print $2 }' "$cg/memory.stat")
+    sw=$(cat "$cg/memory.swap.current" 2>/dev/null)
+    echo $((${a:-0} + ${sw:-0}))
+  elif pid=$(mount_pid); then
+    awk '/^VmRSS:|^VmSwap:/ { s += $2 } END { print s * 1024 }' "/proc/$pid/status" 2>/dev/null
+  fi
+}
+# Gebruikt de mount te veel (boven VERFRIS_MB) en was er de laatste 30 min
+# geen verfris: dan nu (op de achtergrond, check wacht er niet op).
+verfris_nodig() {
+  m=$(mount_anon)
+  [ -n "$m" ] && [ "$m" -gt $((VERFRIS_MB * 1024 * 1024)) ] || return 1
+  [ -n "$(find "$VERFRIS" -mmin -30 2>/dev/null)" ] && return 1
+  echo "weed mount gebruikt $(human "$m") (grens voor verfris ${VERFRIS_MB} MiB): mount en platform herstarten" >&2
+  : >"$VERFRIS"
+  systemd-run --no-block --unit=cf-platform-verfris --collect "$0" verfris >/dev/null 2>&1 || "$0" verfris &
+  return 0
+}
+# verfris: het platform hier stoppen (als het draait), weed mount herstarten
+# (en zo zijn geheugen terug), wachten tot hij weer antwoordt en het platform
+# weer starten. check (keepalived) laat het VIP zolang hier.
+verfris() {
+  : >"$VERFRIS"
+  draaide=0
+  systemctl is-active --quiet cf-platform && draaide=1
+  [ "$draaide" = 1 ] && systemctl stop cf-platform
+  systemctl restart cf-platform-mount
+  i=0
+  until gemount; do
+    i=$((i + 1))
+    [ "$i" -ge 90 ] && { echo "verfris: de mount kwam niet terug na 3 min: journalctl -u cf-platform-mount" >&2; return 1; }
+    sleep 2
+  done
+  if [ "$draaide" = 1 ] && has_vip && start_ok; then systemctl start --no-block cf-platform; fi
+  echo "verfris: weed mount herstart"
+}
+# Antwoordt de database (het VIP van PostgreSQL) niet? Dan helpt het VIP
+# verhuizen niet: het platform hangt elders net zo. Zonder pg_isready: onbekend.
+db_weg() {
+  command -v pg_isready >/dev/null 2>&1 || return 1
+  url=$(env_get PLATFORM_DATABASE_URL)
+  hostdb=${url#*://}; hostdb=${hostdb#*@}; host=${hostdb%%/*}
+  port=${host##*:}; host=${host%:*}
+  [ "$port" = "$host" ] && port=5432
+  timeout 5 pg_isready -q -h "$host" -p "$port" -t 3 >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || [ "$rc" -eq 124 ]
+}
+# gezond: 1 als de app hier al GEZOND_WACHT s niet antwoordt (zie GEZOND).
+# Het bestand: <start van cf-platform> ok, of <start> fout <sinds epoch>.
+gezond() {
+  start=$(systemctl show -p ActiveEnterTimestampMonotonic --value cf-platform 2>/dev/null)
+  if curl -fsS -o /dev/null --max-time 4 http://127.0.0.1:80/health 2>/dev/null; then
+    echo "$start ok" >"$GEZOND"
+    return 0
+  fi
+  [ -f "$GEZOND" ] || return 0
+  read -r s st sinds <"$GEZOND" || return 0
+  # Sinds deze start nog nooit gezond: het platform start nog.
+  [ "$s" = "$start" ] || return 0
+  nu=$(date +%s)
+  if [ "$st" = ok ] || db_weg; then
+    # Eerste fout, of de database zelf is weg: de klok (opnieuw) starten.
+    echo "$start fout $nu" >"$GEZOND"
+    return 0
+  fi
+  case "$sinds" in '' | *[!0-9]*) echo "$start fout $nu" >"$GEZOND"; return 0 ;; esac
+  [ $((nu - sinds)) -ge "$GEZOND_WACHT" ] || return 0
+  echo "De app antwoordt al $((nu - sinds)) s niet op /health (de database wel): VIP afgeven" >&2
+  return 1
+}
 # Wat de mount aan geheugen gebruikt. RSS is het proces zelf (vooral de
 # heap van Go); de cgroup van de unit telt ook de cache van de bestanden
 # die hij schrijft en leest (file), en die geeft de kernel terug als het
@@ -560,14 +663,15 @@ mount_rss() {
 geheugen() {
   pid=$(mount_pid) || { echo "weed mount draait niet"; return 1; }
   echo "weed mount (pid $pid): RSS $(human "$(mount_rss)")"
-  cg=/sys/fs/cgroup$(systemctl show -p ControlGroup --value cf-platform-mount 2>/dev/null)
-  if [ -r "$cg/memory.current" ]; then
-    echo "cgroup van cf-platform-mount: $(human "$(cat "$cg/memory.current")") (grens $(cat "$cg/memory.max" 2>/dev/null), hoog $(cat "$cg/memory.high" 2>/dev/null))"
+  if cg=$(mount_cg); then
+    echo "cgroup van cf-platform-mount: $(human "$(cat "$cg/memory.current")") (grens $(cat "$cg/memory.max" 2>/dev/null), swap $(human "$(cat "$cg/memory.swap.current" 2>/dev/null)") van $(cat "$cg/memory.swap.max" 2>/dev/null))"
+    echo "  eigen geheugen (anon + swap): $(human "$(mount_anon)"); verfris boven ${VERFRIS_MB} MiB"
     awk '$1 == "anon" || $1 == "file" || $1 == "file_dirty" || $1 == "file_writeback" || $1 == "shmem" { printf "  %-15s %s\n", $1, $2 }' "$cg/memory.stat" |
       while read -r k v; do printf '  %-15s %s\n' "$k" "$(human "$v")"; done
     [ -r "$cg/memory.events" ] && echo "  oom_kill: $(awk '$1 == "oom_kill" { print $2 }' "$cg/memory.events")"
   fi
   du -sh "$MOUNT_CACHE/write" "$MOUNT_CACHE" 2>/dev/null | sed 's/^/  schijf: /'
+  [ -f "$VERFRIS" ] && echo "  laatste verfris: $(date -r "$VERFRIS" '+%F %T')"
   return 0
 }
 
@@ -853,6 +957,11 @@ status() {
   chk mount "Bestanden gemount ($DATA)" "$mnt" red "$([ "$mnt" = 1 ] && echo gemount || { gepauzeerd && echo "los voor een back-up van deze CT"; } || echo "niet gemount of antwoordt niet: journalctl -u cf-platform-mount")"
   mg=$(mount_rss)
   [ -n "$mg" ] && val mount_rss "Geheugen van de mount (RSS)" "$(human "$mg")" "$mg"
+  if cg=$(mount_cg); then
+    gm=$(cat "$cg/memory.max" 2>/dev/null)
+    chk mount_grens "Geheugengrens op de mount" "$([ "$gm" != max ] && echo 1 || echo 0)" amber \
+      "$([ "$gm" != max ] && echo "$(human "$gm"), eigen $(human "$(mount_anon)")" || echo "geen: MemoryMax werkt niet in deze CT (alleen de verfris van check)")"
+  fi
   sw=0; systemctl is-active --quiet cf-seaweedfs && sw=1
   chk seaweedfs "SeaweedFS (master, volume, filer)" "$sw" red "$(systemctl is-active cf-seaweedfs 2>/dev/null)"
   vb=$(du -sb /srv/seaweedfs/volume 2>/dev/null | cut -f1)
@@ -962,10 +1071,14 @@ case "${1:-}" in
   check)
     # Keepalived, om de 3 s. Niets hier mag op FUSE blijven hangen: alles op
     # de mount gaat via fuse (hoogstens 5 s), de markering staat lokaal.
+    # Een verfris loopt (mount en platform herstarten): even niets doen.
+    systemctl is-active --quiet cf-platform-verfris && exit 0
     systemctl is-active --quiet cf-platform-mount || exit 1
     # Een back-up van deze CT: het VIP afgeven, de mount gaat zo los.
     gepauzeerd && exit 1
     gemount || exit 1
+    # Gebruikt weed mount te veel geheugen: netjes herstarten (verfris).
+    verfris_nodig && exit 0
     overgestapt || exit 0
     # Draait het platform hier maar faalt het, dan geeft deze node het VIP af.
     systemctl is-failed --quiet cf-platform && exit 1
@@ -976,6 +1089,9 @@ case "${1:-}" in
       elif mount_nieuwer; then
         echo "weed mount startte opnieuw terwijl het platform draaide: platform herstarten (anders ziet het de oude mount)" >&2
         systemctl restart --no-block cf-platform
+      elif ! gezond; then
+        # De app hangt: VIP afgeven (notify_fault stopt het platform hier).
+        exit 1
       fi
     fi
     exit 0
@@ -1009,6 +1125,7 @@ case "${1:-}" in
   sleutels-klaar) sleutels_klaar ;;
   mount) mount_start ;;
   geheugen) geheugen ;;
+  verfris) verfris ;;
   backup-pauze) shift; backup_pauze "$@" ;;
   backup-hervat) backup_hervat ;;
   mappen) mappen ;;
@@ -1018,7 +1135,7 @@ case "${1:-}" in
     overstap "$@"
     ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|mapregels|sleutels-klaar|compose|overstap|mount|geheugen|backup-pauze|backup-hervat|mappen" >&2
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|mapregels|sleutels-klaar|compose|overstap|mount|geheugen|verfris|backup-pauze|backup-hervat|mappen" >&2
     exit 2
     ;;
 esac
