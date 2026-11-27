@@ -1,0 +1,13 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Alleen voor
+# postfix-ctl.sh; het wachtwoord staat hier, daarom 0600.
+VIP='{{ .params.vip }}'
+RELAYHOST='{{ .params.relayhost }}'
+RELAY_PORT='{{ .params.relay_port }}'
+RELAY_TLS='{{ .params.relay_tls }}'
+RELAY_USER='{{ if .params.relay_user }}{{ .params.relay_user }}{{ end }}'
+RELAY_PASSWORD='{{ .params.relay_password }}'
+SENDER='{{ .params.sender }}'
+SENDER_NAME='{{ if .params.sender_name }}{{ .params.sender_name }}{{ end }}'
+MYNETWORKS='{{ .params.mynetworks }}'
+TEST_TO='{{ if .params.test_to }}{{ .params.test_to }}{{ end }}'
+QUEUE_WARN='{{ .params.queue_warn }}'

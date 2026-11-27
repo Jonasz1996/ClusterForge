@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"path"
 	"regexp"
 	"slices"
@@ -40,6 +41,11 @@ type Template struct {
 	// prioriteit zodra die weer gezond is (keepalived met preempt). Een
 	// failovertest verwacht dat dan standaard.
 	Failback bool `yaml:"failback"`
+	// Autostart zegt dat elke node die een Proxmox-gast is, met de host
+	// meestart (onboot). Een nieuwe CT of VM van ClusterForge heeft dat al;
+	// Toepassen en Herstel zetten het ook bij een bestaande gast die het
+	// cluster overnam, als het uit staat.
+	Autostart bool `yaml:"autostart"`
 	// Kubernetes zegt welke Kubernetes deze versie installeert; alleen bij
 	// cluster_type kubernetes, en daar verplicht.
 	Kubernetes *KubeInfo `yaml:"kubernetes"`
@@ -804,6 +810,21 @@ type Check struct {
 	KubeReady *struct {
 		Within string `json:"within"`
 	} `json:"kube_ready,omitempty"`
+	// UDP stuurt een vraag over UDP naar addr (host:poort) en wacht op een
+	// antwoord van precies dat adres. Probe zegt welke vraag: rustdesk is
+	// een registratie bij hbbs (testlijst 2, 1.3).
+	UDP *struct {
+		Addr   string `json:"addr"`
+		Probe  string `json:"probe"`
+		Within string `json:"within"`
+	} `json:"udp,omitempty"`
+}
+
+// UDPProbes zijn de vragen voor een udp-controle. rustdesk is een
+// RendezvousMessage{register_peer: RegisterPeer{id: "cf-check"}} van hbbs
+// (protobuf, veld 6), waarop hbbs altijd antwoordt.
+var UDPProbes = map[string][]byte{
+	"rustdesk": append([]byte{0x32, 0x0a, 0x0a, 0x08}, "cf-check"...),
 }
 
 // Within geeft hoe lang de controle mag duren.
@@ -816,6 +837,8 @@ func (c Check) Within() time.Duration {
 		s = c.HTTP.Within
 	case c.KubeReady != nil:
 		s = c.KubeReady.Within
+	case c.UDP != nil:
+		s = c.UDP.Within
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil || d <= 0 {
@@ -838,13 +861,21 @@ func (t *Template) RenderChecks(c Context) ([]Check, error) {
 			return nil, fmt.Errorf("controle %d: %w", i+1, err)
 		}
 		kinds := 0
-		for _, set := range []bool{ch.VIPOwned != nil, ch.HTTP != nil, ch.KubeReady != nil} {
+		for _, set := range []bool{ch.VIPOwned != nil, ch.HTTP != nil, ch.KubeReady != nil, ch.UDP != nil} {
 			if set {
 				kinds++
 			}
 		}
 		if kinds != 1 {
-			return nil, fmt.Errorf("controle %d heeft precies één soort nodig (vip_owned, http of kube_ready)", i+1)
+			return nil, fmt.Errorf("controle %d heeft precies één soort nodig (vip_owned, http, kube_ready of udp)", i+1)
+		}
+		if ch.UDP != nil {
+			if _, _, err := net.SplitHostPort(ch.UDP.Addr); err != nil {
+				return nil, fmt.Errorf("controle %d: udp-adres %q: %w", i+1, ch.UDP.Addr, err)
+			}
+			if _, ok := UDPProbes[ch.UDP.Probe]; !ok {
+				return nil, fmt.Errorf("controle %d: onbekende udp-vraag %q", i+1, ch.UDP.Probe)
+			}
 		}
 		out = append(out, ch)
 	}

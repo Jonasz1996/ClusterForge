@@ -36,6 +36,10 @@ export function ActionModal({
     staleTime: Infinity,
   });
   const [confirm, setConfirm] = useState("");
+  // Een ander doel kan bewust een andere app zijn; standaard draait de
+  // controle dan terug (testlijst 2, 1.1).
+  const [otherApp, setOtherApp] = useState(false);
+  const canOther = ["update", "retarget", "retarget_many", "restore"].includes(action.action);
   const p = plan.data;
   const needConfirm = !!p?.confirm;
   const job = start.data?.job;
@@ -63,8 +67,14 @@ export function ActionModal({
             ))}
             <p className="text-xs text-slate-500">
               ClusterForge maakt eerst een kopie van de NPM-database en de config, verandert alles via de API van NPM (database én config samen),
-              controleert daarna vijf dingen en draait terug als iets niet klopt.
+              controleert daarna vijf dingen (ook of de pagina dezelfde app toont als vooraf) en draait terug als iets niet klopt.
             </p>
+            {canOther && !job && (
+              <label className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={otherApp} onChange={(e) => setOtherApp(e.target.checked)} />
+                Een andere app is de bedoeling (anders gaat de host terug als hij na de wijziging een andere pagina toont)
+              </label>
+            )}
             {needConfirm && !job && (
               <Field label={`Tik ${p.confirm} over om te bevestigen`} htmlFor="publish-confirm">
                 <Input id="publish-confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" />
@@ -94,6 +104,7 @@ export function ActionModal({
                 start.mutate({
                   ...action,
                   confirm: needConfirm ? confirm.trim() : undefined,
+                  allow_other_app: otherApp || undefined,
                 })
               }
             >

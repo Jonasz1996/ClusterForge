@@ -95,6 +95,10 @@ type Plan struct {
 	Rules    []protocol.FirewallRule `json:"rules"`
 	Entries  []Entry                 `json:"entries"`
 	Warnings []string                `json:"warnings"`
+	// VRRPMissing zijn de clusterleden waarvan ufw nu geen VRRP (protocol
+	// 112) binnenlaat terwijl keepalived hier draait: split-brain-gevaar
+	// (testlijst 2, 1.4).
+	VRRPMissing []string `json:"vrrp_missing,omitempty"`
 }
 
 // Build rekent het plan uit.
@@ -116,6 +120,8 @@ type builder struct {
 	seen     map[string]int // proto/port/class → index
 	warnings []string
 	closed   map[string]string // proto/port → reden
+	// vrrpMissing: zie Plan.VRRPMissing.
+	vrrpMissing []string
 }
 
 func (b *builder) resolve(class string) ([]string, string) {
@@ -291,6 +297,17 @@ func (b *builder) vrrp() {
 	if !b.in.Keepalived && !slices.Contains(b.in.Units, "keepalived") {
 		return
 	}
+	peers := slices.Clone(b.in.Unicast)
+	for _, p := range b.in.Peers {
+		if !slices.Contains(peers, p) {
+			peers = append(peers, p)
+		}
+	}
+	if miss := MissingVRRP(b.in.Status, peers); len(miss) > 0 {
+		b.vrrpMissing = miss
+		b.warnings = append(b.warnings, fmt.Sprintf("ufw laat VRRP (protocol 112) van %s niet binnen: keepalived hoort de andere node niet en neemt het VIP ook (split-brain, dubbel IP). Oplossing: VRRP toelaten",
+			strings.Join(miss, ", ")))
+	}
 	b.add(Entry{Proto: "vrrp", Port: "", Software: "Keepalived (VRRP)", Class: ClassCluster, Origin: "vrrp"})
 	for _, p := range b.in.Unicast {
 		if !slices.Contains(b.in.Peers, p) {
@@ -313,6 +330,7 @@ func (b *builder) custom() {
 
 func (b *builder) finish() Plan {
 	p := Plan{Strict: b.in.Settings.Strict, Rules: []protocol.FirewallRule{}, Warnings: []string{}}
+	p.VRRPMissing = b.vrrpMissing
 	for i := range b.entries {
 		e := &b.entries[i]
 		if why, ok := b.closed[e.Proto+"/"+e.Port]; ok && e.State == "open" && e.Origin != "ssh" && e.Origin != "custom" {
@@ -431,4 +449,66 @@ func minimal(froms []string) []string {
 		}
 	}
 	return out
+}
+
+// MissingVRRP geeft de peers waarvan een actieve ufw met standaard deny
+// geen VRRP binnenlaat. Een regel telt als hij allow is, voor vrrp of elk
+// protocol, zonder poort, en van any, het adres of een netwerk erom.
+func MissingVRRP(st *protocol.FirewallStatus, peers []string) []string {
+	if st == nil || !st.Active || (st.Incoming != "deny" && st.Incoming != "reject") {
+		return nil
+	}
+	var out []string
+	for _, p := range peers {
+		ip, err := netip.ParseAddr(p)
+		if err != nil || !ip.Is4() {
+			continue
+		}
+		ok := false
+		for _, r := range st.Rules {
+			if r.Action != "allow" || (r.Direction != "" && r.Direction != "in") || r.Port != "" {
+				continue
+			}
+			if r.Proto != "vrrp" && r.Proto != "any" && r.Proto != "" && r.Proto != "112" {
+				continue
+			}
+			if fromCovers(r.From, ip) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func fromCovers(from string, ip netip.Addr) bool {
+	from = strings.TrimSpace(strings.ToLower(from))
+	switch from {
+	case "", "any", "anywhere", "0.0.0.0/0":
+		return true
+	}
+	if a, err := netip.ParseAddr(from); err == nil {
+		return a == ip
+	}
+	if p, err := netip.ParsePrefix(from); err == nil {
+		return p.Contains(ip)
+	}
+	return false
+}
+
+// VRRPScript is het eenmalige commando dat VRRP van de peers toelaat.
+func VRRPScript(peers []string) string {
+	var b strings.Builder
+	b.WriteString("set -e\n")
+	for _, p := range peers {
+		if _, err := netip.ParseAddr(p); err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, "ufw allow proto vrrp from %s comment '%sVRRP keepalived'\n", p, protocol.FirewallCommentPrefix)
+	}
+	b.WriteString("ufw status | grep -i vrrp\n")
+	return b.String()
 }

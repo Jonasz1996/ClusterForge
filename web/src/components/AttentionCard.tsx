@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { RestartService } from "@/components/RestartService";
+import { RunCommandAction } from "@/components/RunCommandAction";
 import { Alert, Badge, Card, cx } from "@/components/ui";
 import { useAttention, type AttentionItem } from "@/lib/attention";
 import { useMe } from "@/lib/auth";
@@ -20,6 +21,7 @@ export function AttentionCard() {
   const items = q.data?.items ?? [];
   const [open, setOpen] = useState<string | null>(null);
   const [restart, setRestart] = useState<{ unit: string; nodeIds: string[] } | null>(null);
+  const [command, setCommand] = useState<{ title: string; script: string; nodeIds: string[] } | null>(null);
   const now = items.filter((i) => i.tone === "red");
   const later = items.filter((i) => i.tone !== "red");
 
@@ -30,6 +32,19 @@ export function AttentionCard() {
       if (!isAdmin || !a.unit || !a.node_ids?.length) return null;
       return (
         <button key={a.label} type="button" className={cls} onClick={() => setRestart({ unit: a.unit!, nodeIds: a.node_ids! })}>
+          {a.label}
+        </button>
+      );
+    }
+    if (a.kind === "run_command") {
+      if (!isAdmin || !a.script || !a.node_ids?.length) return null;
+      return (
+        <button
+          key={a.label}
+          type="button"
+          className={cls}
+          onClick={() => setCommand({ title: a.title ?? a.label, script: a.script!, nodeIds: a.node_ids! })}
+        >
           {a.label}
         </button>
       );
@@ -110,6 +125,7 @@ export function AttentionCard() {
         </section>
       )}
       {restart && <RestartService unit={restart.unit} nodeIds={restart.nodeIds} onClose={() => setRestart(null)} />}
+      {command && <RunCommandAction title={command.title} script={command.script} nodeIds={command.nodeIds} onClose={() => setCommand(null)} />}
     </Card>
   );
 }

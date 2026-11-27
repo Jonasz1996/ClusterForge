@@ -24,7 +24,7 @@ import (
 )
 
 // retryableKinds zijn de taken die na een fout opnieuw kunnen.
-var retryableKinds = map[string]bool{deploy.Kind: true}
+var retryableKinds = map[string]bool{deploy.Kind: true, deploy.CleanupKind: true}
 
 var countParamRe = regexp.MustCompile(`^\{\{\s*\.params\.([a-z0-9_]+)\s*\}\}$`)
 
@@ -232,6 +232,10 @@ func optional(s string) *string {
 func (s *Server) RetryJob(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	p, ok := requireAdmin(w, r)
 	if !ok {
+		return
+	}
+	if cur, err := s.q.GetJob(r.Context(), id); err == nil && cur.Job.Kind == deploy.Kind && cur.Job.ClusterID == nil {
+		writeError(w, http.StatusConflict, "conflict", "het cluster van deze uitrol is opgeruimd; rol opnieuw uit met de wizard")
 		return
 	}
 	j, err := s.jobs.Retry(r.Context(), id, events.User(p.User.ID))

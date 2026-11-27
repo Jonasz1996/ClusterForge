@@ -355,6 +355,11 @@ func TestVaultXOvernemen(t *testing.T) {
 	if out, err := n.run("voorstart"); err == nil || !strings.Contains(out, "nog niet overgenomen") {
 		t.Fatalf("voorstart vóór de overname: %v\n%s", err, out)
 	}
+	// En de unit wordt overgeslagen in plaats van rond te draaien
+	// (ExecCondition, testlijst 2, 2.8).
+	if out, err := n.run("wacht"); err == nil || !strings.Contains(out, "wacht op overname") || !n.exists("state/wacht-op-overname") {
+		t.Fatalf("wacht vóór de overname: %v\n%s", err, out)
+	}
 	// Een proces buiten cf-vaultx bezet poort 8000: voorstart zegt dat
 	// duidelijk in plaats van cf-vaultx te laten crashen.
 	n.env = append(n.env, "CF_VX_PORT_HOLDER=4242 /opt/vaultx/venv/bin/uvicorn app.main:app")
@@ -482,6 +487,10 @@ func TestVaultXOvernemen(t *testing.T) {
 	}
 	_ = os.Remove(filepath.Join(n.dir, "oud-actief"))
 
+	// Na de overname mag cf-vaultx starten.
+	if out, err := n.run("wacht"); err != nil || n.exists("state/wacht-op-overname") {
+		t.Fatalf("wacht na de overname: %v\n%s", err, out)
+	}
 	// voorstart: de instellingen van de oude node, met de database van het
 	// cluster, en geen sleutel van de template.
 	if out, err := n.run("voorstart"); err != nil {

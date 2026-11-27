@@ -252,7 +252,7 @@ func planAdvice(in adviceInput) []AutoItem {
 			call: &protocol.OPNCall{Path: "firewall/filter/addRule", Body: body}})
 	}
 
-	order := map[string]int{"wan": 0, "open": 1, "shadow": 2, "dup": 3, "unused": 4}
+	order := map[string]int{"wan": 0, "open": 1, "shadow": 2, "dup": 3, "unused": 4, "vip": 5}
 	sort.SliceStable(out, func(i, j int) bool { return order[out[i].Kind] < order[out[j].Kind] })
 	return out
 }
@@ -401,6 +401,11 @@ func (s *Service) advice(ctx context.Context, c Cluster) (AdviceView, error) {
 	var ignored []string
 	_ = s.pool.QueryRow(ctx, `SELECT advice_ignored FROM opnsense_auto WHERE cluster_key = $1`, c.Key).Scan(&ignored)
 	v.Items = planAdvice(in)
+	vip, note := s.vipAdvice(ctx, *fw, in.Rules)
+	v.Items = append(v.Items, vip...)
+	if note != "" {
+		v.Notes = append(v.Notes, note)
+	}
 	for i := range v.Items {
 		v.Items[i].Ignored = slices.Contains(ignored, v.Items[i].Key)
 	}

@@ -8,11 +8,14 @@ global_defs {
 }
 
 # Zonder de bestanden (mount van SeaweedFS), of als het platform hier faalt,
-# geeft deze node het VIP af.
+# geeft deze node het VIP af. check zelf wacht hoogstens 5 s op de mount;
+# timeout 30 en fall 6 (fixlijst 26-11, punt 10): een trage of even
+# herstartende mount (±20 s) laat het VIP nog niet verhuizen.
 vrrp_script chk_platform {
     script "/usr/local/lib/clusterforge/platform-ctl.sh check"
     interval 3
-    fall 2
+    timeout 30
+    fall 6
     rise 2
 }
 

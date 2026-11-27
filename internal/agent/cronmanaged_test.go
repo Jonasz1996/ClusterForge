@@ -170,7 +170,9 @@ func TestCronRunner(t *testing.T) {
 	}
 	sp.sent(runs)
 
-	// Loopt de vorige run nog, dan slaat deze over.
+	// Loopt de vorige run nog, dan slaat deze over, zonder exitcode: zo
+	// houden de incidenten een fout van de vorige run open (anders dan een
+	// sync die oversloeg omdat deze node niet stuurt).
 	unlock, err := cronLock(filepath.Join(root, protocol.CronStateDir, "locks", jobB+".lock"))
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +180,7 @@ func TestCronRunner(t *testing.T) {
 	r.Main(ctx, jobB)
 	unlock()
 	runs = spooled(t, root)
-	if len(runs) != 1 || runs[0].Result != protocol.CronSkipped {
+	if len(runs) != 1 || runs[0].Result != protocol.CronSkipped || runs[0].Exit != nil {
 		t.Fatalf("overgeslagen: %+v", runs)
 	}
 }

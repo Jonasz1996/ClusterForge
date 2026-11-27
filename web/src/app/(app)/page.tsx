@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Tabs } from "@/components/Tabs";
 import { AttentionCard } from "@/components/AttentionCard";
+import { AutoChangesCard } from "@/components/AutoChangesCard";
 import { AuditList } from "@/components/audit/AuditList";
 import { OpenIncidentsCard } from "@/components/incidents/Incidents";
 import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
@@ -38,6 +39,7 @@ export default function OverviewPage() {
       <PageHeader title="Overzicht" description="Wat je nu moet doen, per oorzaak, met de knop die het oplost. Eronder de status van alles." />
 
       <AttentionCard />
+      {isAdmin && <AutoChangesCard />}
 
       <div>
         <Tabs

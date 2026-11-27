@@ -35,6 +35,8 @@ func TestRisk(t *testing.T) {
 			result = fmt.Sprintf(`{"metric":{"node_id":%q},"value":[1,"NaN"]},{"metric":{"node_id":%q},"value":[1,"42"]}`, a, b)
 		case strings.Contains(q, "Swap"):
 			result = ""
+		case strings.Contains(q, "node_load15"):
+			result = ""
 		case strings.Contains(q, "errs_total"):
 			result = fmt.Sprintf(`{"metric":{"node_id":%q},"value":[1,"12"]}`, b)
 		case strings.Contains(q, "deriv"):

@@ -233,6 +233,11 @@ export const navGroups: NavGroup[] = [
         keywords: "opruimen schijf logs journal docker prune database optimize vacuum analyze index automatisch",
       },
       {
+        href: "/onderhoud/resources",
+        label: "Resources",
+        keywords: "schijf vol vergroten resize swap geheugen ram cpu load herstart herstartlus container database afhankelijkheid drempels",
+      },
+      {
         href: "/back-ups",
         label: "Back-ups",
         keywords: "backup restore controle",

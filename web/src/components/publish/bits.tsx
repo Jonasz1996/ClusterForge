@@ -63,8 +63,16 @@ export function StatusBar({ ov, admin }: { ov: PublishOverview; admin: boolean }
           </Button>
         )}
       </div>
-      {ov.npm.error && <Alert>NPM: {ov.npm.error}</Alert>}
-      {ov.authentik.error && <Alert>Authentik: {ov.authentik.error}</Alert>}
+      {ov.npm.error && (
+        <Alert>
+          NPM: {ov.npm.error} (fout van {ago(ov.npm.read_at)}; ClusterForge probeert het elke 30 seconden opnieuw)
+        </Alert>
+      )}
+      {ov.authentik.error && (
+        <Alert>
+          Authentik: {ov.authentik.error} (fout van {ago(ov.authentik.read_at)}; ClusterForge probeert het elke 30 seconden opnieuw)
+        </Alert>
+      )}
       {!ov.npm.linked && (
         <Alert kind="info">
           NPM is nog niet gekoppeld. Kies de NPM-node of het NPM-cluster en een NPM-gebruiker in{" "}

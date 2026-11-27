@@ -10,6 +10,7 @@ import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfir
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import { useIsAdmin } from "@/lib/inventory";
+import { readOnlyScript } from "@/lib/readonly";
 import {
   useCommand,
   useCommands,
@@ -316,8 +317,14 @@ function RunDialog({ detail, once, onClose }: { detail?: CommandDetail; once?: O
   const [confirm, setConfirm] = useState("");
   const nodes = updates.data?.nodes ?? [];
   const clusters = [...new Map(nodes.filter((n) => n.cluster_id).map((n) => [n.cluster_id!, n])).values()];
-  const chosen: UpdateNode[] = mode === "cluster" ? nodes.filter((n) => n.cluster_id === clusterId) : nodes.filter((n) => picked.includes(n.node_id));
-  const prodSlugs = [...new Set(chosen.filter((n) => n.cluster_environment === "prod").map((n) => n.cluster_slug))];
+  // Bij een heel cluster gaan offline nodes standaard niet mee (2.3).
+  const inCluster = nodes.filter((n) => n.cluster_id === clusterId);
+  const skipped = mode === "cluster" ? inCluster.filter((n) => !n.online || !n.supported) : [];
+  const chosen: UpdateNode[] =
+    mode === "cluster" ? inCluster.filter((n) => n.online && n.supported) : nodes.filter((n) => picked.includes(n.node_id));
+  // Testlijst 3, N11: een leescommando vraagt op prod geen bevestiging.
+  const readOnly = readOnlyScript(once ? once.script : (detail?.script ?? ""));
+  const prodSlugs = readOnly ? [] : [...new Set(chosen.filter((n) => n.cluster_environment === "prod").map((n) => n.cluster_slug))];
   const prodSlug = prodSlugs.length === 1 ? prodSlugs[0] : undefined;
   const blocked =
     chosen.length === 0 || chosen.some((n) => !n.online || !n.supported) || prodSlugs.length > 1 || (!!prodSlug && !prodConfirmed(prodSlug, confirm, totp));
@@ -385,9 +392,15 @@ function RunDialog({ detail, once, onClose }: { detail?: CommandDetail; once?: O
               ))}
             </div>
           )}
+          {skipped.length > 0 && (
+            <p className="text-xs text-slate-500">Overgeslagen, niet verbonden: {skipped.map((n) => n.hostname).join(", ")}</p>
+          )}
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={cont} onChange={(e) => setCont(e.target.checked)} /> Verder op de volgende nodes als het op een node mislukt
           </label>
+          <p className="text-xs text-slate-500">
+            Een leescommando (zoals pvesm status, df of systemctl status) loopt altijd op alle nodes door, met hoogstens 2 minuten per node.
+          </p>
           {prodSlugs.length > 1 && <Alert>Kies nodes uit hoogstens één prodcluster tegelijk.</Alert>}
           {prodSlug && <ProdConfirm slug={prodSlug} value={confirm} onChange={setConfirm} />}
           {run.error && <Alert>{run.error instanceof ApiError ? run.error.message : "Starten mislukte"}</Alert>}

@@ -89,6 +89,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een herstelcode aanvragen die de beheerder in de CLI plakt
+         * @description Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server user reset <code>` zoekt het account op.
+         */
+        post: operations["accountRecoveryHelp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/reset/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen) */
+        post: operations["completeResetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/sessions": {
         parameters: {
             query?: never;
@@ -5817,6 +5854,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publish/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert) */
+        get: operations["getPublishChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/publish/adopt": {
         parameters: {
             query?: never;
@@ -5866,6 +5920,74 @@ export interface paths {
         put?: never;
         /** Een host niet langer beheren; hij blijft in NPM staan (admin) */
         post: operations["releasePublishHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet */
+        get: operations["getPublishAuto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin) */
+        put: operations["savePublishAutoRule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een mislukte automatische publicatie opnieuw laten proberen (admin) */
+        post: operations["retryPublishAuto"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/auto/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin) */
+        get: operations["getPublishAutoBackup"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6924,6 +7046,23 @@ export interface paths {
          *     vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
          */
         put: operations["setAgentUpgradeProdAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-upgrades/night-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin) */
+        put: operations["setAgentUpgradeNightOnly"];
         post?: never;
         delete?: never;
         options?: never;
@@ -8340,6 +8479,8 @@ export interface components {
             /** @description Leeg = alle clusters */
             cluster_ids: string[];
             cluster_names: string[];
+            /** @description Leeg = alle lees-routes; anders alleen de genoemde capabilities */
+            scopes: ("pentest" | "dashboard")[];
             /** Format: date-time */
             expires_at: string | null;
             /** Format: date-time */
@@ -8353,6 +8494,8 @@ export interface components {
             name: string;
             /** @description Leeg of weg = alle clusters */
             cluster_ids?: string[];
+            /** @description Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege. */
+            scopes?: ("pentest" | "dashboard")[];
             /** @description 0 of weg = verloopt nooit */
             ttl_days?: number;
         };
@@ -11178,6 +11321,32 @@ export interface components {
             created_at: string;
             /** @description De leermodus in het dashboard Kubernetes staat aan */
             kube_learning: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden */
+            must_change_password: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden */
+            must_setup_totp: boolean;
+        };
+        RecoveryRequest: {
+            username: string;
+        };
+        RecoveryHelp: {
+            /** @description Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Tot wanneer de beheerder de code kan gebruiken
+             */
+            expires_at: string;
+            commands: components["schemas"]["RecoveryCommand"][];
+            /** @description Hoe lang het tijdelijke wachtwoord geldig is */
+            ttl_minutes: number;
+        };
+        RecoveryCommand: {
+            label: string;
+            command: string;
+        };
+        ResetPasswordRequest: {
+            new_password: string;
         };
         Me: {
             user: components["schemas"]["User"];
@@ -11220,13 +11389,17 @@ export interface components {
         };
         AttentionAction: {
             /**
-             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+             * @description link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
              * @enum {string}
              */
-            kind: "link" | "restart_service";
+            kind: "link" | "restart_service" | "run_command";
             label: string;
             href?: string;
             unit?: string;
+            /** @description Naam van het eenmalige commando bij run_command */
+            title?: string;
+            /** @description Het script bij run_command */
+            script?: string;
             node_ids?: string[];
         };
         NavUsage: {
@@ -12779,7 +12952,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job";
+            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job" | "unit";
             /** Format: uuid */
             id: string;
             name: string;
@@ -14300,6 +14473,13 @@ export interface components {
             auto: boolean;
             /** @description Ook agents op prod vanzelf bijwerken */
             prod_auto: boolean;
+            /** @description Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent */
+            night_only?: boolean;
+            /**
+             * Format: date-time
+             * @description Begin van het volgende nachtvenster
+             */
+            next_window?: string;
             /** @description Een update op prod mislukte; vanzelf bijwerken op prod staat stil */
             prod_halted: boolean;
             /** @description De node waar de update op prod mislukte */
@@ -17141,6 +17321,58 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    accountRecoveryHelp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryHelp"];
+                };
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    completeResetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Ingesteld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listMySessions: {
@@ -26219,6 +26451,29 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getPublishChanges: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     adoptPublishHosts: {
         parameters: {
             query?: never;
@@ -26286,6 +26541,106 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getPublishAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    savePublishAutoRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description De regel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    retryPublishAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description De volgende beurt probeert opnieuw */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getPublishAutoBackup: {
+        parameters: {
+            query: {
+                service_key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De host als JSON */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
@@ -28047,6 +28402,35 @@ export interface operations {
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeNightOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     clearAgentUpgradeProdQueue: {

@@ -83,6 +83,43 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /auth/recovery:
+    post:
+      operationId: accountRecoveryHelp
+      summary: Een herstelcode aanvragen die de beheerder in de CLI plakt
+      description: >
+        Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of
+        niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server
+        user reset <code>` zoekt het account op.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecoveryRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryHelp" }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/reset/password:
+    post:
+      operationId: completeResetPassword
+      summary: Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        "204": { description: Ingesteld }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /auth/sessions:
     get:
       operationId: listMySessions
@@ -6230,6 +6267,19 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /publish/changes:
+    get:
+      operationId: getPublishChanges
+      summary: Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+      parameters:
+        - { name: hours, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 720 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PveObject" } }
+        "401": { $ref: "#/components/responses/Error" }
   /publish/adopt:
     post:
       operationId: adoptPublishHosts
@@ -6267,6 +6317,66 @@ paths:
       summary: Een host niet langer beheren; hij blijft in NPM staan (admin)
       responses:
         "204": { description: Losgelaten }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/auto:
+    get:
+      operationId: getPublishAuto
+      summary: Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /publish/auto/rules:
+    put:
+      operationId: savePublishAutoRule
+      summary: Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: De regel
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/auto/retry:
+    post:
+      operationId: retryPublishAuto
+      summary: Een mislukte automatische publicatie opnieuw laten proberen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "204": { description: De volgende beurt probeert opnieuw }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/auto/backup:
+    get:
+      operationId: getPublishAutoBackup
+      summary: De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+      parameters:
+        - { name: service_key, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: De host als JSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -7430,6 +7540,28 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/night-only:
+    put:
+      operationId: setAgentUpgradeNightOnly
+      summary: Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /agent-upgrades/prod-queue:
     delete:
       operationId: clearAgentUpgradeProdQueue
@@ -9109,7 +9241,7 @@ components:
         filter: { type: object, additionalProperties: true }
     ApiToken:
       type: object
-      required: [id, name, prefix, cluster_ids, cluster_names, expires_at, created_at, created_by, last_used_at, last_used_ip]
+      required: [id, name, prefix, cluster_ids, cluster_names, scopes, expires_at, created_at, created_by, last_used_at, last_used_ip]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -9121,6 +9253,10 @@ components:
         cluster_names:
           type: array
           items: { type: string }
+        scopes:
+          type: array
+          items: { type: string, enum: [pentest, dashboard] }
+          description: Leeg = alle lees-routes; anders alleen de genoemde capabilities
         expires_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
@@ -9135,6 +9271,14 @@ components:
           type: array
           items: { type: string, format: uuid }
           description: Leeg of weg = alle clusters
+        scopes:
+          type: array
+          items: { type: string, enum: [pentest, dashboard] }
+          description: >-
+            Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het
+            token alleen die capabilities lezen: 'pentest' = enkel de
+            pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de
+            dashboard-API. Least-privilege.
         ttl_days:
           type: integer
           minimum: 0
@@ -11787,7 +11931,7 @@ components:
       enum: [admin, viewer]
     User:
       type: object
-      required: [id, username, role, totp_enabled, created_at, kube_learning]
+      required: [id, username, role, totp_enabled, created_at, kube_learning, must_change_password, must_setup_totp]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
@@ -11795,6 +11939,38 @@ components:
         totp_enabled: { type: boolean }
         created_at: { type: string, format: date-time }
         kube_learning: { type: boolean, description: De leermodus in het dashboard Kubernetes staat aan }
+        must_change_password:
+          type: boolean
+          description: Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden
+        must_setup_totp:
+          type: boolean
+          description: Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden
+    RecoveryRequest:
+      type: object
+      required: [username]
+      properties:
+        username: { type: string }
+    RecoveryHelp:
+      type: object
+      required: [code, expires_at, commands, ttl_minutes]
+      properties:
+        code: { type: string, description: Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich }
+        expires_at: { type: string, format: date-time, description: Tot wanneer de beheerder de code kan gebruiken }
+        commands:
+          type: array
+          items: { $ref: "#/components/schemas/RecoveryCommand" }
+        ttl_minutes: { type: integer, description: Hoe lang het tijdelijke wachtwoord geldig is }
+    RecoveryCommand:
+      type: object
+      required: [label, command]
+      properties:
+        label: { type: string }
+        command: { type: string }
+    ResetPasswordRequest:
+      type: object
+      required: [new_password]
+      properties:
+        new_password: { type: string }
     Me:
       type: object
       required: [user, csrf_token, session_expires_at]
@@ -11844,11 +12020,13 @@ components:
       properties:
         kind:
           type: string
-          enum: [link, restart_service]
-          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando"
+          enum: [link, restart_service, run_command]
+          description: "link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids"
         label: { type: string }
         href: { type: string }
         unit: { type: string }
+        title: { type: string, description: Naam van het eenmalige commando bij run_command }
+        script: { type: string, description: Het script bij run_command }
         node_ids: { type: array, items: { type: string, format: uuid } }
     NavUsage:
       type: object
@@ -13376,7 +13554,7 @@ components:
       type: object
       required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present, app]
       properties:
-        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job] }
+        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job, unit] }
         id: { type: string, format: uuid }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -15087,6 +15265,8 @@ components:
         archs: { type: array, items: { type: string }, description: "Architecturen waarvoor de server een agent heeft" }
         auto: { type: boolean, description: Agents vanzelf bijwerken staat aan }
         prod_auto: { type: boolean, description: Ook agents op prod vanzelf bijwerken, één prodcluster tegelijk }
+        night_only: { type: boolean, description: "Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent" }
+        next_window: { type: string, format: date-time, description: Begin van het volgende nachtvenster }
         prod_halted: { type: boolean, description: Een update op prod mislukte; vanzelf bijwerken op prod staat stil }
         halted_by: { type: string, description: De node waar de update op prod mislukte }
         prod_queue:

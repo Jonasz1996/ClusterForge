@@ -1,0 +1,254 @@
+#!/bin/bash
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# Postfix als interne relay achter het VIP {{ .params.vip }}. Postfix draait
+# op elke node en luistert op 127.0.0.1 en op het VIP (ip_nonlocal_bind),
+# zodat de node die het VIP krijgt meteen mail aanneemt. Elke node stuurt
+# zijn eigen wachtrij zelf door naar de smarthost.
+#
+#   postfix-ctl.sh configure | configured   kaarten en master.cf zetten / staan ze goed?
+#   postfix-ctl.sh check                    keepalived: neemt Postfix hier mail aan?
+#   postfix-ctl.sh relaytest                geen open relay (faalt als het wel zo is)
+#   postfix-ctl.sh relaytest-recent         slaagde relaytest in het laatste uur?
+#   postfix-ctl.sh queue                    aantal mails in de wachtrij (Zabbix)
+#   postfix-ctl.sh status-json              één regel JSON voor ClusterForge
+#   postfix-ctl.sh testmail-if-vip <aan>    testmail via het VIP, alleen op de VIP-node
+#   postfix-ctl.sh zabbix | zabbix-ok       UserParameter cf.postfix.queue zetten
+set -u
+CONF=${CF_PF_CONF:-/etc/cf-postfix/relay.conf}
+STATE=${CF_PF_STATE:-/var/lib/cf-postfix}
+PF=${CF_PF_DIR:-/etc/postfix}
+# shellcheck disable=SC1090
+. "$CONF"
+HASH=$STATE/configured
+RELAYOK=$STATE/relaytest
+ZBX=/etc/zabbix/zabbix_agent2.d
+ZBXCONF=$ZBX/cf-postfix.conf
+ZBXLINE='UserParameter=cf.postfix.queue,/usr/local/lib/clusterforge/postfix-ctl.sh queue'
+
+say() { echo "== $*"; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+
+# De gewenste inhoud van de kaarten, op stdout, voor de hash.
+want_sasl() { [ -n "$RELAY_USER" ] && printf '[%s]:%s %s:%s\n' "$RELAYHOST" "$RELAY_PORT" "$RELAY_USER" "$RELAY_PASSWORD"; }
+want_canonical() { printf '/.+/ %s\n' "$SENDER"; }
+want_headers() {
+  # Zonder naam herschrijft sender_canonical_maps het adres in From al en
+  # blijft de naam van de app staan.
+  if [ -n "$SENDER_NAME" ]; then
+    printf '/^From:.*/ REPLACE From: %s <%s>\n' "$SENDER_NAME" "$SENDER"
+  else
+    echo "# geen naam: alleen het adres (sender_canonical)"
+  fi
+}
+want_hash() {
+  { want_sasl; want_canonical; want_headers; echo "$VIP"; sha256sum "$PF/main.cf" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+
+master_ok() {
+  postconf -M "127.0.0.1:smtp/inet" >/dev/null 2>&1 && [ -n "$(postconf -M "127.0.0.1:smtp/inet" 2>/dev/null)" ] &&
+    [ -n "$(postconf -M "$VIP:smtp/inet" 2>/dev/null)" ] && [ -z "$(postconf -M "smtp/inet" 2>/dev/null)" ]
+}
+
+configured() {
+  [ "$(cat "$HASH" 2>/dev/null)" = "$(want_hash)" ] && master_ok
+}
+
+configure() {
+  mkdir -p "$STATE" && chmod 700 "$STATE"
+  sysctl -q -w net.ipv4.ip_nonlocal_bind=1 >/dev/null 2>&1 ||
+    echo "WAARSCHUWING: ip_nonlocal_bind kon niet aan; Postfix luistert op het VIP pas na een herstart als deze node het VIP heeft." >&2
+  umask 077
+  if [ -n "$RELAY_USER" ]; then
+    want_sasl >"$PF/sasl_passwd"
+    postmap "hash:$PF/sasl_passwd" || fail "postmap sasl_passwd"
+    chmod 600 "$PF/sasl_passwd" "$PF/sasl_passwd.db"
+  else
+    rm -f "$PF/sasl_passwd" "$PF/sasl_passwd.db"
+  fi
+  umask 022
+  want_canonical >"$PF/sender_canonical"
+  want_headers >"$PF/header_checks"
+  # Niet op elk adres luisteren: alleen 127.0.0.1 en het VIP.
+  postconf -MX "smtp/inet" 2>/dev/null
+  postconf -M "127.0.0.1:smtp/inet=127.0.0.1:smtp inet n - n - - smtpd"
+  postconf -M "$VIP:smtp/inet=$VIP:smtp inet n - n - - smtpd"
+  # Een ander VIP van vroeger weg.
+  postconf -M 2>/dev/null | awk '$2 == "inet" && $1 ~ /:smtp$/ {print $1}' | while read -r svc; do
+    case "$svc" in "127.0.0.1:smtp" | "$VIP:smtp") ;; *) postconf -MX "$svc/inet" ;; esac
+  done
+  postfix check || fail "postfix check"
+  if systemctl is-active --quiet postfix; then
+    # Andere luisteradressen vragen een herstart, geen reload.
+    systemctl restart postfix || fail "Postfix herstarten"
+  else
+    systemctl start postfix || fail "Postfix starten"
+  fi
+  want_hash >"$HASH"
+  say "Postfix ingesteld: relay naar [$RELAYHOST]:$RELAY_PORT, afzender $SENDER, relayen mag vanaf $MYNETWORKS"
+}
+
+listening() { ss -Hltn "sport = :25" 2>/dev/null | grep -q .; }
+
+check() {
+  systemctl is-active --quiet postfix || exit 1
+  listening || exit 1
+  exit 0
+}
+
+# smtp <adres> <XCLIENT-adres of leeg> <regels...>: één SMTP-gesprek, geeft
+# per regel de code van het antwoord. Voor XCLIENT moet de server het
+# toelaten (smtpd_authorized_xclient_hosts = 127.0.0.1).
+smtp_dialog() {
+  local host=$1 xclient=$2
+  shift 2
+  exec 3<>"/dev/tcp/$host/25" || return 1
+  local line
+  read_reply() {
+    local code=""
+    while IFS= read -r -t 20 line <&3; do
+      line=${line%$'\r'}
+      code=${line:0:3}
+      [ "${line:3:1}" = "-" ] || break
+    done
+    echo "$code ${line:4}"
+  }
+  read_reply >/dev/null
+  printf 'EHLO cf-relaytest\r\n' >&3
+  read_reply >/dev/null
+  if [ -n "$xclient" ]; then
+    printf 'XCLIENT ADDR=%s NAME=[UNAVAILABLE]\r\n' "$xclient" >&3
+    read_reply
+    printf 'EHLO cf-relaytest\r\n' >&3
+    read_reply >/dev/null
+  fi
+  for cmd in "$@"; do
+    printf '%s\r\n' "$cmd" >&3
+    read_reply
+  done
+  printf 'QUIT\r\n' >&3
+  exec 3>&-
+}
+
+relaytest() {
+  mkdir -p "$STATE"
+  # Net na een herstart van Postfix: even wachten tot poort 25 luistert.
+  for _ in $(seq 1 20); do listening && break; sleep 1; done
+  # Van buiten (203.0.113.77, een documentatie-adres): de RCPT naar een
+  # extern domein moet geweigerd worden.
+  out=$(smtp_dialog 127.0.0.1 203.0.113.77 'MAIL FROM:<relaytest@example.net>' 'RCPT TO:<relaytest@example.com>' 'RSET')
+  xcl=$(echo "$out" | sed -n 1p)
+  rcpt=$(echo "$out" | sed -n 3p)
+  [ -n "$out" ] || { rm -f "$RELAYOK"; fail "geen verbinding met Postfix op 127.0.0.1:25"; }
+  case "$xcl" in
+    220*) ;;
+    *) rm -f "$RELAYOK"; fail "XCLIENT niet toegelaten ($xcl); kan de relay niet testen" ;;
+  esac
+  case "$rcpt" in
+    5*) say "Geen open relay: een adres van buiten krijgt \"$rcpt\"" ;;
+    *) rm -f "$RELAYOK"; fail "OPEN RELAY: een adres van buiten mag relayen ($rcpt). Kijk mynetworks na." ;;
+  esac
+  # Zonder RSET-antwoord zou een tweede lus niet starten; geen DATA, er
+  # vertrekt dus nooit een mail.
+  date +%s >"$RELAYOK"
+}
+
+relaytest_recent() {
+  t=$(cat "$RELAYOK" 2>/dev/null) || return 1
+  [ -n "$t" ] && [ $(($(date +%s) - t)) -lt 3600 ]
+}
+
+queue() {
+  postqueue -j 2>/dev/null | grep -c . || true
+}
+
+status_json() {
+  local q def active=false vip=false relay=closed out
+  q=$(postqueue -j 2>/dev/null | grep -c .)
+  def=$(postqueue -j 2>/dev/null | grep -c '"queue_name": *"deferred"')
+  systemctl is-active --quiet postfix && active=true
+  has_vip && vip=true
+  if ! out=$(relaytest 2>&1); then
+    case "$out" in *"OPEN RELAY"*) relay=open ;; *) relay=error ;; esac
+  fi
+  printf 'CFPF {"queue":%d,"deferred":%d,"active":%s,"vip":%s,"relay":"%s","queue_warn":%d}\n' \
+    "${q:-0}" "${def:-0}" "$active" "$vip" "$relay" "${QUEUE_WARN:-20}"
+}
+
+testmail() {
+  to=${1:-$TEST_TO}
+  [ -n "$to" ] || fail "geen ontvanger: geef een adres of vul 'Ontvanger van de testmail' in bij het cluster"
+  echo "$to" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' || fail "ongeldig adres: $to"
+  if ! has_vip; then
+    say "Deze node heeft het VIP niet; de testmail gaat via de VIP-node."
+    exit 0
+  fi
+  id="cf-test-$(date +%s)-$$@$(hostname)"
+  say "Testmail naar $to via het VIP $VIP"
+  exec 3<>"/dev/tcp/$VIP/25" || fail "geen verbinding met $VIP:25"
+  r() { local l; while IFS= read -r -t 30 l <&3; do l=${l%$'\r'}; [ "${l:3:1}" = "-" ] || { echo "$l"; return; }; done; echo "000 geen antwoord"; }
+  w() { printf '%s\r\n' "$1" >&3; }
+  r >/dev/null
+  w "EHLO $(hostname)"; r >/dev/null
+  w "MAIL FROM:<$SENDER>"; m=$(r)
+  w "RCPT TO:<$to>"; rc=$(r)
+  case "$rc" in 25*) ;; *) w QUIT; fail "ontvanger geweigerd: $rc" ;; esac
+  w "DATA"; r >/dev/null
+  w "From: ${SENDER_NAME:-ClusterForge} <$SENDER>"
+  w "To: <$to>"
+  w "Subject: Testmail van de Postfix-relay ({{ .cluster.slug }})"
+  w "Message-ID: <$id>"
+  w "Date: $(LC_ALL=C date -R)"
+  w ""
+  w "Deze mail ging via het VIP $VIP en node $(hostname) naar [$RELAYHOST]:$RELAY_PORT."
+  w "."
+  d=$(r)
+  w QUIT
+  exec 3>&-
+  echo "MAIL FROM: $m"
+  echo "DATA: $d"
+  case "$d" in 250*) ;; *) fail "niet aangenomen: $d" ;; esac
+  qid=$(echo "$d" | sed -n 's/.*queued as \([A-Za-z0-9]*\).*/\1/p')
+  [ -n "$qid" ] || { say "Aangenomen; het wachtrij-id staat niet in het antwoord."; exit 0; }
+  say "In de wachtrij als $qid; wachten op de smarthost (hoogstens 60 s)"
+  for _ in $(seq 1 30); do
+    sleep 2
+    l=$( { journalctl -q --no-pager -t postfix/smtp --since "-5min" 2>/dev/null; cat /var/log/mail.log 2>/dev/null; } | grep "$qid:.*status=" | tail -n 1)
+    case "$l" in
+      *status=sent*) echo "$l"; say "Afgeleverd bij de smarthost."; exit 0 ;;
+      *status=bounced*) echo "$l"; fail "de smarthost weigerde de mail" ;;
+      *status=deferred*) echo "$l"; fail "uitgesteld: de smarthost is niet bereikbaar of weigert de login; de mail blijft in de wachtrij" ;;
+    esac
+  done
+  fail "na 60 s nog geen antwoord van de smarthost; kijk 'postqueue -p' op $(hostname)"
+}
+
+zabbix_ok() {
+  [ -d "$ZBX" ] || return 0
+  [ "$(cat "$ZBXCONF" 2>/dev/null)" = "$ZBXLINE" ]
+}
+
+zabbix() {
+  if [ ! -d "$ZBX" ]; then
+    say "Geen Zabbix-agent 2 op deze node; overgeslagen."
+    return 0
+  fi
+  echo "$ZBXLINE" >"$ZBXCONF"
+  systemctl restart zabbix-agent2 2>/dev/null || true
+  say "Zabbix-item cf.postfix.queue staat klaar"
+}
+
+case "${1:-}" in
+  configure) configure ;;
+  configured) configured ;;
+  check) check ;;
+  relaytest) relaytest ;;
+  relaytest-recent) relaytest_recent ;;
+  queue) queue ;;
+  status-json) status_json ;;
+  testmail-if-vip) testmail "${2:-}" ;;
+  zabbix) zabbix ;;
+  zabbix-ok) zabbix_ok ;;
+  *) echo "gebruik: $0 configure|configured|check|relaytest|relaytest-recent|queue|status-json|testmail-if-vip <aan>|zabbix|zabbix-ok" >&2; exit 2 ;;
+esac

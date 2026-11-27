@@ -17,7 +17,9 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/apps"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
+	"github.com/Jonasz1996/clusterforge/internal/firewall"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/resources"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 )
 
@@ -283,6 +285,26 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Testlijst 2, 1.4: ufw laat VRRP van de andere keepalived-nodes niet
+	// binnen. Per node een regel met de oplossing als eenmalig commando.
+	if s.firewall != nil {
+		if fws, err := s.firewall.Nodes(ctx); err == nil {
+			for _, n := range fws {
+				if n.Plan == nil || len(n.Plan.VRRPMissing) == 0 {
+					continue
+				}
+				it := gen.AttentionItem{Id: "firewall-vrrp-" + n.NodeID.String(), Tone: red, Count: 1, Href: "/firewall?tab=nodes",
+					Title:  "ufw blokkeert VRRP op " + n.Hostname + ": split-brain-gevaar",
+					Detail: "geen VRRP (protocol 112) van " + strings.Join(n.Plan.VRRPMissing, ", "),
+					Help: ptr("keepalived op " + n.Hostname + " hoort de andere node niet en neemt het VIP er ook bij: twee nodes met hetzelfde IP. " +
+						"VRRP toelaten zet per andere node een ufw-regel (ufw allow proto vrrp from <ip>) en verandert verder niets."),
+					Actions: &[]gen.AttentionAction{{Kind: gen.RunCommand, Label: "VRRP toelaten", Title: ptr("VRRP toelaten op " + n.Hostname),
+						Script: ptr(firewall.VRRPScript(n.Plan.VRRPMissing)), NodeIds: &[]uuid.UUID{n.NodeID}}}}
+				items = append(items, it)
+			}
+		}
+	}
+
 	// OPNsense (fase 34): problemen per firewallcluster, onderhoudsmodus en
 	// oude back-ups.
 	if s.opnsense != nil {
@@ -321,6 +343,30 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Testlijst 3, N2: clusters waar alle sites, de aanmelding of
+	// ClusterForge zelf op draaien, horen op Prod; anders zijn "alleen
+	// Lab/Test" en "ook productie" zinloos.
+	if ids, names, err := s.shouldBeProd(ctx); err == nil && len(ids) > 0 {
+		href := "/clusters"
+		if len(ids) == 1 {
+			href = "/clusters/detail?id=" + ids[0].String()
+		}
+		add("cluster-should-be-prod", amber, "Belangrijk cluster staat niet op Prod (NPM, Authentik of ClusterForge zelf)",
+			names+": zet de omgeving op Prod bij het cluster (Bewerken → Omgeving)", href, len(ids))
+	}
+
+	// Vervangen installaties (fase 48): na de termijn zonder problemen
+	// voorstellen om de oude op te ruimen.
+	if s.replace != nil {
+		if ns, err := s.replace.Notices(ctx); err == nil {
+			for _, n := range ns {
+				add(n.ID, amber, n.Title, n.Detail, n.Href, n.Count)
+			}
+		} else {
+			s.log.Warn("Vervangen-aandacht", "err", err)
+		}
+	}
+
 	// Schijfbewaking (fase 41): nodes boven de drempels.
 	if s.disk != nil {
 		if full, err := s.disk.Full(ctx); err == nil {
@@ -346,6 +392,39 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		} else {
 			s.log.Warn("schijfbewaking", "err", err)
 		}
+	}
+
+	// Testlijst 3, N27: voorstellen voor resources met één klik.
+	if s.resources != nil {
+		var crit, warn []string
+		for _, pr := range s.resources.Peek() {
+			switch {
+			case pr.Kind == resources.KindDisk:
+				// Volle schijven staan al hierboven (disk-crit/disk-warn).
+			case pr.Level == "crit":
+				crit = append(crit, pr.Title)
+			case pr.Level == "warn":
+				warn = append(warn, pr.Title)
+			}
+		}
+		add("resources-crit", red, plural(len(crit), "probleem met resources", "problemen met resources")+" (voorstel klaar)", names(crit), "/onderhoud/resources", len(crit))
+		add("resources-warn", amber, plural(len(warn), "voorstel voor resources", "voorstellen voor resources")+" (swap, geheugen, load, containers)", names(warn), "/onderhoud/resources", len(warn))
+	}
+
+	if s.mailrelay != nil {
+		var crit, warn []string
+		critHref, warnHref := "/clusters", "/clusters"
+		for _, n := range s.mailrelay.Notices() {
+			if n.Level == "crit" {
+				crit = append(crit, n.Text)
+				critHref = n.Href
+			} else {
+				warn = append(warn, n.Text)
+				warnHref = n.Href
+			}
+		}
+		add("mailrelay-crit", red, plural(len(crit), "probleem met de Postfix-relay", "problemen met de Postfix-relay"), names(crit), critHref, len(crit))
+		add("mailrelay-queue", amber, plural(len(warn), "melding over de Postfix-wachtrij", "meldingen over de Postfix-wachtrij"), names(warn), warnHref, len(warn))
 	}
 
 	if s.needs2FA(ctx, p) {
@@ -406,4 +485,43 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// shouldBeProd geeft de clusters die niet op prod staan maar NPM, Authentik
+// of ClusterForge zelf draaien.
+func (s *Server) shouldBeProd(ctx context.Context) ([]uuid.UUID, string, error) {
+	var extra []uuid.UUID
+	if s.publish != nil {
+		if st, err := s.publish.Settings(ctx); err == nil {
+			for _, id := range []*uuid.UUID{st.NPMClusterID, st.AuthentikClusterID} {
+				if id != nil {
+					extra = append(extra, *id)
+				}
+			}
+		}
+	}
+	self := ""
+	if s.selfHost != nil {
+		self = s.selfHost.Cluster
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, name FROM clusters
+		WHERE environment::text <> 'prod'
+		AND (coalesce(template_name, '') IN ('nginx-proxy-manager', 'authentik', 'clusterforge') OR id = ANY($1) OR (slug = $2 AND $2 <> ''))
+		ORDER BY name`, extra, self)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	var ns []string
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, "", err
+		}
+		ids = append(ids, id)
+		ns = append(ns, name)
+	}
+	return ids, names(ns), rows.Err()
 }

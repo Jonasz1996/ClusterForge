@@ -31,6 +31,10 @@ type Param struct {
 	// Immutable zegt dat de waarde na de uitrol vastligt, zoals het VIP:
 	// GitOps weigert een andere waarde voor een bestaand cluster.
 	Immutable bool `yaml:"immutable"`
+	// Rebuild: een andere waarde past de hele template opnieuw toe op elke
+	// node, rollend (testlijst 3, N8: de versie van de homepage schreef
+	// alleen homepage-ctl.sh en bouwde niets).
+	Rebuild bool `yaml:"rebuild"`
 
 	re *regexp.Regexp
 }

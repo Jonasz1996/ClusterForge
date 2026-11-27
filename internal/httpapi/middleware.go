@@ -16,6 +16,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 const (
@@ -36,6 +37,7 @@ func principalFrom(ctx context.Context) (auth.Principal, bool) {
 var publicRoutes = map[string]bool{
 	"GET /api/v1/health":         true,
 	"POST /api/v1/auth/login":    true,
+	"POST /api/v1/auth/recovery": true,
 	"POST /api/v1/agents/enroll": true,
 	"POST /api/v1/agents/claim":  true,
 }
@@ -72,6 +74,10 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 				return
 			}
 		}
+		if auth.SetupPending(p.User) && !setupRoute(p.User, r.Method+" "+r.URL.Path) {
+			writeError(w, http.StatusForbidden, "account_setup_required", auth.ErrSetupRequired.Error())
+			return
+		}
 		if p.Refreshed {
 			s.setSessionCookie(w, c.Value, p.ExpiresAt)
 		}
@@ -79,6 +85,21 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 		ctx := events.WithRequest(context.WithValue(r.Context(), principalKey, p), clientIP(r), p.SessionID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// setupRoute zegt welke calls mogen zolang een gebruiker na een reset nog
+// geen nieuw wachtwoord of geen nieuwe TOTP heeft: eerst het wachtwoord,
+// dan de TOTP.
+func setupRoute(u store.User, route string) bool {
+	switch route {
+	case "GET /api/v1/auth/me", "POST /api/v1/auth/logout":
+		return true
+	case "POST /api/v1/auth/reset/password":
+		return u.MustChangePassword
+	case "POST /api/v1/auth/totp/setup", "POST /api/v1/auth/totp/enable":
+		return !u.MustChangePassword
+	}
+	return false
 }
 
 func isSafeMethod(m string) bool {

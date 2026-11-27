@@ -94,6 +94,18 @@ func (s *Server) CreateApiToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation", "geldigheid moet tussen 0 (nooit verlopen) en 3650 dagen liggen")
 		return
 	}
+	// Scopes (least-privilege): leeg = alle lees-routes; anders enkel de
+	// genoemde capabilities. Onbekende waarden weigeren; dubbele overslaan.
+	scopes := make([]string, 0, len(deref(req.Scopes)))
+	for _, sc := range deref(req.Scopes) {
+		if !sc.Valid() {
+			writeError(w, http.StatusBadRequest, "validation", "onbekende scope: "+string(sc))
+			return
+		}
+		if !slices.Contains(scopes, string(sc)) {
+			scopes = append(scopes, string(sc))
+		}
+	}
 	names, err := s.clusterNames(r.Context())
 	if err != nil {
 		s.internalError(w, r, err)
@@ -125,7 +137,7 @@ func (s *Server) CreateApiToken(w http.ResponseWriter, r *http.Request) {
 		var err error
 		t, err = q.CreateAPIToken(r.Context(), store.CreateAPITokenParams{
 			Name: name, TokenHash: hashAPIToken(token), Prefix: token[:len(apiTokenPrefix)+6],
-			ClusterIds: clusterIDs, ExpiresAt: expires, CreatedBy: &p.User.ID,
+			ClusterIds: clusterIDs, Scopes: scopes, ExpiresAt: expires, CreatedBy: &p.User.ID,
 		})
 		if err != nil {
 			return err
@@ -133,7 +145,7 @@ func (s *Server) CreateApiToken(w http.ResponseWriter, r *http.Request) {
 		return s.ev.Write(r.Context(), q, events.Event{
 			Actor: events.User(p.User.ID), SubjectType: "api_token", SubjectID: t.ID.String(),
 			Action:  "api_token.created",
-			Payload: map[string]any{"name": t.Name, "prefix": t.Prefix, "cluster_ids": t.ClusterIds, "expires_at": t.ExpiresAt},
+			Payload: map[string]any{"name": t.Name, "prefix": t.Prefix, "cluster_ids": t.ClusterIds, "scopes": t.Scopes, "expires_at": t.ExpiresAt},
 		})
 	})
 	if err != nil {
@@ -194,8 +206,13 @@ func (s *Server) clusterNames(ctx context.Context) (map[uuid.UUID]string, error)
 }
 
 func toAPIToken(t store.ApiToken, by string, names map[uuid.UUID]string) gen.ApiToken {
+	scopes := make([]gen.ApiTokenScopes, 0, len(t.Scopes))
+	for _, sc := range t.Scopes {
+		scopes = append(scopes, gen.ApiTokenScopes(sc))
+	}
 	out := gen.ApiToken{
 		Id: t.ID, Name: t.Name, Prefix: t.Prefix, ClusterIds: nonNil(t.ClusterIds), ClusterNames: []string{},
+		Scopes:    scopes,
 		ExpiresAt: nullableOf(t.ExpiresAt), CreatedAt: t.CreatedAt, CreatedBy: by,
 		LastUsedAt: nullableOf(t.LastUsedAt), LastUsedIp: t.LastUsedIp,
 	}
@@ -217,6 +234,9 @@ type dashboardTokenKey struct{}
 // er is niets om te wijzigen.
 func (s *Server) dashboardRoutes(r chi.Router) {
 	r.Use(s.requireAPIToken)
+	// Een gescoped token mag de dashboard-API alleen met de scope 'dashboard';
+	// een ongescoped token mag alles (backward compatible).
+	r.Use(s.requireScope("dashboard", true))
 	r.Get("/", s.dashboardOverview)
 	r.Get("/clusters", s.dashboardClusters)
 	r.Get("/clusters/{cluster}", s.dashboardCluster)
@@ -280,6 +300,30 @@ func (s *Server) requireAPIToken(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), dashboardTokenKey{}, t)))
 	})
+}
+
+// requireScope dwingt, ná requireAPIToken, de least-privilege-scopes van een
+// token af. Een token zonder scopes (leeg) mag alle lees-routes — dat houdt
+// bestaande dashboard-tokens werkend. Een token mét scopes mag alleen de
+// routes waarvan de capability in de lijst staat.
+//
+// allowUnscoped bepaalt wat een token zónder scopes op DEZE route mag:
+//   - true  (dashboard): leeg = toegestaan (backward compatible).
+//   - false (pentest):   leeg = geweigerd; alleen een token dat 'pentest'
+//     expliciet in zijn scopes heeft, mag de pentest-inventaris lezen. Zo kan
+//     geen enkel ongescoped of dashboard-token de inventaris lezen.
+func (s *Server) requireScope(scope string, allowUnscoped bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t, _ := r.Context().Value(dashboardTokenKey{}).(store.ApiToken)
+			ok := slices.Contains(t.Scopes, scope) || (len(t.Scopes) == 0 && allowUnscoped)
+			if !ok {
+				writeError(w, http.StatusForbidden, "forbidden", "token mist de scope '"+scope+"'")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *Server) dashboardScoped(w http.ResponseWriter, r *http.Request) (gen.DashboardOverview, bool) {

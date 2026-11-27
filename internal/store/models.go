@@ -407,6 +407,7 @@ type AgentUpgradeSetting struct {
 	UpdatedBy *uuid.UUID
 	UpdatedAt time.Time
 	ProdAuto  bool
+	NightOnly bool
 }
 
 type ApiToken struct {
@@ -420,6 +421,7 @@ type ApiToken struct {
 	CreatedBy  *uuid.UUID
 	LastUsedAt *time.Time
 	LastUsedIp string
+	Scopes     []string
 }
 
 type AssistantConversation struct {
@@ -1281,6 +1283,15 @@ type HomeAppDoubt struct {
 	DecidedAt  time.Time
 }
 
+type ImportFinding struct {
+	RunID      uuid.UUID
+	NodeID     *uuid.UUID
+	TokenName  string
+	Findings   []byte
+	ScanRunID  *uuid.UUID
+	ReceivedAt time.Time
+}
+
 type Incident struct {
 	ID               uuid.UUID
 	Number           int32
@@ -1574,6 +1585,17 @@ type NodeLinkProposal struct {
 	DecidedBy    *uuid.UUID
 }
 
+type NodePentest struct {
+	NodeID          uuid.UUID
+	NodeType        string
+	ClonedFrom      string
+	PentestAllowed  bool
+	PentestWindow   string
+	RollbackAllowed bool
+	UpdatedBy       *uuid.UUID
+	UpdatedAt       time.Time
+}
+
 type NodeStatus struct {
 	NodeID        uuid.UUID
 	HeartbeatAt   time.Time
@@ -1660,6 +1682,16 @@ type OpnsenseFlowRead struct {
 	Skipped int64
 	Dropped int64
 	Error   string
+}
+
+type PasswordResetRequest struct {
+	ID        uuid.UUID
+	CodeHash  []byte
+	Username  string
+	Ip        string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
 }
 
 type ProxmoxBackup struct {
@@ -1768,6 +1800,51 @@ type PublishAuthEvent struct {
 	Country  string
 	City     string
 	Reason   string
+}
+
+type PublishAutoItem struct {
+	ServiceKey  string
+	Domain      string
+	ClusterID   *uuid.UUID
+	ClusterName string
+	State       string
+	JobID       *uuid.UUID
+	NpmHostID   *int32
+	Cleanup     bool
+	Tries       int32
+	Error       string
+	Backup      []byte
+	TriedAt     *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type PublishAutoRule struct {
+	ID         uuid.UUID
+	ClusterID  *uuid.UUID
+	ServiceKey *string
+	Enabled    bool
+	Cleanup    bool
+	UpdatedBy  *uuid.UUID
+	UpdatedAt  time.Time
+}
+
+type PublishChange struct {
+	ID          uuid.UUID
+	JobID       *uuid.UUID
+	NpmHostID   int32
+	Domain      string
+	Action      string
+	Created     bool
+	Deleted     bool
+	Old         []byte
+	New         []byte
+	TitleBefore string
+	TitleAfter  string
+	ChangedBy   *uuid.UUID
+	ChangedAt   time.Time
+	RevertedAt  *time.Time
+	RevertedBy  *uuid.UUID
 }
 
 type PublishConnection struct {
@@ -1887,6 +1964,30 @@ type RecoveryReport struct {
 	Month       pgtype.Date
 	Report      []byte
 	GeneratedAt time.Time
+}
+
+type Replacement struct {
+	ID          uuid.UUID
+	ClusterID   uuid.UUID
+	OldNodeID   *uuid.UUID
+	OldHostname string
+	OldAddress  netip.Addr
+	Vip         *netip.Addr
+	Reason      string
+	KeepDays    int32
+	State       string
+	JobID       *uuid.UUID
+	CleanupJob  *uuid.UUID
+	Note        string
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ResourcesSetting struct {
+	ID         bool
+	Thresholds []byte
+	UpdatedAt  time.Time
 }
 
 type RiskAcceptance struct {
@@ -2246,17 +2347,21 @@ type UpkeepRun struct {
 }
 
 type User struct {
-	ID            uuid.UUID
-	Username      string
-	PasswordHash  string
-	Role          UserRole
-	TotpSecret    *string
-	TotpEnabledAt *time.Time
-	TotpLastStep  *int64
-	DisabledAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	KubeLearning  bool
+	ID                    uuid.UUID
+	Username              string
+	PasswordHash          string
+	Role                  UserRole
+	TotpSecret            *string
+	TotpEnabledAt         *time.Time
+	TotpLastStep          *int64
+	DisabledAt            *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	KubeLearning          bool
+	TempPasswordExpiresAt *time.Time
+	TempPasswordUsedAt    *time.Time
+	MustChangePassword    bool
+	MustSetupTotp         bool
 }
 
 type Vip struct {

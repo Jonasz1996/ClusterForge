@@ -1,18 +1,25 @@
 # Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
 # Het platform (app, office en media). Niet enabled: keepalived start het op
 # de node met het VIP (platform-ctl.sh master of check), en pas na de overstap
-# (platform-ctl.sh overstap echt zet de markering op de gedeelde datamap).
+# (platform-ctl.sh overstap echt zet de markering op de gedeelde datamap;
+# platform-ctl.sh check zet er een kopie van op elke node zelf, zodat
+# systemd hier niet op FUSE kijkt).
 [Unit]
 Description=Platform van {{ .cluster.slug }} (actief op de node met het VIP)
-ConditionPathExists=/srv/platform-data/.cf-platform-active
+ConditionPathExists=/var/lib/cf-platform/actief
 Requires=docker.service cf-platform-mount.service
-After=docker.service cf-platform-mount.service
+# Stopt keepalived (een update of onderhoud zet het uit), dan stopt het
+# platform ook: anders draait het verder zonder VIP, naast de nieuwe node.
+BindsTo=keepalived.service
+After=docker.service cf-platform-mount.service keepalived.service
 StartLimitIntervalSec=600
 StartLimitBurst=5
 
 [Service]
 ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh up
 ExecStop=/usr/local/lib/clusterforge/platform-ctl.sh down
+# platform-ctl.sh up stopt met 3 zonder het VIP: niet gestart, geen fout.
+SuccessExitStatus=3
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=900

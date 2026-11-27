@@ -135,6 +135,42 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for ApiTokenScopes.
+const (
+	ApiTokenScopesDashboard ApiTokenScopes = "dashboard"
+	ApiTokenScopesPentest   ApiTokenScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenScopes enum.
+func (e ApiTokenScopes) Valid() bool {
+	switch e {
+	case ApiTokenScopesDashboard:
+		return true
+	case ApiTokenScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiTokenInputScopes.
+const (
+	ApiTokenInputScopesDashboard ApiTokenInputScopes = "dashboard"
+	ApiTokenInputScopesPentest   ApiTokenInputScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenInputScopes enum.
+func (e ApiTokenInputScopes) Valid() bool {
+	switch e {
+	case ApiTokenInputScopesDashboard:
+		return true
+	case ApiTokenInputScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AppIssueTone.
 const (
 	AppIssueToneAmber AppIssueTone = "amber"
@@ -202,6 +238,7 @@ func (e AssistantConversationInputSubjectType) Valid() bool {
 const (
 	Link           AttentionActionKind = "link"
 	RestartService AttentionActionKind = "restart_service"
+	RunCommand     AttentionActionKind = "run_command"
 )
 
 // Valid indicates whether the value is a known member of the AttentionActionKind enum.
@@ -210,6 +247,8 @@ func (e AttentionActionKind) Valid() bool {
 	case Link:
 		return true
 	case RestartService:
+		return true
+	case RunCommand:
 		return true
 	default:
 		return false
@@ -2331,6 +2370,7 @@ const (
 	IncidentSubjectTypeNode    IncidentSubjectType = "node"
 	IncidentSubjectTypeService IncidentSubjectType = "service"
 	IncidentSubjectTypeTestRun IncidentSubjectType = "test_run"
+	IncidentSubjectTypeUnit    IncidentSubjectType = "unit"
 )
 
 // Valid indicates whether the value is a known member of the IncidentSubjectType enum.
@@ -2349,6 +2389,8 @@ func (e IncidentSubjectType) Valid() bool {
 	case IncidentSubjectTypeService:
 		return true
 	case IncidentSubjectTypeTestRun:
+		return true
+	case IncidentSubjectTypeUnit:
 		return true
 	default:
 		return false
@@ -4814,6 +4856,12 @@ type AgentUpgradeOverview struct {
 	// HaltedBy De node waar de update op prod mislukte
 	HaltedBy string `json:"halted_by"`
 
+	// NextWindow Begin van het volgende nachtvenster
+	NextWindow *time.Time `json:"next_window,omitempty"`
+
+	// NightOnly Vanzelf bijwerken alleen 's nachts (02:00-05:00, Brussel), in één keer naar de nieuwste agent
+	NightOnly *bool `json:"night_only,omitempty"`
+
 	// OffClusterIds Clusters waar vanzelf bijwerken uitstaat
 	OffClusterIds []openapi_types.UUID `json:"off_cluster_ids"`
 
@@ -4865,7 +4913,13 @@ type ApiToken struct {
 
 	// Prefix Het begin van het token
 	Prefix string `json:"prefix"`
+
+	// Scopes Leeg = alle lees-routes; anders alleen de genoemde capabilities
+	Scopes []ApiTokenScopes `json:"scopes"`
 }
+
+// ApiTokenScopes defines model for ApiToken.Scopes.
+type ApiTokenScopes string
 
 // ApiTokenInput defines model for ApiTokenInput.
 type ApiTokenInput struct {
@@ -4873,9 +4927,15 @@ type ApiTokenInput struct {
 	ClusterIds *[]openapi_types.UUID `json:"cluster_ids,omitempty"`
 	Name       string                `json:"name"`
 
+	// Scopes Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege.
+	Scopes *[]ApiTokenInputScopes `json:"scopes,omitempty"`
+
 	// TtlDays 0 of weg = verloopt nooit
 	TtlDays *int `json:"ttl_days,omitempty"`
 }
+
+// ApiTokenInputScopes defines model for ApiTokenInput.Scopes.
+type ApiTokenInputScopes string
 
 // AppIssue defines model for AppIssue.
 type AppIssue struct {
@@ -5086,14 +5146,20 @@ type Attention struct {
 type AttentionAction struct {
 	Href *string `json:"href,omitempty"`
 
-	// Kind link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+	// Kind link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
 	Kind    AttentionActionKind   `json:"kind"`
 	Label   string                `json:"label"`
 	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
-	Unit    *string               `json:"unit,omitempty"`
+
+	// Script Het script bij run_command
+	Script *string `json:"script,omitempty"`
+
+	// Title Naam van het eenmalige commando bij run_command
+	Title *string `json:"title,omitempty"`
+	Unit  *string `json:"unit,omitempty"`
 }
 
-// AttentionActionKind link opent href; restart_service herstart unit op node_ids met een eenmalig commando
+// AttentionActionKind link opent href; restart_service herstart unit op node_ids met een eenmalig commando; run_command draait script (na bevestiging) op node_ids
 type AttentionActionKind string
 
 // AttentionBadge defines model for AttentionBadge.
@@ -12953,6 +13019,25 @@ type RecipeVersionDetail struct {
 	Version   string                    `json:"version"`
 }
 
+// RecoveryCommand defines model for RecoveryCommand.
+type RecoveryCommand struct {
+	Command string `json:"command"`
+	Label   string `json:"label"`
+}
+
+// RecoveryHelp defines model for RecoveryHelp.
+type RecoveryHelp struct {
+	// Code Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich
+	Code     string            `json:"code"`
+	Commands []RecoveryCommand `json:"commands"`
+
+	// ExpiresAt Tot wanneer de beheerder de code kan gebruiken
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// TtlMinutes Hoe lang het tijdelijke wachtwoord geldig is
+	TtlMinutes int `json:"ttl_minutes"`
+}
+
 // RecoveryReport defines model for RecoveryReport.
 type RecoveryReport struct {
 	Clusters    []RecoveryReportCluster `json:"clusters"`
@@ -13064,6 +13149,11 @@ type RecoveryReportRun struct {
 	Trigger         string                     `json:"trigger"`
 }
 
+// RecoveryRequest defines model for RecoveryRequest.
+type RecoveryRequest struct {
+	Username string `json:"username"`
+}
+
 // RecoveryTargets defines model for RecoveryTargets.
 type RecoveryTargets struct {
 	// Custom Het cluster heeft eigen doelen
@@ -13162,6 +13252,11 @@ type RemediationStepChoice struct {
 
 	// Step De stap, zoals file:/etc/keepalived/keepalived.conf
 	Step string `json:"step"`
+}
+
+// ResetPasswordRequest defines model for ResetPasswordRequest.
+type ResetPasswordRequest struct {
+	NewPassword string `json:"new_password"`
 }
 
 // RiskAcceptance defines model for RiskAcceptance.
@@ -14658,10 +14753,16 @@ type User struct {
 	Id        openapi_types.UUID `json:"id"`
 
 	// KubeLearning De leermodus in het dashboard Kubernetes staat aan
-	KubeLearning bool   `json:"kube_learning"`
-	Role         Role   `json:"role"`
-	TotpEnabled  bool   `json:"totp_enabled"`
-	Username     string `json:"username"`
+	KubeLearning bool `json:"kube_learning"`
+
+	// MustChangePassword Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden
+	MustChangePassword bool `json:"must_change_password"`
+
+	// MustSetupTotp Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden
+	MustSetupTotp bool   `json:"must_setup_totp"`
+	Role          Role   `json:"role"`
+	TotpEnabled   bool   `json:"totp_enabled"`
+	Username      string `json:"username"`
 }
 
 // UserRef defines model for UserRef.
@@ -15404,6 +15505,11 @@ type SetAgentUpgradeAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
 }
 
+// SetAgentUpgradeNightOnlyJSONBody defines parameters for SetAgentUpgradeNightOnly.
+type SetAgentUpgradeNightOnlyJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
 type SetAgentUpgradeProdAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
@@ -16026,6 +16132,16 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetPublishAutoBackupParams defines parameters for GetPublishAutoBackup.
+type GetPublishAutoBackupParams struct {
+	ServiceKey string `form:"service_key" json:"service_key"`
+}
+
+// GetPublishChangesParams defines parameters for GetPublishChanges.
+type GetPublishChangesParams struct {
+	Hours *int `form:"hours,omitempty" json:"hours,omitempty"`
+}
+
 // GetPublishLoginsParams defines parameters for GetPublishLogins.
 type GetPublishLoginsParams struct {
 	Window *GetPublishLoginsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -16137,6 +16253,9 @@ type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 // SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
 type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
 
+// SetAgentUpgradeNightOnlyJSONRequestBody defines body for SetAgentUpgradeNightOnly for application/json ContentType.
+type SetAgentUpgradeNightOnlyJSONRequestBody SetAgentUpgradeNightOnlyJSONBody
+
 // SetAgentUpgradeProdAutoJSONRequestBody defines body for SetAgentUpgradeProdAuto for application/json ContentType.
 type SetAgentUpgradeProdAutoJSONRequestBody SetAgentUpgradeProdAutoJSONBody
 
@@ -16172,6 +16291,12 @@ type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
 // SetPreferencesJSONRequestBody defines body for SetPreferences for application/json ContentType.
 type SetPreferencesJSONRequestBody = Preferences
+
+// AccountRecoveryHelpJSONRequestBody defines body for AccountRecoveryHelp for application/json ContentType.
+type AccountRecoveryHelpJSONRequestBody = RecoveryRequest
+
+// CompleteResetPasswordJSONRequestBody defines body for CompleteResetPassword for application/json ContentType.
+type CompleteResetPasswordJSONRequestBody = ResetPasswordRequest
 
 // DisableTotpJSONRequestBody defines body for DisableTotp for application/json ContentType.
 type DisableTotpJSONRequestBody = TotpDisableRequest
@@ -16563,6 +16688,12 @@ type StartPublishJSONRequestBody = PveObject
 // AdoptPublishHostsJSONRequestBody defines body for AdoptPublishHosts for application/json ContentType.
 type AdoptPublishHostsJSONRequestBody = PveObject
 
+// RetryPublishAutoJSONRequestBody defines body for RetryPublishAuto for application/json ContentType.
+type RetryPublishAutoJSONRequestBody = PveObject
+
+// SavePublishAutoRuleJSONRequestBody defines body for SavePublishAutoRule for application/json ContentType.
+type SavePublishAutoRuleJSONRequestBody = PveObject
+
 // PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
 type PlanPublishJSONRequestBody = PveObject
 
@@ -16718,6 +16849,9 @@ type ServerInterface interface {
 	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/auto)
 	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
+	// SetAgentUpgradeNightOnly Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+	// (PUT /agent-upgrades/night-only)
+	SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request)
 	// SetAgentUpgradeProdAuto Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/prod-auto)
 	SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request)
@@ -16802,6 +16936,12 @@ type ServerInterface interface {
 	// SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 	// (PUT /auth/preferences)
 	SetPreferences(w http.ResponseWriter, r *http.Request)
+	// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
+	// (POST /auth/recovery)
+	AccountRecoveryHelp(w http.ResponseWriter, r *http.Request)
+	// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+	// (POST /auth/reset/password)
+	CompleteResetPassword(w http.ResponseWriter, r *http.Request)
 	// ListMySessions De actieve sessies van de ingelogde gebruiker
 	// (GET /auth/sessions)
 	ListMySessions(w http.ResponseWriter, r *http.Request)
@@ -17750,6 +17890,21 @@ type ServerInterface interface {
 	// AdoptPublishHosts Bestaande proxy hosts in NPM laten beheren door ClusterForge, zonder ze te veranderen (admin)
 	// (POST /publish/adopt)
 	AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
+	// GetPublishAuto Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+	// (GET /publish/auto)
+	GetPublishAuto(w http.ResponseWriter, r *http.Request)
+	// GetPublishAutoBackup De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+	// (GET /publish/auto/backup)
+	GetPublishAutoBackup(w http.ResponseWriter, r *http.Request, params GetPublishAutoBackupParams)
+	// RetryPublishAuto Een mislukte automatische publicatie opnieuw laten proberen (admin)
+	// (POST /publish/auto/retry)
+	RetryPublishAuto(w http.ResponseWriter, r *http.Request)
+	// SavePublishAutoRule Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+	// (PUT /publish/auto/rules)
+	SavePublishAutoRule(w http.ResponseWriter, r *http.Request)
+	// GetPublishChanges Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+	// (GET /publish/changes)
+	GetPublishChanges(w http.ResponseWriter, r *http.Request, params GetPublishChangesParams)
 	// AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
 	// (POST /publish/hosts/{hostId}/accept)
 	AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int)
@@ -18158,6 +18313,12 @@ func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SetAgentUpgradeNightOnly Agents alleen 's nachts (02:00-05:00, Brussel) vanzelf bijwerken, aan of uit (admin)
+// (PUT /agent-upgrades/night-only)
+func (_ Unimplemented) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // SetAgentUpgradeProdAuto Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
 // (PUT /agent-upgrades/prod-auto)
 func (_ Unimplemented) SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request) {
@@ -18323,6 +18484,18 @@ func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 // (PUT /auth/preferences)
 func (_ Unimplemented) SetPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
+// (POST /auth/recovery)
+func (_ Unimplemented) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+// (POST /auth/reset/password)
+func (_ Unimplemented) CompleteResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -20222,6 +20395,36 @@ func (_ Unimplemented) AdoptPublishHosts(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetPublishAuto Automatisch publiceren (fase 48) - regels per cluster of dienst, wat ClusterForge vanzelf deed en wat de volgende beurt doet
+// (GET /publish/auto)
+func (_ Unimplemented) GetPublishAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishAutoBackup De proxy host zoals NPM hem had vlak voor het opruimen bij decomm (admin)
+// (GET /publish/auto/backup)
+func (_ Unimplemented) GetPublishAutoBackup(w http.ResponseWriter, r *http.Request, params GetPublishAutoBackupParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RetryPublishAuto Een mislukte automatische publicatie opnieuw laten proberen (admin)
+// (POST /publish/auto/retry)
+func (_ Unimplemented) RetryPublishAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SavePublishAutoRule Automatisch publiceren aan of uit zetten voor een cluster of een dienst (admin)
+// (PUT /publish/auto/rules)
+func (_ Unimplemented) SavePublishAutoRule(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishChanges Wat ClusterForge de laatste uren aan proxy hosts veranderde, met de waarden van vooraf (terugdraaien via actie revert)
+// (GET /publish/changes)
+func (_ Unimplemented) GetPublishChanges(w http.ResponseWriter, r *http.Request, params GetPublishChangesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // AcceptPublishDrift Een handmatige wijziging in NPM aanvaarden als de nieuwe gewenste toestand (admin)
 // (POST /publish/hosts/{hostId}/accept)
 func (_ Unimplemented) AcceptPublishDrift(w http.ResponseWriter, r *http.Request, hostId int) {
@@ -21047,6 +21250,20 @@ func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// SetAgentUpgradeNightOnly operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentUpgradeNightOnly(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentUpgradeNightOnly(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetAgentUpgradeProdAuto operation middleware
 func (siw *ServerInterfaceWrapper) SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request) {
 
@@ -21781,6 +21998,34 @@ func (siw *ServerInterfaceWrapper) SetPreferences(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AccountRecoveryHelp operation middleware
+func (siw *ServerInterfaceWrapper) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AccountRecoveryHelp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteResetPassword operation middleware
+func (siw *ServerInterfaceWrapper) CompleteResetPassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteResetPassword(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -31137,6 +31382,114 @@ func (siw *ServerInterfaceWrapper) AdoptPublishHosts(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishAuto operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishAutoBackup operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishAutoBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishAutoBackupParams
+
+	// ------------- Required query parameter "service_key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "service_key", r.URL.Query(), &params.ServiceKey, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "service_key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "service_key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishAutoBackup(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryPublishAuto operation middleware
+func (siw *ServerInterfaceWrapper) RetryPublishAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryPublishAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SavePublishAutoRule operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishAutoRule(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishAutoRule(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishChanges operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPublishChangesParams
+
+	// ------------- Optional query parameter "hours" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "hours", r.URL.Query(), &params.Hours, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "hours"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hours", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AcceptPublishDrift operation middleware
 func (siw *ServerInterfaceWrapper) AcceptPublishDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -34000,6 +34353,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/auth/password", wrapper.ChangePassword)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/recovery", wrapper.AccountRecoveryHelp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/reset/password", wrapper.CompleteResetPassword)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/auth/sessions", wrapper.ListMySessions)
 	})
 	r.Group(func(r chi.Router) {
@@ -35014,6 +35373,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/publish/actions", wrapper.StartPublish)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/changes", wrapper.GetPublishChanges)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/adopt", wrapper.AdoptPublishHosts)
 	})
 	r.Group(func(r chi.Router) {
@@ -35021,6 +35383,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/publish/hosts/{hostId}/release", wrapper.ReleasePublishHost)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/auto", wrapper.GetPublishAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/auto/rules", wrapper.SavePublishAutoRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/auto/retry", wrapper.RetryPublishAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/auto/backup", wrapper.GetPublishAutoBackup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)
@@ -35219,6 +35593,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/agent-upgrades/prod-auto", wrapper.SetAgentUpgradeProdAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-upgrades/night-only", wrapper.SetAgentUpgradeNightOnly)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/agent-upgrades/prod-queue", wrapper.ClearAgentUpgradeProdQueue)

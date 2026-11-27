@@ -1,0 +1,11 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De YouTube-module (fixlijst 26-11, punt 7), bovenop compose.youtube.yaml van
+# een versie die hem heeft; platform-ctl.sh neemt dit bestand alleen dan mee
+# (YOUTUBE=aan). Het image van het cluster, en geen herstart door Docker zelf:
+# de helper start en stopt met de app, alleen op de node met het VIP. De map
+# DATA_ROOT/import/youtube maakt platform-ctl.sh (mappen) vóór de start, van
+# uid 10001.
+services:
+  youtube:
+    image: cf-platform:local
+    restart: "no"

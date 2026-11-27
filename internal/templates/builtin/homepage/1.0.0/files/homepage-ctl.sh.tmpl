@@ -418,6 +418,67 @@ timescaledb() {
   return 0
 }
 
+# wacht (ExecCondition, testlijst 2, 2.8): vóór de overname start de api
+# niet. Zo draait systemd geen herstartlus van tienduizenden pogingen: de unit
+# wordt overgeslagen (geen fout, geen herstart) en $WACHT zegt waarom. check
+# start hem vanzelf zodra de overname gebeurd is. Database onbereikbaar is
+# geen wachten op een overname: dan probeert voorstart het gewoon opnieuw.
+WACHT=$STATE/wacht-op-overname
+waiting() {
+  if has_oud && oud_enabled; then
+    echo "de oude homepage draait nog op deze node"
+    return 0
+  fi
+  meta=$(db_meta 2>/dev/null) || return 1
+  if [ -z "$(metafield "$meta" ready)" ]; then
+    echo "de homepage is nog niet overgenomen (homepage-ctl.sh overnemen)"
+    return 0
+  fi
+  return 1
+}
+wacht() {
+  if why=$(waiting); then
+    mkdir -p "$STATE" 2>/dev/null
+    if [ ! -f "$WACHT" ]; then
+      logger -t cf-homepage "wacht op overname: $why; $API start daarna vanzelf" 2>/dev/null
+    fi
+    echo "$why" > "$WACHT"
+    echo "wacht op overname: $why" >&2
+    exit 1
+  fi
+  rm -f "$WACHT"
+  exit 0
+}
+# na_overname: een overgeslagen api starten zodra er niets meer te wachten is.
+na_overname() {
+  [ -f "$WACHT" ] || return 0
+  # Niet bij elke check de database vragen: hoogstens elke 30 s.
+  [ -n "$(find "$WACHT" -mmin -0.5 2>/dev/null)" ] && return 0
+  if waiting >/dev/null; then
+    touch "$WACHT"
+    return 0
+  fi
+  rm -f "$WACHT"
+  sysctl_ start --no-block "$API"
+}
+
+# rechten (testlijst 2, 2.9): na een overname stond $ETC op root:root en kon
+# de worker (gebruiker homepage) secret.key niet lezen. De map en de
+# bestanden die de api en de worker lezen, horen bij de groep homepage; en
+# dat wordt echt nagekeken als die gebruiker.
+rechten() {
+  id homepage > /dev/null 2>&1 || return 0
+  chgrp homepage "$ETC" && chmod 0750 "$ETC" || fail "rechten van $ETC"
+  for f in secret.key setup-token homepage.env nginx versie; do
+    [ -e "$ETC/$f" ] && { chgrp homepage "$ETC/$f" && chmod g+r "$ETC/$f" || fail "rechten van $ETC/$f"; }
+  done
+  if [ -e "$ETC/secret.key" ] && command -v runuser > /dev/null 2>&1; then
+    runuser -u homepage -- test -r "$ETC/secret.key" ||
+      fail "de gebruiker homepage kan $ETC/secret.key niet lezen ($(stat -c '%U:%G %a' "$ETC" "$ETC/secret.key" 2>/dev/null | tr '\n' ' '))"
+  fi
+  return 0
+}
+
 voorstart() {
   [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
   [ -x "$VENV/bin/python" ] || fail "de homepage is nog niet gebouwd ($VENV)"
@@ -446,6 +507,7 @@ voorstart() {
   if nginx_sync; then
     nginx -t > /dev/null 2>&1 && sysctl_ reload nginx > /dev/null 2>&1
   fi
+  rechten
   fingerprint > "$HASH"
   # De syslog-ontvanger start na de overname mee (ExecCondition: syslog-mag).
   sysctl_ is-active --quiet "$SYSLOG" || sysctl_ start --no-block "$SYSLOG" > /dev/null 2>&1
@@ -894,18 +956,41 @@ bouwen() {
   (cd "$CODE/frontend" && npm ci --no-audit --no-fund --loglevel=error > /dev/null &&
     npm run build --silent -- --outDir dist.new --emptyOutDir > /dev/null) || undo "frontend bouwen"
   [ -s "$CODE/frontend/dist.new/index.html" ] || undo "de frontend-build gaf geen index.html"
+  prev_venv=$(readlink "$CODE/.venv" 2>/dev/null)
+  prev_built=$(cat "$STATE/gebouwd" 2>/dev/null)
   ln -sfn "$name" "$CODE/.venv.tmp" && mv -Tf "$CODE/.venv.tmp" "$CODE/.venv" || undo ".venv"
   rm -rf "$CODE/frontend/dist.vorige"
   [ -d "$CODE/frontend/dist" ] && mv "$CODE/frontend/dist" "$CODE/frontend/dist.vorige"
   mv "$CODE/frontend/dist.new" "$CODE/frontend/dist" || fail "dist"
-  for d in "$CODE"/.venv-*; do
-    [ -d "$d" ] || continue
-    [ "${d##*/}" = "$name" ] || rm -rf "$d"
-  done
   chown -R root:root "$CODE"
   echo "$VERSION $commit" > "$STATE/gebouwd"
   versie_schrijven "$commit"
   echo "Gebouwd: $commit"
+  # Testlijst 3, N31: nieuwe code draait pas na een herstart. Alleen als de
+  # commit veranderde en de api hier draait; lukt het niet, dan gaat de
+  # vorige build terug.
+  if [ -n "$prev" ] && [ "$prev" != "$commit" ] && sysctl_ is-active --quiet "$API"; then
+    say "Herstarten op $commit"
+    sysctl_ try-restart "$API" "$SYSLOG"
+    worker_mag && sysctl_ try-restart "$WORKER"
+    if ! draait_versie; then
+      echo "Nieuwe build draait niet gezond; vorige build ($prev) terugzetten" >&2
+      git -C "$CODE" checkout -q -f --detach "$prev"
+      [ -n "$prev_venv" ] && [ -d "$CODE/$prev_venv" ] && ln -sfn "$prev_venv" "$CODE/.venv.tmp" && mv -Tf "$CODE/.venv.tmp" "$CODE/.venv"
+      if [ -d "$CODE/frontend/dist.vorige" ]; then
+        rm -rf "$CODE/frontend/dist.nieuw" && mv "$CODE/frontend/dist" "$CODE/frontend/dist.nieuw" && mv "$CODE/frontend/dist.vorige" "$CODE/frontend/dist"
+      fi
+      [ -n "$prev_built" ] && echo "$prev_built" > "$STATE/gebouwd"
+      versie_schrijven "$prev"
+      sysctl_ try-restart "$API" "$SYSLOG"
+      worker_mag && sysctl_ try-restart "$WORKER"
+      fail "de build van $commit draait niet gezond; terug op $prev"
+    fi
+  fi
+  for d in "$CODE"/.venv-*; do
+    [ -d "$d" ] || continue
+    [ "${d##*/}" = "$name" ] || rm -rf "$d"
+  done
 }
 # Wat er draait, voor "wat is er nieuw" in de homepage (zoals install.sh).
 versie_schrijven() {
@@ -913,11 +998,42 @@ versie_schrijven() {
   printf 'versie=%s\ncommit=%s\nkanaal=cluster\ndatum=%s\n' "$v" "$1" "$(date -Iseconds)" > "$ETC/versie"
   chgrp homepage "$ETC/versie" 2>/dev/null
   chmod 0640 "$ETC/versie"
+  # Het versiebestand van de oude installatie (/etc/homepage/versie) bleef
+  # anders op de commit van vóór de overname staan (N31).
+  if [ "$OUD_ETC" != "$ETC" ] && [ -f "$OUD_ETC/versie" ] && ! { has_oud && oud_enabled; }; then
+    cp -p "$ETC/versie" "$OUD_ETC/versie" 2>/dev/null
+  fi
+}
+# laatste_commit: de commit van een branch op GitHub nu (leeg bij een
+# commit, tag of als GitHub niet antwoordt). Testlijst 3, N10: een cluster
+# op "main" volgt main, niet de commit van de laatste build.
+laatste_commit() {
+  timeout 15 git ls-remote "$REPO" "refs/heads/$VERSION" 2>/dev/null | cut -f1 | head -n 1
 }
 gebouwd() {
   [ "$(cut -d' ' -f1 "$STATE/gebouwd" 2>/dev/null)" = "$VERSION" ] &&
     [ "$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ] &&
-    [ -x "$VENV/bin/python" ] && [ -s "$CODE/frontend/dist/index.html" ] && [ -s "$ETC/versie" ]
+    [ -x "$VENV/bin/python" ] && [ -s "$CODE/frontend/dist/index.html" ] && [ -s "$ETC/versie" ] || return 1
+  laatst=$(laatste_commit)
+  [ -z "$laatst" ] || [ "$laatst" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ]
+}
+# draait_versie: na een herstart moet de api gezond zijn en de gebouwde
+# commit tonen (testlijst 3, N8/N9). Faalt het, dan stopt de rollende uitrol
+# op deze node met de laatste logregels erbij.
+draait_versie() {
+  sysctl_ is-enabled --quiet "$API" 2>/dev/null || return 0
+  [ -s "$CF/secret.key" ] || return 0
+  want=$(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null)
+  for _ in $(seq 1 60); do
+    if healthy && grep -q "^commit=$want" "$ETC/versie" 2>/dev/null; then
+      echo "draait commit $want en is gezond"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "de homepage draait niet gezond op commit $want na 2 minuten; laatste regels van $API:" >&2
+  journalctl -u "$API" -n 15 --no-pager -o cat 2>/dev/null >&2
+  return 1
 }
 
 # Met een actieve ufw (default deny): etcd, Patroni, PostgreSQL, SSH (de
@@ -960,6 +1076,7 @@ status() {
   echo "node:        $ME (index $INDEX)"
   if has_ip "$VIP"; then echo "VIP:         $VIP staat hier"; else echo "VIP:         $VIP staat elders"; fi
   if has_ip "$DB_VIP"; then echo "db-VIP:      $DB_VIP staat hier (primary)"; else echo "db-VIP:      $DB_VIP staat elders"; fi
+  [ -f "$WACHT" ] && echo "wacht:       op overname: $(cat "$WACHT")"
   echo "api:         $(sysctl_ is-active "$API" 2>/dev/null)"
   echo "syslog:      $(sysctl_ is-active "$SYSLOG" 2>/dev/null)"
   echo "worker:      $(sysctl_ is-active "$WORKER" 2>/dev/null)"
@@ -976,7 +1093,7 @@ status() {
   fi
   if [ -s "$CF/secret.key" ]; then echo "sleutel:     overgenomen ($(keyhash))"; else echo "sleutel:     nog geen (wacht op de overname)"; fi
   echo "TimescaleDB: $(ts_want || true)"
-  echo "versie:      $VERSION ($(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet gebouwd))"
+  echo "versie:      $VERSION (gebouwd: $(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet), op GitHub nu: $(laatste_commit || true))"
   # shellcheck disable=SC2012
   echo "back-up:     $(ls -1t "$BACKUPS"/homepage-*.dump 2>/dev/null | head -n 1)"
   return 0
@@ -986,7 +1103,9 @@ case "${1:-}" in
   voorstart) voorstart ;;
   migreren) migreren ;;
   worker) worker ;;
+  wacht) wacht ;;
   check)
+    na_overname
     sysctl_ is-active --quiet nginx || exit 1
     api_up
     ;;
@@ -1022,10 +1141,11 @@ case "${1:-}" in
   restart-if-changed)
     sysctl_ try-restart "$API" "$SYSLOG"
     worker_mag && sysctl_ try-restart "$WORKER"
-    exit 0
+    draait_versie
     ;;
+  draait-versie) draait_versie ;;
   *)
-    echo "gebruik: $0 voorstart|migreren|worker|check|master|vip-weg|volg|worker-mag|syslog-mag|backup-mag|status|voorbereiden|voorbereid|overnemen|afronden|terug|bouwen|gebouwd|timescaledb|timescaledb-ok|nginx|nginx-ok|mappen|mappen-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
+    echo "gebruik: $0 voorstart|migreren|worker|check|master|vip-weg|volg|worker-mag|syslog-mag|backup-mag|status|voorbereiden|voorbereid|overnemen|afronden|terug|bouwen|gebouwd|timescaledb|timescaledb-ok|nginx|nginx-ok|mappen|mappen-ok|firewall|firewall-ok|unchanged|restart-if-changed|draait-versie" >&2
     exit 2
     ;;
 esac
