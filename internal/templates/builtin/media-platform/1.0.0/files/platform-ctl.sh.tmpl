@@ -25,6 +25,13 @@
 #   platform-ctl.sh compose …        docker compose met de bestanden van het cluster
 #   platform-ctl.sh overstap proef|echt [datamap]
 #                                    van de single-node op deze machine naar het cluster
+#   platform-ctl.sh mount            weed mount starten (ExecStart van cf-platform-mount)
+#   platform-ctl.sh geheugen         wat de mount aan geheugen gebruikt (RSS, anon, cache)
+#   platform-ctl.sh backup-pauze [max-wachten-s] | backup-hervat
+#                                    de mount los voor een back-up van deze CT (vzdump-hook
+#                                    op de Proxmox-host) en daarna terug
+#   platform-ctl.sh mappen           de mappen van het platform op de gedeelde data
+#                                    (arr/ van uid 10001)
 #
 # Mediabeheer (fase 11, ARR=aan en een versie met compose.arr.yaml): up start
 # na de app ook qBittorrent en Prowlarr, down stopt ze; alleen op de node met
@@ -42,6 +49,15 @@ set -u
 SRC=/opt/cf-platform/src/infra/single
 DATA=/srv/platform-data
 ACTIVE=$DATA/.cf-platform-active
+# Dezelfde markering op deze node zelf, niet op FUSE (fixlijst 26-11, punt 10):
+# check (keepalived, om de 3 s), master en cf-platform.service lezen die
+# lokale kopie. Een vastgelopen mount laat ze zo niet hangen. check zet hem
+# zodra de gedeelde er is; bij het starten kijkt het nog eens naar de gedeelde.
+ACTIVE_LOCAL=/var/lib/cf-platform/actief
+# Back-up van deze CT (vzdump): de mount staat los zolang dit bestand er is
+# (hoogstens 6 uur). Het slot op de gedeelde map laat één node tegelijk los.
+PAUZE=/run/cf-platform-backup.pauze
+PAUZE_SLOT=$DATA/.cf-backup-pauze
 HASH=/run/cf-platform.hash
 ENV=/etc/clusterforge/platform.env
 VIP='{{ .params.vip }}'
@@ -63,6 +79,14 @@ ARR_TORRENTS=/var/lib/cf-platform/torrents
 ARR_MAG=/run/cf-platform-arr.mag
 ARR_LOCK=/run/cf-platform-arr.lock
 arr_on() { [ "$(env_get ARR)" = aan ] && [ -f "$SRC/compose.arr.yaml" ]; }
+# Lidarr (fixlijst 26-11, punt 8): mee met mediabeheer, als deze versie hem
+# in compose.arr.yaml heeft.
+lidarr_on() { arr_on && grep -q '^  lidarr:' "$SRC/compose.arr.yaml"; }
+# De diensten van mediabeheer, die pas na arr-koppel starten.
+arr_svcs() { if lidarr_on; then echo qbittorrent prowlarr lidarr; else echo qbittorrent prowlarr; fi; }
+# De YouTube-module (fixlijst 26-11, punt 7): met YOUTUBE=aan en een versie
+# die compose.youtube.yaml heeft. De helper start met de app mee.
+youtube_on() { [ "$(env_get YOUTUBE)" = aan ] && [ -f "$SRC/compose.youtube.yaml" ]; }
 # Kan Docker hier geheugen- en cpu-grenzen zetten? Zonder die cgroups (een
 # LXC) start een container met grenzen niet; dan zonder (regel van install.sh).
 limits_ok() {
@@ -77,7 +101,11 @@ limits_fit() {
 }
 limits_use() { [ -n "$limits" ] && [ -f "$1" ] && limits_fit "$1"; }
 compose() {
+  if youtube_on; then
+    set -- -f "$SRC/compose.youtube.yaml" -f /etc/clusterforge/platform-youtube.yaml "$@"
+  fi
   if arr_on; then
+    if lidarr_on; then set -- -f /etc/clusterforge/platform-lidarr.yaml "$@"; fi
     set -- -f "$SRC/compose.arr.yaml" -f /etc/clusterforge/platform-arr.yaml "$@"
   fi
   set -- -f /etc/clusterforge/platform-cluster.yaml "$@"
@@ -117,9 +145,47 @@ fingerprint() {
       find "$MODELLEN" -path "$MODELLEN/.*" -prune -o -type f -printf '%P %s\n' 2>/dev/null | sort
     fi
     if arr_on; then cat /etc/clusterforge/platform-arr.yaml; fi
+    if lidarr_on; then cat /etc/clusterforge/platform-lidarr.yaml; fi
+    if youtube_on; then cat /etc/clusterforge/platform-youtube.yaml; fi
     docker image inspect -f '{{"{{"}}.Id{{"}}"}}' cf-platform:local 2>/dev/null; } | sha256sum | cut -d' ' -f1
 }
 has_vip() { ip -o addr show | grep -q " $VIP/"; }
+# Een commando op de FUSE-mount, hoogstens 5 s: zit de mount vast, dan
+# blokkeert een stat of test daar voor altijd (en keepalived met hem).
+fuse() { timeout -k 2 5 "$@"; }
+gemount() { fuse mountpoint -q "$DATA"; }
+# Is de overstap gedaan? De lokale markering, of de gedeelde (dan meteen ook
+# lokaal).
+overgestapt() {
+  [ -f "$ACTIVE_LOCAL" ] && return 0
+  fuse test -f "$ACTIVE" || return 1
+  mkdir -p "${ACTIVE_LOCAL%/*}" &&
+    { fuse cat "$ACTIVE" >"$ACTIVE_LOCAL.tmp" 2>/dev/null || :; } &&
+    mv -f "$ACTIVE_LOCAL.tmp" "$ACTIVE_LOCAL"
+  return 0
+}
+# Vlak voor het starten: staat de gedeelde markering er nog? Weg (terug naar
+# de single): ook de lokale weg, en niet starten. Antwoordt de mount niet:
+# ook niet starten.
+start_ok() {
+  fuse test -f "$ACTIVE"
+  case $? in
+    0) overgestapt ;;
+    1) rm -f "$ACTIVE_LOCAL"; return 1 ;;
+    *) return 1 ;;
+  esac
+}
+# Een back-up van deze CT loopt (backup-pauze), hoogstens 6 uur oud.
+gepauzeerd() { [ -n "$(find "$PAUZE" -mmin -360 2>/dev/null)" ]; }
+# Startte weed mount opnieuw (een crash, de OOM-killer) terwijl het platform
+# bleef draaien? Dan ziet de container in /data nog de oude, dode mount
+# ("Transport endpoint is not connected") tot hij herstart.
+mount_nieuwer() {
+  m=$(systemctl show -p ExecMainStartTimestampMonotonic --value cf-platform-mount 2>/dev/null)
+  p=$(systemctl show -p ActiveEnterTimestampMonotonic --value cf-platform 2>/dev/null)
+  case "$m:$p" in *[!0-9:]* | :* | *:) return 1 ;; esac
+  [ "$m" -gt 0 ] && [ "$p" -gt 0 ] && [ "$m" -gt "$p" ]
+}
 say() { echo "== $*"; }
 fail() { echo "FOUT: $*" >&2; exit 1; }
 
@@ -149,7 +215,7 @@ overstap() {
   case "$mode" in proef|echt) ;; *) fail "gebruik: $0 overstap proef|echt [datamap]" ;; esac
   say "Controles"
   [ -f "$ACTIVE" ] && fail "het cluster draait al (overstap gedaan op $(cat "$ACTIVE"))"
-  mountpoint -q "$DATA" || fail "$DATA is niet gemount (journalctl -u cf-platform-mount)"
+  gemount || fail "$DATA is niet gemount (journalctl -u cf-platform-mount)"
   [ -f "$bron/platform.db" ] || fail "geen $bron/platform.db: draait de single-node op deze machine?"
   docker image inspect cf-platform:local >/dev/null 2>&1 || fail "image cf-platform:local ontbreekt; rol het cluster eerst uit"
   command -v rsync >/dev/null || fail "rsync ontbreekt"
@@ -175,9 +241,10 @@ overstap() {
   say "Database kopiëren naar PostgreSQL"
   db_copy "$bron" || fail "db-copy (de single staat stil: start hem terug met: docker start $(echo $single))"
   date -Iseconds > "$ACTIVE"
+  overgestapt
   say "Overgestapt. Het platform start op de node met het VIP ($VIP)."
   if has_vip; then systemctl start cf-platform && systemctl --no-pager status cf-platform | head -n 3; fi
-  echo "Terug naar de single: rm $ACTIVE op een node, systemctl stop cf-platform op de VIP-node, docker start $(echo $single)"
+  echo "Terug naar de single: rm $ACTIVE op een node, systemctl stop cf-platform op de VIP-node, docker start $(echo $single) (de kopie $ACTIVE_LOCAL op een node telt dan niet meer: die gaat weg zodra hij het platform wil starten)"
 }
 
 
@@ -260,7 +327,7 @@ geo() {
   [ -f "$SRC/../../api/app/geo/load.py" ] || { echo "Plaatsnamen: deze versie heeft ze niet"; return 0; }
   list=$(geo_list)
   [ -n "$list" ] || { echo "Plaatsnamen: geen bronnen in install.sh"; return 0; }
-  mountpoint -q "$DATA" || { echo "Plaatsnamen: $DATA is niet gemount" >&2; return 1; }
+  gemount || { echo "Plaatsnamen: $DATA is niet gemount" >&2; return 1; }
   [ -d "$DATA/geo" ] || as_app mkdir -m 0750 "$DATA/geo" || return 1
   missing=0
   echo "$list" | { while read -r name size sha url; do
@@ -422,6 +489,156 @@ sleutels_klaar() {
     fail "sleutels-check van het platform is niet in orde (of deze versie kent het niet); niets gekopieerd of gewist"
 }
 
+# --- mappen op de gedeelde data ---------------------------------------------
+# Mappen die het platform of zijn containers nodig hebben, van het platform
+# (uid 10001). Maakt Docker een ontbrekende map voor een bind mount, dan is
+# die van root, en dan kan qBittorrent of Prowlarr (PUID 10001) er niet in
+# schrijven (fixlijst 26-11, punt 6). Ook een map die er al als root stond,
+# krijgt 10001. Elke start op de VIP-node (up), en met de hand.
+mappen() {
+  gemount || { echo "$DATA is niet gemount, of de mount antwoordt niet" >&2; return 1; }
+  set -- arr
+  if arr_on; then set -- "$@" arr/qbittorrent arr/prowlarr; fi
+  if lidarr_on; then set -- "$@" arr/lidarr import import/lidarr; fi
+  if youtube_on; then set -- "$@" import import/youtube; fi
+  for d in "$@"; do
+    p=$DATA/$d
+    fuse test -L "$p" && { echo "$p is een symlink; niets gewijzigd" >&2; return 1; }
+    if ! fuse test -d "$p"; then
+      fuse setpriv --reuid=10001 --regid=10001 --clear-groups mkdir -p "$p" ||
+        { echo "kon $p niet maken" >&2; return 1; }
+    fi
+    if [ "$(fuse stat -c %u -- "$p")" != 10001 ]; then
+      fuse chown -h 10001:10001 "$p" || { echo "kon de eigenaar van $p niet zetten" >&2; return 1; }
+      echo "$p: eigenaar 10001"
+    fi
+  done
+  return 0
+}
+
+# --- de mount (cf-platform-mount) -------------------------------------------
+# Fixlijst 26-11, punt 5. weed mount buffert wat geschreven wordt tot het
+# naar de volumes is: in het geheugen (hoogstens 4 x concurrentWriters
+# stukken van 2 MB) en daarna in een wisselbestand op schijf
+# (-cacheDirWrite). Zonder grens bleef dat groeien zolang de uploads achter
+# liepen; -writeBufferSizeMB zet er een grens op (geheugen en wisselbestand
+# samen) en laat een schrijver dan wachten. GOMEMLIMIT (de unit) laat Go
+# opruimen voor de grens van systemd bereikt is. De drie opties van de
+# hotfix staan er altijd; -writeBufferSizeMB alleen als deze weed hem kent.
+MOUNT_CACHE=/var/cache/weed-mount
+mount_start() {
+  until curl -fsS -o /dev/null --max-time 10 http://127.0.0.1:8888/; do sleep 5; done
+  # Een back-up van deze CT loopt: pas daarna mounten.
+  while gepauzeerd; do sleep 10; done
+  # Het wisselbestand van een vorige mount is waardeloos (wat er niet
+  # weggeschreven was, is met die mount weg); weg ermee.
+  rm -rf "$MOUNT_CACHE/write"
+  mkdir -p "$MOUNT_CACHE/write"
+  set -- -filer=127.0.0.1:8888 -filer.path=/ -dir="$DATA" -allowOthers \
+    -cacheDir="$MOUNT_CACHE" -cacheDirWrite="$MOUNT_CACHE/write" \
+    -concurrentWriters=8 -cacheCapacityMB=512
+  if /usr/local/bin/weed help mount 2>&1 | grep -q -- -writeBufferSizeMB; then
+    set -- "$@" -writeBufferSizeMB=1024
+  fi
+  exec /usr/local/bin/weed mount "$@"
+}
+mount_pid() {
+  pid=$(systemctl show -p MainPID --value cf-platform-mount 2>/dev/null)
+  case "$pid" in '' | 0 | *[!0-9]*) return 1 ;; esac
+  echo "$pid"
+}
+# RSS van weed mount in bytes (leeg als hij niet draait).
+mount_rss() {
+  pid=$(mount_pid) || return 0
+  awk '/^VmRSS:/ { print $2 * 1024 }' "/proc/$pid/status" 2>/dev/null
+}
+# Wat de mount aan geheugen gebruikt. RSS is het proces zelf (vooral de
+# heap van Go); de cgroup van de unit telt ook de cache van de bestanden
+# die hij schrijft en leest (file), en die geeft de kernel terug als het
+# krap wordt (MemoryHigh). Groeit anon over uren door, ook na een import,
+# dan lekt weed mount zelf; groeit vooral file, dan is het cache.
+geheugen() {
+  pid=$(mount_pid) || { echo "weed mount draait niet"; return 1; }
+  echo "weed mount (pid $pid): RSS $(human "$(mount_rss)")"
+  cg=/sys/fs/cgroup$(systemctl show -p ControlGroup --value cf-platform-mount 2>/dev/null)
+  if [ -r "$cg/memory.current" ]; then
+    echo "cgroup van cf-platform-mount: $(human "$(cat "$cg/memory.current")") (grens $(cat "$cg/memory.max" 2>/dev/null), hoog $(cat "$cg/memory.high" 2>/dev/null))"
+    awk '$1 == "anon" || $1 == "file" || $1 == "file_dirty" || $1 == "file_writeback" || $1 == "shmem" { printf "  %-15s %s\n", $1, $2 }' "$cg/memory.stat" |
+      while read -r k v; do printf '  %-15s %s\n' "$k" "$(human "$v")"; done
+    [ -r "$cg/memory.events" ] && echo "  oom_kill: $(awk '$1 == "oom_kill" { print $2 }' "$cg/memory.events")"
+  fi
+  du -sh "$MOUNT_CACHE/write" "$MOUNT_CACHE" 2>/dev/null | sed 's/^/  schijf: /'
+  return 0
+}
+
+# --- back-up van deze CT (vzdump) -------------------------------------------
+# Fixlijst 26-11, punt 3. vzdump bevriest de CT voor een snapshot (en in
+# suspend-modus kopieert het met rsync). Een FUSE-mount in de CT laat dat
+# vastlopen: de daemon van de mount bevriest mee, en wat op de mount wacht,
+# bevriest nooit; de host zelf mag er niet in (Permission denied op
+# /srv/platform-data). Daarom zet de vzdump-hook op de Proxmox-host
+# (deploy/proxmox/vzdump-media-platform.sh) de mount los vóór de snapshot
+# en daarna weer vast. De bestanden staan op SeaweedFS op elke node; die
+# horen niet in de back-up van de CT.
+#
+# backup-pauze: één node tegelijk (het slot op de gedeelde map, hoogstens
+# max-wachten seconden wachten, standaard 2 uur), dan geeft deze node het VIP
+# af (check faalt), het platform stopt en de mount gaat los. Na 6 uur
+# komt de mount vanzelf terug, ook als backup-hervat nooit komt.
+pauze_van() { fuse cat "$PAUZE_SLOT/van" 2>/dev/null; }
+backup_pauze() {
+  wacht=${1:-7200}
+  case "$wacht" in '' | *[!0-9]*) fail "gebruik: $0 backup-pauze [max-wachten-s]" ;; esac
+  me=$(hostname)
+  if gemount; then
+    t=0
+    while :; do
+      if fuse mkdir "$PAUZE_SLOT" 2>/dev/null; then
+        printf '%s %s\n' "$me" "$(date +%s)" | fuse tee "$PAUZE_SLOT/van" >/dev/null
+        break
+      fi
+      # shellcheck disable=SC2046
+      set -- $(pauze_van)
+      # Van deze node zelf (een vorige keer niet opgeruimd) of ouder dan 6 uur: overnemen.
+      if [ "${1:-}" = "$me" ] || { [ -n "${2:-}" ] && [ $(($(date +%s) - $2)) -gt 21600 ]; }; then
+        printf '%s %s\n' "$me" "$(date +%s)" | fuse tee "$PAUZE_SLOT/van" >/dev/null
+        break
+      fi
+      [ "$t" -ge "$wacht" ] && fail "de mount van ${1:-een andere node} staat al los voor een back-up; na $wacht s nog altijd. Geen back-up van deze CT nu (de mount blijft vast)."
+      [ "$t" = 0 ] && echo "Wacht: de mount van ${1:-een andere node} staat los voor een back-up."
+      sleep 30; t=$((t + 30))
+    done
+  fi
+  : >"$PAUZE"
+  # Komt backup-hervat nooit (de hook liep vast), dan na 6 uur toch.
+  systemctl stop cf-platform-backup-hervat.timer >/dev/null 2>&1 || :
+  systemd-run --unit=cf-platform-backup-hervat --on-active=6h --timer-property=AccuracySec=1min \
+    /usr/local/lib/clusterforge/platform-ctl.sh backup-hervat >/dev/null 2>&1 ||
+    echo "Let op: geen timer voor het terugzetten; zet de mount na de back-up terug met platform-ctl.sh backup-hervat" >&2
+  # check faalt nu: keepalived geeft het VIP aan een andere node (fall x interval).
+  t=0
+  while has_vip && [ "$t" -lt 120 ]; do sleep 2; t=$((t + 2)); done
+  has_vip && echo "Let op: deze node heeft het VIP nog (geen andere node neemt het); het platform stopt tot na de back-up" >&2
+  systemctl stop cf-platform || :
+  systemctl stop cf-platform-mount || { backup_hervat; fail "cf-platform-mount stopt niet"; }
+  if mountpoint -q "$DATA" 2>/dev/null; then
+    backup_hervat; fail "$DATA is nog gemount; geen back-up nu"
+  fi
+  echo "De mount staat los voor de back-up van $me."
+}
+backup_hervat() {
+  rm -f "$PAUZE"
+  systemctl stop cf-platform-backup-hervat.timer >/dev/null 2>&1 || :
+  systemctl start --no-block cf-platform-mount
+  t=0
+  while ! gemount && [ "$t" -lt 180 ]; do sleep 3; t=$((t + 3)); done
+  gemount || { echo "Let op: de mount is na 3 minuten nog niet terug (journalctl -u cf-platform-mount)" >&2; return 1; }
+  # shellcheck disable=SC2046
+  set -- $(pauze_van)
+  [ "${1:-}" = "$(hostname)" ] && fuse rm -rf "$PAUZE_SLOT"
+  echo "De mount is terug."
+}
+
 # --- mediabeheer (fase 11) --------------------------------------------------
 # qBittorrent en Prowlarr draaien alleen op de node met het VIP, net als de
 # app, en nooit door Docker zelf herstart (platform-arr.yaml). Hun config
@@ -463,7 +680,8 @@ arr_start() {
   (
     flock 9 || { echo "Mediabeheer: geen slot op $ARR_LOCK; qBittorrent en Prowlarr starten niet" >&2; exit 1; }
     arr_mag || { echo "$ARR_STOPT; qBittorrent en Prowlarr starten niet" >&2; exit 1; }
-    compose up -d --no-deps qbittorrent prowlarr </dev/null ||
+    # shellcheck disable=SC2046
+    compose up -d --no-deps $(arr_svcs) </dev/null ||
       { echo "Mediabeheer: qBittorrent of Prowlarr kon niet starten" >&2; exit 1; }
     # Begon down of verdween het VIP terwijl ze startten: meteen weer weg.
     arr_mag || { arr_stop; echo "$ARR_STOPT; qBittorrent en Prowlarr weer gestopt" >&2; exit 1; }
@@ -472,7 +690,7 @@ arr_start() {
 }
 # qBittorrent en Prowlarr van dit cluster stoppen, ook als ARR intussen uit staat.
 arr_stop() {
-  for svc in qbittorrent prowlarr; do
+  for svc in qbittorrent prowlarr lidarr; do
     ids=$(docker ps -q --filter label=com.docker.compose.project=cf-platform --filter "label=com.docker.compose.service=$svc")
     # shellcheck disable=SC2086
     [ -z "$ids" ] || docker stop $ids >/dev/null
@@ -628,11 +846,13 @@ status() {
   STIL=""; [ "${1:-}" = --stil ] && STIL=1
   rev=$(cat /var/lib/clusterforge/platform-image.rev 2>/dev/null)
   role=stand-by; has_vip && role=actief
-  [ -f "$ACTIVE" ] || role=voor-overstap
+  overgestapt || role=voor-overstap
   [ -n "$STIL" ] || echo "== $(hostname) ($role), versie $REF ${rev:+(${rev%"${rev#????????????}"})}"
   # Elke node
-  mnt=0; mountpoint -q "$DATA" && mnt=1
-  chk mount "Bestanden gemount ($DATA)" "$mnt" red "$([ "$mnt" = 1 ] && echo gemount || echo "niet gemount: journalctl -u cf-platform-mount")"
+  mnt=0; gemount && mnt=1
+  chk mount "Bestanden gemount ($DATA)" "$mnt" red "$([ "$mnt" = 1 ] && echo gemount || { gepauzeerd && echo "los voor een back-up van deze CT"; } || echo "niet gemount of antwoordt niet: journalctl -u cf-platform-mount")"
+  mg=$(mount_rss)
+  [ -n "$mg" ] && val mount_rss "Geheugen van de mount (RSS)" "$(human "$mg")" "$mg"
   sw=0; systemctl is-active --quiet cf-seaweedfs && sw=1
   chk seaweedfs "SeaweedFS (master, volume, filer)" "$sw" red "$(systemctl is-active cf-seaweedfs 2>/dev/null)"
   vb=$(du -sb /srv/seaweedfs/volume 2>/dev/null | cut -f1)
@@ -700,7 +920,8 @@ case "${1:-}" in
     # Code 3 telt in cf-platform.service als gewoon gestopt (SuccessExitStatus),
     # zodat de unit niet op failed komt en deze node het VIP later nog kan nemen.
     has_vip || { echo "Deze node heeft het VIP $VIP niet: het platform start hier niet." >&2; exit 3; }
-    mountpoint -q "$DATA" || { echo "$DATA is niet gemount" >&2; exit 1; }
+    gemount || { echo "$DATA is niet gemount, of de mount antwoordt niet" >&2; exit 1; }
+    mappen || exit 1
     if analyse_on; then analyse_dirs || exit 1; fi
     if arr_on; then arr_dirs || exit 1; fi
     # Plaatsnamen: niet fataal; zonder bronnen werkt de rest gewoon.
@@ -719,7 +940,7 @@ case "${1:-}" in
     if arr_on; then
       # Eerst de app (op de voorgrond, zoals zonder mediabeheer); qBittorrent
       # en Prowlarr pas na arr-koppel.
-      svcs=$(compose config --services | grep -vx -e qbittorrent -e prowlarr)
+      svcs=$(compose config --services | grep -vx -e qbittorrent -e prowlarr -e lidarr)
       [ -n "$svcs" ] || { echo "compose config gaf geen diensten" >&2; exit 1; }
       : > "$ARR_MAG"
       arr_start &
@@ -739,19 +960,28 @@ case "${1:-}" in
     rm -f "$HASH"
     ;;
   check)
+    # Keepalived, om de 3 s. Niets hier mag op FUSE blijven hangen: alles op
+    # de mount gaat via fuse (hoogstens 5 s), de markering staat lokaal.
     systemctl is-active --quiet cf-platform-mount || exit 1
-    mountpoint -q "$DATA" || exit 1
-    [ -f "$ACTIVE" ] || exit 0
+    # Een back-up van deze CT: het VIP afgeven, de mount gaat zo los.
+    gepauzeerd && exit 1
+    gemount || exit 1
+    overgestapt || exit 0
     # Draait het platform hier maar faalt het, dan geeft deze node het VIP af.
     systemctl is-failed --quiet cf-platform && exit 1
-    # Na de overstap (of na een herstart) start de node met het VIP het zelf.
-    if has_vip && ! systemctl is-active --quiet cf-platform; then
-      systemctl start --no-block cf-platform
+    if has_vip; then
+      if ! systemctl is-active --quiet cf-platform; then
+        # Na de overstap (of na een herstart) start de node met het VIP het zelf.
+        if start_ok; then systemctl start --no-block cf-platform; fi
+      elif mount_nieuwer; then
+        echo "weed mount startte opnieuw terwijl het platform draaide: platform herstarten (anders ziet het de oude mount)" >&2
+        systemctl restart --no-block cf-platform
+      fi
     fi
     exit 0
     ;;
   master)
-    [ -f "$ACTIVE" ] && systemctl start --no-block cf-platform
+    if overgestapt && start_ok; then systemctl start --no-block cf-platform; fi
     exit 0
     ;;
   backup)
@@ -777,13 +1007,18 @@ case "${1:-}" in
   replicatie) shift; replicatie "$@" ;;
   mapregels) shift; mapregels "$@" ;;
   sleutels-klaar) sleutels_klaar ;;
+  mount) mount_start ;;
+  geheugen) geheugen ;;
+  backup-pauze) shift; backup_pauze "$@" ;;
+  backup-hervat) backup_hervat ;;
+  mappen) mappen ;;
   compose) shift; compose "$@" ;;
   overstap)
     shift
     overstap "$@"
     ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|mapregels|sleutels-klaar|compose|overstap" >&2
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|db-backup|status|modellen|geo|replicatie|mapregels|sleutels-klaar|compose|overstap|mount|geheugen|backup-pauze|backup-hervat|mappen" >&2
     exit 2
     ;;
 esac

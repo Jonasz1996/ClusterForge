@@ -415,6 +415,7 @@ func serve() error {
 	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
+	ro.PVE = pvh
 	// Syncs die de template vraagt (fase 11, zoals Nginx Proxy Manager):
 	// na een gelukte uitrol of wijziging als beheerde cronjob.
 	templateSyncs := func(ctx context.Context, j store.Job) {

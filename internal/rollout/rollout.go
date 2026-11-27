@@ -26,6 +26,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/kube"
+	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -89,6 +90,9 @@ type Service struct {
 	// KubeReadyTimeout is hoe lang de taak na het toepassen wacht tot de
 	// node Ready is met de nieuwe k3s.
 	KubeReadyTimeout time.Duration
+	// PVE zet bij een template met autostart onboot aan op de Proxmox-gast
+	// van elke node. Zonder PVE gebeurt dat niet.
+	PVE *pvehost.Service
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus deploy.Commander,
