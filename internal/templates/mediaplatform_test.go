@@ -61,7 +61,7 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"OFFICE_JWT_SECRET=officegeheim1\n", "ANALYSE=aan\n", "BEELD=aan\n", "PLAATSEN=aan\n",
 			"MODELLEN_ROOT=/opt/cf-platform/modellen\n", "SLEUTELS_ROOT=/var/lib/cf-platform/sleutels/gezichten\n",
 			"ANALYSE_WORKER_KEY=" + sha256hex("analyse mediasleutel1") + "\n"},
-		"/etc/clusterforge/platform-analyse.yaml":      {"analyse:\n    image: cf-platform:local", "analyse-omzetten:"},
+		"/etc/clusterforge/platform-analyse.yaml":      {"analyse:\n    image: cf-platform:local", "analyse-omzetten:", "PLATFORM_ANALYSE_POSTGRES: \"true\""},
 		"/etc/systemd/system/cf-platform-status.timer": {"OnUnitActiveSec=60"},
 		"/etc/clusterforge/platform-cluster.yaml":      {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local"},
 		"/usr/local/lib/clusterforge/platform-src.sh":  {"REF='claude/stappenplan-uitwerken-lu4uv3'", "SRC=/opt/cf-platform/src", "-p cf-platform"},

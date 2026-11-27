@@ -145,7 +145,8 @@ func newNPMNode(t *testing.T, script, name string) *npmNode {
 		"curl":   `[ -f "$CF_TEST_DIR/api" ]`,
 		"logger": `echo "logger $*" >> "$CF_TEST_DIR/log"`,
 		"systemctl": `case "$1 $2" in "is-active --quiet") [ "$3" = cf-npm ] && { [ -f "$CF_TEST_DIR/active" ]; exit $?; }; exit 0;;
-"is-failed --quiet") exit 1;; esac; echo "systemctl $*" >> "$CF_TEST_DIR/log"; exit 0`,
+"is-failed --quiet") [ "$3" = cf-npm ] && [ -f "$CF_TEST_DIR/failed" ]; exit $?;;
+"reset-failed cf-npm") rm -f "$CF_TEST_DIR/failed";; esac; echo "systemctl $*" >> "$CF_TEST_DIR/log"; exit 0`,
 		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
 case "$1" in
 ps) [ -f "$CF_TEST_DIR/foreign" ] && cat "$CF_TEST_DIR/foreign";;
@@ -524,5 +525,41 @@ func TestNPMHealth(t *testing.T) {
 	check(false, "oude NPM naast de configuratie")
 	if out, _ := n.run("status"); !strings.Contains(out, "andere NPM draait hier: abc123") {
 		t.Errorf("status zonder oude NPM: %s", out)
+	}
+}
+
+// TestNPMCheckFailedStandby: een gefaalde cf-npm (bv. na een herstart) houdt
+// een standby niet in FAULT; hij wist de fout en blijft BACKUP. Alleen de
+// node met het VIP geeft het VIP af.
+func TestNPMCheckFailedStandby(t *testing.T) {
+	tpl, c := npmContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newNPMNode(t, files["/usr/local/lib/clusterforge/npm-ctl.sh"], "npm-02")
+	dir := filepath.Dir(n.script)
+	failed := filepath.Join(dir, "failed")
+
+	if err := os.WriteFile(failed, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := n.run("check"); err != nil {
+		t.Fatalf("standby met gefaalde cf-npm: check faalt (FAULT): %v %s", err, out)
+	}
+	log, _ := os.ReadFile(filepath.Join(dir, "log"))
+	if !strings.Contains(string(log), "systemctl reset-failed cf-npm") {
+		t.Errorf("standby wist de fout niet:\n%s", log)
+	}
+	if _, err := os.Stat(failed); err == nil {
+		t.Error("cf-npm staat nog op failed")
+	}
+
+	n.vip = true
+	if err := os.WriteFile(failed, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.run("check"); err == nil {
+		t.Error("VIP-node met gefaalde cf-npm: check slaagt, het VIP blijft")
+	}
+	if _, err := os.Stat(failed); err != nil {
+		t.Error("de VIP-node wist de fout zelf (moet eerst het VIP afgeven)")
 	}
 }

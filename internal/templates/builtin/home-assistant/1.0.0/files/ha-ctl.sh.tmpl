@@ -310,7 +310,14 @@ case "${1:-}" in
     ;;
   check)
     systemctl is-active --quiet docker || exit 1
-    systemctl is-failed --quiet cf-homeassistant && exit 1
+    # Een gefaalde cf-homeassistant telt alleen op de node met het VIP: die geeft het
+    # VIP af. Een standby (bv. na een herstart, of nadat hij zelf het VIP
+    # afgaf) wist de fout en blijft BACKUP, zodat failover mogelijk blijft;
+    # bij het volgende MASTER start hij het opnieuw.
+    if systemctl is-failed --quiet cf-homeassistant; then
+      has_vip && exit 1
+      systemctl reset-failed cf-homeassistant 2>/dev/null || true
+    fi
     # Zodra Galera er is: alleen een node waarvan MariaDB mag schrijven
     # (Synced in een Primary component).
     if [ -e "$GALERA" ] && [ -z "${CF_HA_GALERA_OK:-}" ]; then
@@ -334,6 +341,7 @@ case "${1:-}" in
     exit 0
     ;;
   master)
+    systemctl reset-failed cf-homeassistant 2>/dev/null
     [ -z "$(foreign)" ] && systemctl start --no-block cf-homeassistant
     exit 0
     ;;

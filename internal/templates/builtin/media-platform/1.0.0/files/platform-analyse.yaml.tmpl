@@ -8,3 +8,8 @@ services:
     restart: "no"
   analyse-omzetten:
     image: cf-platform:local
+  # Het cluster draait op PostgreSQL: gezichten en zoeken op beeld vragen daar
+  # sinds platform 0.8.2 PLATFORM_ANALYSE_POSTGRES (een oudere versie negeert het).
+  platform:
+    environment:
+      PLATFORM_ANALYSE_POSTGRES: "true"
