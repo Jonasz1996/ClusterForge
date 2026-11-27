@@ -309,7 +309,14 @@ case "${1:-}" in
     ;;
   check)
     systemctl is-active --quiet docker || exit 1
-    systemctl is-failed --quiet cf-rustdesk && exit 1
+    # Een gefaalde cf-rustdesk telt alleen op de node met het VIP: die geeft het
+    # VIP af. Een standby (bv. na een herstart, of nadat hij zelf het VIP
+    # afgaf) wist de fout en blijft BACKUP, zodat failover mogelijk blijft;
+    # bij het volgende MASTER start hij het opnieuw.
+    if systemctl is-failed --quiet cf-rustdesk; then
+      has_vip && exit 1
+      systemctl reset-failed cf-rustdesk 2>/dev/null || true
+    fi
     # Zonder sleutel of kopie zou deze node een nieuwe sleutel maken.
     can_serve || exit 1
     if has_vip || [ -f "$YIELD" ]; then
@@ -354,6 +361,7 @@ case "${1:-}" in
     exit 0
     ;;
   master)
+    systemctl reset-failed cf-rustdesk 2>/dev/null
     [ -z "$(foreign)" ] && systemctl start --no-block cf-rustdesk
     exit 0
     ;;

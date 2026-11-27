@@ -429,7 +429,14 @@ case "${1:-}" in
     ;;
   check)
     systemctl is-active --quiet docker || exit 1
-    systemctl is-failed --quiet cf-clusterforge && exit 1
+    # Een gefaalde cf-clusterforge telt alleen op de node met het VIP: die geeft het
+    # VIP af. Een standby (bv. na een herstart, of nadat hij zelf het VIP
+    # afgaf) wist de fout en blijft BACKUP, zodat failover mogelijk blijft;
+    # bij het volgende MASTER start hij het opnieuw.
+    if systemctl is-failed --quiet cf-clusterforge; then
+      has_vip && exit 1
+      systemctl reset-failed cf-clusterforge 2>/dev/null || true
+    fi
     if ! can_serve; then
       # Vóór de verhuizing houdt node 1 het VIP (daar komt de server); een
       # andere node zonder hoofdsleutel neemt het nooit.
@@ -480,6 +487,7 @@ case "${1:-}" in
     exit 0
     ;;
   master)
+    systemctl reset-failed cf-clusterforge 2>/dev/null
     can_serve && systemctl start --no-block cf-clusterforge
     exit 0
     ;;
