@@ -135,6 +135,42 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for ApiTokenScopes.
+const (
+	ApiTokenScopesDashboard ApiTokenScopes = "dashboard"
+	ApiTokenScopesPentest   ApiTokenScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenScopes enum.
+func (e ApiTokenScopes) Valid() bool {
+	switch e {
+	case ApiTokenScopesDashboard:
+		return true
+	case ApiTokenScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiTokenInputScopes.
+const (
+	ApiTokenInputScopesDashboard ApiTokenInputScopes = "dashboard"
+	ApiTokenInputScopesPentest   ApiTokenInputScopes = "pentest"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenInputScopes enum.
+func (e ApiTokenInputScopes) Valid() bool {
+	switch e {
+	case ApiTokenInputScopesDashboard:
+		return true
+	case ApiTokenInputScopesPentest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AppIssueTone.
 const (
 	AppIssueToneAmber AppIssueTone = "amber"
@@ -4877,7 +4913,13 @@ type ApiToken struct {
 
 	// Prefix Het begin van het token
 	Prefix string `json:"prefix"`
+
+	// Scopes Leeg = alle lees-routes; anders alleen de genoemde capabilities
+	Scopes []ApiTokenScopes `json:"scopes"`
 }
+
+// ApiTokenScopes defines model for ApiToken.Scopes.
+type ApiTokenScopes string
 
 // ApiTokenInput defines model for ApiTokenInput.
 type ApiTokenInput struct {
@@ -4885,9 +4927,15 @@ type ApiTokenInput struct {
 	ClusterIds *[]openapi_types.UUID `json:"cluster_ids,omitempty"`
 	Name       string                `json:"name"`
 
+	// Scopes Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege.
+	Scopes *[]ApiTokenInputScopes `json:"scopes,omitempty"`
+
 	// TtlDays 0 of weg = verloopt nooit
 	TtlDays *int `json:"ttl_days,omitempty"`
 }
+
+// ApiTokenInputScopes defines model for ApiTokenInput.Scopes.
+type ApiTokenInputScopes string
 
 // AppIssue defines model for AppIssue.
 type AppIssue struct {
@@ -12971,6 +13019,25 @@ type RecipeVersionDetail struct {
 	Version   string                    `json:"version"`
 }
 
+// RecoveryCommand defines model for RecoveryCommand.
+type RecoveryCommand struct {
+	Command string `json:"command"`
+	Label   string `json:"label"`
+}
+
+// RecoveryHelp defines model for RecoveryHelp.
+type RecoveryHelp struct {
+	// Code Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich
+	Code     string            `json:"code"`
+	Commands []RecoveryCommand `json:"commands"`
+
+	// ExpiresAt Tot wanneer de beheerder de code kan gebruiken
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// TtlMinutes Hoe lang het tijdelijke wachtwoord geldig is
+	TtlMinutes int `json:"ttl_minutes"`
+}
+
 // RecoveryReport defines model for RecoveryReport.
 type RecoveryReport struct {
 	Clusters    []RecoveryReportCluster `json:"clusters"`
@@ -13082,6 +13149,11 @@ type RecoveryReportRun struct {
 	Trigger         string                     `json:"trigger"`
 }
 
+// RecoveryRequest defines model for RecoveryRequest.
+type RecoveryRequest struct {
+	Username string `json:"username"`
+}
+
 // RecoveryTargets defines model for RecoveryTargets.
 type RecoveryTargets struct {
 	// Custom Het cluster heeft eigen doelen
@@ -13180,6 +13252,11 @@ type RemediationStepChoice struct {
 
 	// Step De stap, zoals file:/etc/keepalived/keepalived.conf
 	Step string `json:"step"`
+}
+
+// ResetPasswordRequest defines model for ResetPasswordRequest.
+type ResetPasswordRequest struct {
+	NewPassword string `json:"new_password"`
 }
 
 // RiskAcceptance defines model for RiskAcceptance.
@@ -14676,10 +14753,16 @@ type User struct {
 	Id        openapi_types.UUID `json:"id"`
 
 	// KubeLearning De leermodus in het dashboard Kubernetes staat aan
-	KubeLearning bool   `json:"kube_learning"`
-	Role         Role   `json:"role"`
-	TotpEnabled  bool   `json:"totp_enabled"`
-	Username     string `json:"username"`
+	KubeLearning bool `json:"kube_learning"`
+
+	// MustChangePassword Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden
+	MustChangePassword bool `json:"must_change_password"`
+
+	// MustSetupTotp Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden
+	MustSetupTotp bool   `json:"must_setup_totp"`
+	Role          Role   `json:"role"`
+	TotpEnabled   bool   `json:"totp_enabled"`
+	Username      string `json:"username"`
 }
 
 // UserRef defines model for UserRef.
@@ -16209,6 +16292,12 @@ type ChangePasswordJSONRequestBody = ChangePasswordRequest
 // SetPreferencesJSONRequestBody defines body for SetPreferences for application/json ContentType.
 type SetPreferencesJSONRequestBody = Preferences
 
+// AccountRecoveryHelpJSONRequestBody defines body for AccountRecoveryHelp for application/json ContentType.
+type AccountRecoveryHelpJSONRequestBody = RecoveryRequest
+
+// CompleteResetPasswordJSONRequestBody defines body for CompleteResetPassword for application/json ContentType.
+type CompleteResetPasswordJSONRequestBody = ResetPasswordRequest
+
 // DisableTotpJSONRequestBody defines body for DisableTotp for application/json ContentType.
 type DisableTotpJSONRequestBody = TotpDisableRequest
 
@@ -16847,6 +16936,12 @@ type ServerInterface interface {
 	// SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 	// (PUT /auth/preferences)
 	SetPreferences(w http.ResponseWriter, r *http.Request)
+	// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
+	// (POST /auth/recovery)
+	AccountRecoveryHelp(w http.ResponseWriter, r *http.Request)
+	// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+	// (POST /auth/reset/password)
+	CompleteResetPassword(w http.ResponseWriter, r *http.Request)
 	// ListMySessions De actieve sessies van de ingelogde gebruiker
 	// (GET /auth/sessions)
 	ListMySessions(w http.ResponseWriter, r *http.Request)
@@ -18389,6 +18484,18 @@ func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 // (PUT /auth/preferences)
 func (_ Unimplemented) SetPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AccountRecoveryHelp Een herstelcode aanvragen die de beheerder in de CLI plakt
+// (POST /auth/recovery)
+func (_ Unimplemented) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CompleteResetPassword Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+// (POST /auth/reset/password)
+func (_ Unimplemented) CompleteResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -21891,6 +21998,34 @@ func (siw *ServerInterfaceWrapper) SetPreferences(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AccountRecoveryHelp operation middleware
+func (siw *ServerInterfaceWrapper) AccountRecoveryHelp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AccountRecoveryHelp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteResetPassword operation middleware
+func (siw *ServerInterfaceWrapper) CompleteResetPassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteResetPassword(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -34216,6 +34351,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/password", wrapper.ChangePassword)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/recovery", wrapper.AccountRecoveryHelp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/reset/password", wrapper.CompleteResetPassword)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/auth/sessions", wrapper.ListMySessions)

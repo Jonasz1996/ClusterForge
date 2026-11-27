@@ -28,6 +28,8 @@ type NodeRisk struct {
 	// de lineaire trend van zeven dagen; alleen voor bestandssystemen die
 	// voller worden en waarvan minstens een dag metingen is.
 	DiskDaysLeft map[string]float64
+	// Load15Avg is de gemiddelde load15 over zeven dagen (testlijst 3, N27).
+	Load15Avg *float64
 }
 
 // riskQueries zijn vast; de browser of de assistent stuurt nooit zelf
@@ -36,6 +38,7 @@ var riskQueries = map[string]string{
 	"cpu":    `quantile_over_time(0.95, (100 * (1 - avg by (node_id) (rate(node_cpu_seconds_total{mode="idle"}[5m]))))[7d:5m])`,
 	"memory": `max by (node_id) (quantile_over_time(0.95, (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))[7d:5m]))`,
 	"swap":   `max by (node_id) (avg_over_time((100 * (1 - node_memory_SwapFree_bytes / (node_memory_SwapTotal_bytes > 0)))[7d:5m]))`,
+	"load15": `max by (node_id) (avg_over_time(node_load15[7d]))`,
 	"net_errors": `sum by (node_id) (increase(node_network_receive_errs_total[7d])) + ` +
 		`sum by (node_id) (increase(node_network_transmit_errs_total[7d]))`,
 	// Dagen tot vol: wat er nog vrij is, gedeeld door wat er per dag
@@ -123,6 +126,8 @@ func (c *Client) Risk(ctx context.Context, now time.Time) (map[uuid.UUID]*NodeRi
 				n.SwapAvg = &v
 			case "net_errors":
 				n.NetErrors = &v
+			case "load15":
+				n.Load15Avg = &v
 			case "disk_days":
 				if n.DiskDaysLeft == nil {
 					n.DiskDaysLeft = map[string]float64{}

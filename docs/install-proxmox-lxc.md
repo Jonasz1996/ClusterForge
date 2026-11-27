@@ -303,6 +303,25 @@ curl -fsSL http://192.168.10.153:8080/install/agent.sh | sudo sh -s -- --server 
 
 (Met https laat je `--allow-http` weg.) De kaart "Agents bijwerken" bij Nodes zegt welke nodes dat nog nodig hebben, met het commando voor jouw server. Daarna hoef je dit niet meer, en ook het golden image niet na elke update opnieuw te maken: een VM uit een ouder image meldt zich aan en wordt daarna vanzelf bijgewerkt. Alleen een image met een agent onder protocol 23 maak je nog één keer opnieuw met `--replace`.
 
+## Account herstellen (wachtwoord of authenticator kwijt)
+
+1. Op de loginpagina klikt de gebruiker op **Wachtwoord vergeten of kan niet inloggen?** en vult zijn gebruikersnaam in.
+2. Hij krijgt een herstelcode zoals `jonas.K7QM-3XPA-9TRW-H2MC` en geeft die aan de beheerder. Elke invoer krijgt dezelfde bevestiging en een code, of het account nu bestaat of niet; de pagina is beperkt tot een paar aanvragen per minuut per IP-adres.
+3. De beheerder plakt de code in één commando:
+
+```bash
+cd /opt/clusterforge/deploy
+docker compose exec server clusterforge-server user reset jonas.K7QM-3XPA-9TRW-H2MC
+# ClusterForge-cluster (HA), op een van de nodes:
+docker exec cf-clusterforge-server clusterforge-server user reset jonas.K7QM-3XPA-9TRW-H2MC
+```
+
+De code is een token van de server: alleen een code die de loginpagina uitgaf werkt, één keer, binnen 24 uur. De CLI leest de gebruikersnaam uit het verzoek, zet de tweestapsverificatie uit, beëindigt alle sessies en toont een tijdelijk wachtwoord. Dat werkt één keer en verloopt na een uur (`-geldig 30m` voor korter, hoogstens `24h`). Na het inloggen moet de gebruiker eerst een nieuw wachtwoord en daarna een nieuwe TOTP instellen; tot dan werkt de rest van ClusterForge niet. Elke reset staat in het logboek als `user.reset`.
+
+Is de loginpagina niet bereikbaar, dan is er een noodweg zonder code: `clusterforge-server user reset -gebruiker jonas`.
+
+Toont de loginpagina beter een ander commando (bv. via ssh), zet dan `CF_RESET_COMMAND` met `{code}` voor de herstelcode, bv. `CF_RESET_COMMAND="ssh root@cf01 docker exec cf-clusterforge-server clusterforge-server user reset {code}"`.
+
 ## Problemen
 
 | Symptoom | Oorzaak |

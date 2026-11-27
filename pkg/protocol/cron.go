@@ -149,7 +149,10 @@ const (
 
 // Uitkomsten van een beheerde run, naast CronOK, CronFailed en CronRunning.
 const (
-	// CronSkipped: de vorige run liep nog; deze sloeg over.
+	// CronSkipped: de vorige run liep nog, of de voorbereiding van een sync
+	// zei dat deze node niet stuurt (SyncBeforeSkip); deze sloeg over. Alleen
+	// die tweede heeft een exitcode (0); daaraan zien de incidenten dat deze
+	// node niet meedoet, en blijft een oude fout van hem niet open.
 	CronSkipped = "skipped"
 	// CronTimeout: gestopt na de tijdslimiet.
 	CronTimedOut = "timeout"

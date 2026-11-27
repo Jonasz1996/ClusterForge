@@ -48,6 +48,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
+	"github.com/Jonasz1996/clusterforge/internal/mailrelay"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/opnsense"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
@@ -57,6 +58,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/replace"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
+	"github.com/Jonasz1996/clusterforge/internal/resources"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/security"
@@ -114,6 +116,7 @@ type Server struct {
 	agentConf    *agentconf.Service
 	selfHost     *selfhost.Service
 	replace      *replace.Service
+	mailrelay    *mailrelay.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	disk         *diskwatch.Service
@@ -126,6 +129,7 @@ type Server struct {
 	logs         *logs.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
+	resources    *resources.Service
 	pbs          *pbs.Service
 	truenas      *truenas.Service
 	aiverslag    *aiverslag.Service
@@ -141,6 +145,8 @@ type Server struct {
 	// hangen.
 	loginTimeout   time.Duration
 	sessionTimeout time.Duration
+	// recoveryLimiter remt "Kan niet inloggen?".
+	recoveryLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
 	enrollLimiter *ipLimiter
 	// throttle remt events die een aanvaller gratis kan laten schrijven.
@@ -214,6 +220,8 @@ type Deps struct {
 	SelfHost *selfhost.Service
 	// Replace: losse installatie vervangen en later opruimen (fase 48).
 	Replace *replace.Service
+	// MailRelay: de Postfix-relayclusters (testlijst 3, N30).
+	MailRelay *mailrelay.Service
 	// Updates en Commands werken de nodes bij en draaien eigen commando's
 	// (fase 10).
 	Updates  *updates.Service
@@ -287,6 +295,7 @@ func New(d Deps) *Server {
 		agentConf:    d.AgentConf,
 		selfHost:     d.SelfHost,
 		replace:      d.Replace,
+		mailrelay:    d.MailRelay,
 		updates:      d.Updates,
 		commands:     d.Commands,
 		crowdsec:     d.CrowdSec,
@@ -312,18 +321,28 @@ func New(d Deps) *Server {
 		loginTimeout:   20 * time.Second,
 		sessionTimeout: 10 * time.Second,
 		enrollLimiter:  newIPLimiter(6*time.Second, 20),
-		throttle:       events.NewThrottle(ev),
-		assistant:      d.Assistant,
-		risk:           d.Risk,
-		topo:           d.Topo,
-		docs:           d.Docs,
-		reports:        d.Reports,
-		kube:           d.Kube,
-		databases:      d.Databases,
-		cronjobs:       d.Cronjobs,
-		heal:           d.Heal,
-		components:     d.Components,
-		kubeNodes:      d.KubeNodes,
+		// 5 aanvragen direct, daarna één per 20 seconden per IP-adres.
+		recoveryLimiter: newIPLimiter(20*time.Second, 5),
+		throttle:        events.NewThrottle(ev),
+		assistant:       d.Assistant,
+		risk:            d.Risk,
+		topo:            d.Topo,
+		docs:            d.Docs,
+		reports:         d.Reports,
+		kube:            d.Kube,
+		databases:       d.Databases,
+		cronjobs:        d.Cronjobs,
+		heal:            d.Heal,
+		components:      d.Components,
+		kubeNodes:       d.KubeNodes,
+	}
+	s.resources = resources.NewService(d.Pool, ev)
+	s.resources.Metrics = s.metrics
+	if d.PVEHosts != nil {
+		s.resources.PVE = d.PVEHosts
+	}
+	if d.Docker != nil {
+		s.resources.Docker = d.Docker
 	}
 	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools(), s.healTools())
 	s.lessons = kubelessons.New(s.kube, s.q)
@@ -379,8 +398,21 @@ func (s *Server) Handler() http.Handler {
 		// Automatisch onderhoud (fase 46), buiten de OpenAPI.
 		api.With(s.requireSession).Get("/upkeep", s.upkeepOverview)
 		api.With(s.requireSession).Get("/auto-changes", s.autoChanges)
+		api.With(s.requireSession).Get("/clusters/{clusterId}/mailrelay", s.mailrelayStatus)
+		api.With(s.requireSession).Post("/clusters/{clusterId}/mailrelay/testmail", s.mailrelayTestMail)
+		api.With(s.requireSession).Get("/resources", s.resourcesList)
+		api.With(s.requireSession).Post("/resources/apply", s.resourcesApply)
+		api.With(s.requireSession).Get("/resources/settings", s.resourcesSettingsGet)
+		api.With(s.requireSession).Put("/resources/settings", s.resourcesSettingsPut)
 		api.With(s.requireSession).Get("/nodes/{nodeId}/pentest", s.pentestGet)
 		api.With(s.requireSession).Put("/nodes/{nodeId}/pentest", s.pentestSet)
+		// Pentest-inventaris voor de orchestrator, achter een los alleen-lezen
+		// API-token (cfa_) i.p.v. de sessiecookie of de cfi_-importsleutel.
+		// Least-privilege: enkel lezen (requireAPIToken dwingt GET-only af),
+		// apart in te trekken, los van de import/schrijfsleutel. De scope
+		// 'pentest' is verplicht (allowUnscoped=false): zo kan geen enkel
+		// ongescoped of dashboard-token de inventaris lezen.
+		api.With(s.requireAPIToken, s.requireScope("pentest", false)).Get("/pentest/nodes", s.pentestNodesAPI)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
 		api.With(s.requireSession).Put("/upkeep/scopes/{scope}", s.upkeepSetPolicy)
 		api.With(s.requireSession).Post("/upkeep/scopes/{scope}/start", s.upkeepStart)

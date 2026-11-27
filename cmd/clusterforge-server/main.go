@@ -64,6 +64,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/logs"
+	"github.com/Jonasz1996/clusterforge/internal/mailrelay"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/noderun"
 	"github.com/Jonasz1996/clusterforge/internal/opnsense"
@@ -120,6 +121,11 @@ func run(args []string) error {
 			return usage()
 		}
 		return adminCreate(args[2:])
+	case "user":
+		if len(args) < 2 || args[1] != "reset" {
+			return usage()
+		}
+		return userReset(args[2:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -129,7 +135,7 @@ func run(args []string) error {
 }
 
 func usage() error {
-	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|healthcheck|version>`)
+	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|user reset|healthcheck|version>`)
 }
 
 func newLogger(level string) *slog.Logger {
@@ -303,10 +309,13 @@ func serve() error {
 	aivSvc.Version = version
 	pub := publish.NewService(pool, ev, log, runner, bus, box)
 	pub.Sync = crons
+	pub.Run = &noderun.Runner{Bus: bus}
 	// Fase 48: een losse installatie vervangen door een cluster en de oude
 	// later opruimen.
 	rpl := replace.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
 	rpl.Pub, rpl.PVE = pub, pvh
+	// Testlijst 3, N30: de Postfix-relays volgen en testmails sturen.
+	mrl := mailrelay.NewService(pool, ev, log, runner, &noderun.Runner{Bus: bus})
 	opnSvc.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
@@ -406,6 +415,7 @@ func serve() error {
 	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
+	ro.PVE = pvh
 	// Syncs die de template vraagt (fase 11, zoals Nginx Proxy Manager):
 	// na een gelukte uitrol of wijziging als beheerde cronjob.
 	templateSyncs := func(ctx context.Context, j store.Job) {
@@ -507,6 +517,7 @@ func serve() error {
 	goLoop(ctx, log, "pbs", pbsSvc.Watch)
 	goLoop(ctx, log, "truenas", tnSvc.Watch)
 	goLoop(ctx, log, "aiverslag", aivSvc.Watch)
+	goLoop(ctx, log, "mailrelay", mrl.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -524,7 +535,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Replace: rpl, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
+			Components: cmps, Upgrades: upg, AgentConf: acf, SelfHost: self, Replace: rpl, MailRelay: mrl, Updates: upd, Commands: cmds, CrowdSec: csec, Disk: dsk, Upkeep: upk, ZabbixAgents: zba, ZabbixMon: zbm, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, PBS: pbsSvc, TrueNAS: tnSvc, AIVerslag: aivSvc, OPNsense: opnSvc, Publish: pub, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -691,6 +702,86 @@ func adminCreate(args []string) error {
 		return err
 	}
 	fmt.Printf("gebruiker %s aangemaakt met rol %s\n", u.Username, u.Role)
+	return nil
+}
+
+// userReset herstelt een account waar de gebruiker niet meer in kan: TOTP
+// uit, een tijdelijk wachtwoord dat één keer werkt, en bij de volgende login
+// verplicht een nieuw wachtwoord en een nieuwe TOTP. Normaal met de
+// herstelcode van de loginpagina; -gebruiker is de noodweg als de
+// webinterface niet bereikbaar is.
+func userReset(args []string) error {
+	fs := flag.NewFlagSet("user reset", flag.ContinueOnError)
+	ttl := fs.Duration("geldig", auth.TempPasswordTTL, "hoe lang het tijdelijke wachtwoord werkt (hoogstens 24h)")
+	byName := fs.String("gebruiker", "", "noodweg zonder code: deze gebruikersnaam resetten")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "gebruik: clusterforge-server user reset <herstelcode>")
+		fmt.Fprintln(os.Stderr, "   of:   clusterforge-server user reset -gebruiker <naam>   (als de loginpagina niet bereikbaar is)")
+		fs.PrintDefaults()
+	}
+	// De code mag voor of na de vlaggen staan.
+	var code string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		code, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if code == "" && fs.NArg() > 0 {
+		code = fs.Arg(0)
+	}
+	switch {
+	case code == "" && *byName == "":
+		fs.Usage()
+		return errors.New("geef de herstelcode van de loginpagina")
+	case code != "" && *byName != "":
+		return errors.New("geef een herstelcode of -gebruiker, niet allebei")
+	case code != "" && !auth.LooksLikeCode(code):
+		return fmt.Errorf("%q is geen herstelcode (die ziet eruit als naam.ABCD-EFGH-JKLM-NPQR); de gebruiker vraagt er een aan via \"Wachtwoord vergeten of kan niet inloggen?\" op de loginpagina, of gebruik -gebruiker <naam>", code)
+	}
+
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg.LogLevel)
+	ctx := context.Background()
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := store.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	q := store.New(pool)
+	authSvc, err := auth.NewService(q, events.NewWriter(q, log), cfg.SessionTTL)
+	if err != nil {
+		return err
+	}
+	var res auth.ResetResult
+	name := *byName
+	if code != "" {
+		res, name, err = authSvc.ResetByCode(ctx, code, *ttl)
+	} else {
+		res, err = authSvc.ResetUser(ctx, name, *ttl)
+	}
+	switch {
+	case errors.Is(err, auth.ErrUnknownCode):
+		return errors.New("deze herstelcode is onbekend, verlopen (na 24 uur) of al gebruikt; laat de gebruiker een nieuwe aanvragen")
+	case errors.Is(err, auth.ErrUnknownUser) && code != "":
+		return fmt.Errorf("er bestaat geen account %q; de code is nu opgebruikt", name)
+	case errors.Is(err, auth.ErrUnknownUser):
+		return fmt.Errorf("gebruiker %q bestaat niet", name)
+	case err != nil:
+		return err
+	}
+	fmt.Printf("Account %s is gereset.\n\n", res.User.Username)
+	fmt.Printf("  Tijdelijk wachtwoord: %s\n", res.TempPassword)
+	fmt.Printf("  Geldig tot:           %s (werkt één keer)\n\n", res.ExpiresAt.Local().Format("2006-01-02 15:04 MST"))
+	fmt.Println("Tweestapsverificatie staat uit en alle sessies zijn beëindigd.")
+	fmt.Println("Bij de volgende login moet de gebruiker een nieuw wachtwoord en een nieuwe TOTP instellen.")
+	fmt.Println("De reset staat in het logboek (user.reset).")
 	return nil
 }
 

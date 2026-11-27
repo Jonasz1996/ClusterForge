@@ -249,7 +249,8 @@ func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (
 	}
 
 	// Een beheerde cronjob waarvan de laatste run op een node mislukte, tot
-	// die weer lukt; per job uit te zetten.
+	// die weer lukt of die node niet meer stuurt (een sync die oversloeg met
+	// SyncBeforeSkip); per job uit te zetten.
 	managed, err := q.ListIncidentCronJobs(ctx)
 	if err != nil {
 		return w, err

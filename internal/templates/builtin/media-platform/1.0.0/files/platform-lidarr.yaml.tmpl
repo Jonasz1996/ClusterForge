@@ -1,0 +1,13 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Lidarr (fixlijst 26-11, punt 8), bovenop compose.arr.yaml van een versie die
+# hem heeft; platform-ctl.sh neemt dit bestand alleen dan mee. Geen herstart
+# door Docker zelf, net als qBittorrent. /downloads is dezelfde map van deze
+# node als bij qBittorrent, anders vindt Lidarr de klare download niet. Zijn
+# config (DATA_ROOT/arr/lidarr) en zijn hoofdmap /music
+# (DATA_ROOT/import/lidarr) blijven op SeaweedFS: een harde link van de
+# lokale schijf naar SeaweedFS kan niet, dus Lidarr kopieert.
+services:
+  lidarr:
+    restart: "no"
+    volumes:
+      - /var/lib/cf-platform/torrents:/downloads

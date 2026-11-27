@@ -2,6 +2,7 @@ package homeapps
 
 import (
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strconv"
@@ -142,16 +143,19 @@ type App struct {
 	ActiveNode  string     `json:"active_node,omitempty"`
 	URL         string     `json:"url,omitempty"`
 	InternalURL string     `json:"internal_url,omitempty"`
-	Version     string     `json:"version,omitempty"`
-	Domains     []string   `json:"domains"`
-	Authentik   string     `json:"authentik,omitempty"`
-	Ports       []int      `json:"ports"`
-	Instances   []Instance `json:"instances"`
-	Problems    []string   `json:"problems"`
-	Stats       string     `json:"stats,omitempty"`
-	Override    Override   `json:"override"`
-	Hidden      bool       `json:"hidden"`
-	Sort        int        `json:"sort"`
+	// Target is het echte doel als host:poort: waar NPM naartoe stuurt, of
+	// anders waar de dienst luistert (homepage H12).
+	Target    string     `json:"target,omitempty"`
+	Version   string     `json:"version,omitempty"`
+	Domains   []string   `json:"domains"`
+	Authentik string     `json:"authentik,omitempty"`
+	Ports     []int      `json:"ports"`
+	Instances []Instance `json:"instances"`
+	Problems  []string   `json:"problems"`
+	Stats     string     `json:"stats,omitempty"`
+	Override  Override   `json:"override"`
+	Hidden    bool       `json:"hidden"`
+	Sort      int        `json:"sort"`
 }
 
 // Doubt is een webdienst die ClusterForge niet zeker herkent: één klik
@@ -405,6 +409,9 @@ func buildApp(key string, g *group, nodes map[uuid.UUID]Node, hostsBySvc map[str
 			if a.Authentik == "" {
 				a.Authentik = h.Authentik
 			}
+			if a.Target == "" && h.Enabled && h.ForwardHost != "" {
+				a.Target = net.JoinHostPort(h.ForwardHost, strconv.Itoa(h.ForwardPort))
+			}
 			for _, p := range h.Problems {
 				if p.Level == "crit" {
 					a.Problems = append(a.Problems, "NPM: "+p.Text)
@@ -439,6 +446,9 @@ func buildApp(key string, g *group, nodes map[uuid.UUID]Node, hostsBySvc map[str
 		}
 		if mainRow.Target != "" {
 			a.InternalURL = scheme + "://" + mainRow.Target + ":" + strconv.Itoa(mainRow.Port)
+			if a.Target == "" {
+				a.Target = net.JoinHostPort(mainRow.Target, strconv.Itoa(mainRow.Port))
+			}
 		}
 	}
 	if a.URL == "" {
@@ -491,6 +501,7 @@ func hostApp(h publish.HostView) App {
 			scheme = "http"
 		}
 		a.InternalURL = scheme + "://" + h.ForwardHost + ":" + strconv.Itoa(h.ForwardPort)
+		a.Target = net.JoinHostPort(h.ForwardHost, strconv.Itoa(h.ForwardPort))
 		a.Ports = []int{h.ForwardPort}
 	}
 	for _, p := range h.Problems {

@@ -29,7 +29,9 @@ var attentionHelp = []struct{ prefix, help string }{
 	{"zabbix-", "De monitoring met Zabbix ziet een probleem. Open Zabbix: daar staat welke server en wat er mis is."},
 	{"opnsense-", "De firewall (OPNsense) vraagt aandacht. Open OPNsense voor de details; wijzigingen via ClusterForge maken eerst een herstelpunt."},
 	{"publish-", "Iets aan je websites naar buiten (NPM, de reverse proxy, of Authentik, de login) vraagt aandacht. Open Publicatie voor de details."},
+	{"mailrelay-", "De Postfix-relay stuurt de mail van je servers door naar je provider. Groeit de wachtrij, dan raakt de mail niet weg: meestal weigert de smarthost de login of is hij onbereikbaar. Open het cluster, kijk bij Postfix-relay de wachtrij na en stuur een testmail; de log zegt wat de smarthost antwoordt. Een open relay is ernstig: dan kan iedereen spam via jouw IP sturen. Zet mynetworks dan meteen juist bij de parameters van het cluster."},
 	{"totp-off", "Tweestapsverificatie beschermt je account met een code op je gsm, ook als iemand je wachtwoord kent. Zet ze aan bij Instellingen; het duurt een minuut."},
+	{"resources-", "ClusterForge ziet een probleem met resources: volle swap, te weinig geheugen, aanhoudend hoge load of een container die blijft herstarten. Bij Onderhoud → Resources staat per probleem een voorstel; één klik maakt er een taak van met een log. ClusterForge doet nooit iets vanzelf en maakt nooit iets kleiner."},
 	{"disk-crit", "De schijf is (bijna) vol. Als ze helemaal vol raakt, stoppen databases en diensten met schrijven en kunnen ze vastlopen. Open de node bij Schijfruimte en klik 'Kijk wat ruimte inneemt'; daarna maak je met één knop veilig ruimte vrij."},
 	{"disk-warn", "De schijf raakt vol. Nog geen probleem, maar ruim op voor het er een wordt: open de node bij Schijfruimte, laat meten wat ruimte inneemt en maak veilig ruimte vrij. Lukt dat niet genoeg, maak de schijf groter in Proxmox."},
 }

@@ -5,8 +5,8 @@ LEFT JOIN users u ON u.id = t.created_by
 ORDER BY t.created_at;
 
 -- name: CreateAPIToken :one
-INSERT INTO api_tokens (name, token_hash, prefix, cluster_ids, expires_at, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO api_tokens (name, token_hash, prefix, cluster_ids, scopes, expires_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: DeleteAPIToken :execrows

@@ -74,6 +74,8 @@ var Known = map[string]Spec{
 	"auth.totp_setup_started":   {CategorySecurity, "Instellen van tweestapsverificatie gestart"},
 	"auth.rate_limited":         {CategorySecurity, "Loginlimiet bereikt"},
 	"user.created":              {CategorySecurity, "Gebruiker aangemaakt"},
+	"user.reset":                {CategorySecurity, "Account gereset via de CLI (tijdelijk wachtwoord, TOTP uit)"},
+	"auth.recovery_requested":   {CategorySecurity, "Herstelcode aangevraagd op de loginpagina"},
 	// Voor het gebruikersbeheer dat later komt.
 	"user.disabled":         {CategorySecurity, "Gebruiker uitgeschakeld"},
 	"user.enabled":          {CategorySecurity, "Gebruiker weer ingeschakeld"},
@@ -144,6 +146,8 @@ var Known = map[string]Spec{
 	"node.lifecycle_changed":      {CategoryLifecycle, "Lifecycle van node gewijzigd"},
 	"node.software_updated":       {CategoryLifecycle, "Pakketten of Docker op node bijgewerkt"},
 	"disk.settings_updated":       {CategoryLifecycle, "Instellingen van schijfbewaking gewijzigd"},
+	"resources.settings_updated":  {CategoryLifecycle, "Drempels voor resources gewijzigd"},
+	"resources.fix_started":       {CategoryLifecycle, "Voorstel voor resources uitgevoerd"},
 	"disk.cleaned":                {CategoryLifecycle, "Schijf opgeruimd"},
 	"node.software_update_failed": {CategoryLifecycle, "Bijwerken van pakketten of Docker mislukt"},
 	"settings.update_policy":      {CategoryLifecycle, "Beleid voor automatisch bijwerken van omgeving gewijzigd"},

@@ -421,6 +421,7 @@ type ApiToken struct {
 	CreatedBy  *uuid.UUID
 	LastUsedAt *time.Time
 	LastUsedIp string
+	Scopes     []string
 }
 
 type AssistantConversation struct {
@@ -1683,6 +1684,16 @@ type OpnsenseFlowRead struct {
 	Error   string
 }
 
+type PasswordResetRequest struct {
+	ID        uuid.UUID
+	CodeHash  []byte
+	Username  string
+	Ip        string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
 type ProxmoxBackup struct {
 	ConnectionID uuid.UUID
 	Volid        string
@@ -1971,6 +1982,12 @@ type Replacement struct {
 	CreatedBy   *uuid.UUID
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type ResourcesSetting struct {
+	ID         bool
+	Thresholds []byte
+	UpdatedAt  time.Time
 }
 
 type RiskAcceptance struct {
@@ -2330,17 +2347,21 @@ type UpkeepRun struct {
 }
 
 type User struct {
-	ID            uuid.UUID
-	Username      string
-	PasswordHash  string
-	Role          UserRole
-	TotpSecret    *string
-	TotpEnabledAt *time.Time
-	TotpLastStep  *int64
-	DisabledAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	KubeLearning  bool
+	ID                    uuid.UUID
+	Username              string
+	PasswordHash          string
+	Role                  UserRole
+	TotpSecret            *string
+	TotpEnabledAt         *time.Time
+	TotpLastStep          *int64
+	DisabledAt            *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	KubeLearning          bool
+	TempPasswordExpiresAt *time.Time
+	TempPasswordUsedAt    *time.Time
+	MustChangePassword    bool
+	MustSetupTotp         bool
 }
 
 type Vip struct {

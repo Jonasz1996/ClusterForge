@@ -37,6 +37,8 @@ services:
       CF_SECURE_COOKIES: ${CF_SECURE_COOKIES:-true}
       CF_TRUST_PROXY_HEADERS: ${CF_TRUST_PROXY_HEADERS:-false}
       CF_SESSION_TTL: ${CF_SESSION_TTL:-12h}
+      # Commando onder "Wachtwoord vergeten of kan niet inloggen?", {code} = herstelcode.
+      CF_RESET_COMMAND: ${CF_RESET_COMMAND:-}
       CF_SESSION_MAX_AGE: ${CF_SESSION_MAX_AGE:-720h}
       CF_NATS_ADVERTISE: ${CF_NATS_ADVERTISE:-}
       # Waar de webserver op de host luistert; op 127.0.0.1 (achter een proxy

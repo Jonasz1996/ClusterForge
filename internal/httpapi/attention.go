@@ -19,6 +19,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/diskwatch"
 	"github.com/Jonasz1996/clusterforge/internal/firewall"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/resources"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 )
 
@@ -391,6 +392,39 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		} else {
 			s.log.Warn("schijfbewaking", "err", err)
 		}
+	}
+
+	// Testlijst 3, N27: voorstellen voor resources met één klik.
+	if s.resources != nil {
+		var crit, warn []string
+		for _, pr := range s.resources.Peek() {
+			switch {
+			case pr.Kind == resources.KindDisk:
+				// Volle schijven staan al hierboven (disk-crit/disk-warn).
+			case pr.Level == "crit":
+				crit = append(crit, pr.Title)
+			case pr.Level == "warn":
+				warn = append(warn, pr.Title)
+			}
+		}
+		add("resources-crit", red, plural(len(crit), "probleem met resources", "problemen met resources")+" (voorstel klaar)", names(crit), "/onderhoud/resources", len(crit))
+		add("resources-warn", amber, plural(len(warn), "voorstel voor resources", "voorstellen voor resources")+" (swap, geheugen, load, containers)", names(warn), "/onderhoud/resources", len(warn))
+	}
+
+	if s.mailrelay != nil {
+		var crit, warn []string
+		critHref, warnHref := "/clusters", "/clusters"
+		for _, n := range s.mailrelay.Notices() {
+			if n.Level == "crit" {
+				crit = append(crit, n.Text)
+				critHref = n.Href
+			} else {
+				warn = append(warn, n.Text)
+				warnHref = n.Href
+			}
+		}
+		add("mailrelay-crit", red, plural(len(crit), "probleem met de Postfix-relay", "problemen met de Postfix-relay"), names(crit), critHref, len(crit))
+		add("mailrelay-queue", amber, plural(len(warn), "melding over de Postfix-wachtrij", "meldingen over de Postfix-wachtrij"), names(warn), warnHref, len(warn))
 	}
 
 	if s.needs2FA(ctx, p) {

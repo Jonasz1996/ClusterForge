@@ -37,6 +37,9 @@ const MaxTileFields = 8
 
 func (s *Server) dashboardV2Routes(r chi.Router) {
 	r.Use(s.requireAPIToken)
+	// Zelfde scope-regel als v1: 'dashboard' voor gescopte tokens, alles voor
+	// ongescopte (backward compatible).
+	r.Use(s.requireScope("dashboard", true))
 	r.Get("/", s.dashV2Overview)
 	r.Get("/apps", s.dashV2Apps)
 	r.Get("/apps/{app}", s.dashV2App)
@@ -70,25 +73,27 @@ type v2Section struct {
 }
 
 type v2Tile struct {
-	Key         string         `json:"key"`
-	Slug        string         `json:"slug"`
-	Name        string         `json:"name"`
-	Group       string         `json:"group"`
-	Icon        string         `json:"icon"`
-	Status      string         `json:"status"`
-	StatusLabel string         `json:"status_label"`
-	Reason      string         `json:"reason"`
-	ReasonCode  string         `json:"reason_code,omitempty"`
-	OK          bool           `json:"ok"`
-	URL         string         `json:"url"`
-	Href        string         `json:"clusterforge_url"`
-	API         string         `json:"api"`
-	Where       v2Where        `json:"where"`
-	Fields      []v2Field      `json:"fields"`
-	Values      map[string]any `json:"values"`
-	Sections    []v2Section    `json:"sections"`
-	App         homeapps.App   `json:"app"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	Key         string `json:"key"`
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Group       string `json:"group"`
+	Icon        string `json:"icon"`
+	Status      string `json:"status"`
+	StatusLabel string `json:"status_label"`
+	Reason      string `json:"reason"`
+	ReasonCode  string `json:"reason_code,omitempty"`
+	// Target is het echte doel als host:poort (homepage H12).
+	Target    string         `json:"target,omitempty"`
+	OK        bool           `json:"ok"`
+	URL       string         `json:"url"`
+	Href      string         `json:"clusterforge_url"`
+	API       string         `json:"api"`
+	Where     v2Where        `json:"where"`
+	Fields    []v2Field      `json:"fields"`
+	Values    map[string]any `json:"values"`
+	Sections  []v2Section    `json:"sections"`
+	App       homeapps.App   `json:"app"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 type v2Where struct {
@@ -349,6 +354,7 @@ func (s *Server) buildHomeApps(ctx context.Context) (homeAppsSet, error) {
 			"reason":       a.Reason,
 			"url":          a.URL,
 			"internal_url": a.InternalURL,
+			"target":       a.Target,
 		}
 		online := 0
 		var updates, sec int
@@ -570,7 +576,7 @@ func (s *Server) tile(r *http.Request, d homeAppsSet, a homeapps.App) v2Tile {
 	base := baseURL(r, s.cfg.TrustProxyHeaders)
 	t := v2Tile{
 		Key: a.Key, Slug: a.Slug, Name: a.Name, Group: a.Group, Icon: a.Icon, Status: a.Status, StatusLabel: a.StatusLabel,
-		Reason: a.Reason, ReasonCode: a.ReasonCode, OK: a.Status == homeapps.StatusOK, URL: a.URL,
+		Reason: a.Reason, ReasonCode: a.ReasonCode, Target: a.Target, OK: a.Status == homeapps.StatusOK, URL: a.URL,
 		Href: base + "/homepage-apps?app=" + a.Slug, API: base + dashboardV2Base + "/apps/" + a.Slug,
 		Fields: d.fields[a.Key], Values: d.values[a.Key], Sections: d.sects[a.Key], App: a, UpdatedAt: d.at,
 	}
@@ -822,6 +828,9 @@ type v2LayoutTile struct {
 	Description string `json:"description"`
 	API         string `json:"api"`
 	Gone        bool   `json:"gone"`
+	// Target is het echte doel (host:poort) voor een tcp-check in de
+	// homepage (H12).
+	Target string `json:"target,omitempty"`
 }
 
 type v2LayoutGroup struct {
@@ -865,7 +874,7 @@ func (s *Server) dashV2Layout(w http.ResponseWriter, r *http.Request) {
 		}
 		l.Groups[i].Tiles = append(l.Groups[i].Tiles, v2LayoutTile{
 			Key: a.Key, App: a.Slug, Name: a.Name, Icon: a.Icon, Href: a.URL, Description: desc,
-			API: base + dashboardV2Base + "/apps/" + a.Slug, Gone: a.Gone,
+			API: base + dashboardV2Base + "/apps/" + a.Slug, Gone: a.Gone, Target: a.Target,
 		})
 	}
 	data, _ := json.Marshal(l.Groups)
