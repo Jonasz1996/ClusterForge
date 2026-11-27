@@ -705,6 +705,62 @@ type CrowdsecDecision struct {
 	FirstSeen  time.Time
 }
 
+type CrowdsecList struct {
+	ID             uuid.UUID
+	Slug           string
+	Kind           string
+	Name           string
+	Source         string
+	Url            string
+	Enabled        bool
+	Scope          string
+	ClusterID      *uuid.UUID
+	RefreshMinutes int32
+	Pinned         bool
+	Generation     int64
+	Hash           string
+	Count          int32
+	Dropped        int32
+	FetchedAt      *time.Time
+	FetchEtag      string
+	FetchModified  string
+	FetchError     string
+	FetchFailedAt  *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type CrowdsecListEntry struct {
+	ListID    uuid.UUID
+	Value     string
+	Reason    string
+	ExpiresAt *time.Time
+	AddedBy   *uuid.UUID
+	CreatedAt time.Time
+}
+
+type CrowdsecListNode struct {
+	NodeID    uuid.UUID
+	ListID    uuid.UUID
+	Tag       string
+	Count     int32
+	AppliedAt *time.Time
+	Error     string
+	FailedAt  *time.Time
+}
+
+type CrowdsecListVersion struct {
+	ID        int64
+	ListID    uuid.UUID
+	Count     int32
+	Added     int32
+	Removed   int32
+	Entries   []byte
+	Note      string
+	Actor     *uuid.UUID
+	CreatedAt time.Time
+}
+
 type CrowdsecNode struct {
 	NodeID            uuid.UUID
 	Managed           bool
@@ -729,6 +785,14 @@ type CrowdsecNode struct {
 	ConsoleEnrolledAt *time.Time
 	ConsoleError      string
 	ConsoleFailedAt   *time.Time
+	Lists             []byte
+	ConsoleOffDone    bool
+}
+
+type CrowdsecOffender struct {
+	Value    string
+	Offenses int32
+	LastAt   time.Time
 }
 
 type CrowdsecSetting struct {
@@ -742,6 +806,11 @@ type CrowdsecSetting struct {
 	ConsoleKeyEnc  []byte
 	ConsoleKeyID   string
 	ConsoleKeyHash string
+	AutoRules      []byte
+	Notify         []byte
+	NotifyEnc      []byte
+	NotifyKeyID    string
+	ConsoleOff     bool
 }
 
 type CrowdsecShared struct {

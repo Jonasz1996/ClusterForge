@@ -119,7 +119,8 @@ func Build(s Signals, cfg NodeConfig, whitelist []string) Plan {
 
 func (p Plan) hash() string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v1\nbouncer=%v\n", p.Bouncer)
+	// v2: het script controleert nginx (fase 47); elke node past één keer opnieuw toe.
+	_, _ = fmt.Fprintf(h, "v2\nbouncer=%v\n", p.Bouncer)
 	for _, c := range p.Collections {
 		_, _ = fmt.Fprintf(h, "col %s\n", c)
 	}

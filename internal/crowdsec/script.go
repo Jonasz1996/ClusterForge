@@ -22,6 +22,8 @@ func Script(p Plan) string {
 	w("STATE=%s", protocol.CrowdSecStateFile)
 	w("BACKUP=$(mktemp -d /var/tmp/cf-crowdsec.XXXXXX)")
 	w("trap 'rm -rf \"$BACKUP\"' EXIT")
+	b.WriteString(nginxGuardScript)
+	w("cf_nginx_guard")
 	w("")
 	w(`echo "== CrowdSec installeren"`)
 	w("if ! command -v cscli >/dev/null 2>&1; then")
@@ -116,6 +118,8 @@ func Script(p Plan) string {
 	} else {
 		w("if systemctl list-unit-files crowdsec-firewall-bouncer.service >/dev/null 2>&1; then systemctl disable --now crowdsec-firewall-bouncer >/dev/null 2>&1 || true; fi")
 	}
+	w("# Na het toepassen: nginx moet nog altijd door nginx -t.")
+	w("cf_nginx_guard")
 	w("")
 	cq := make([]string, len(p.Collections))
 	for i, c := range p.Collections {
@@ -126,6 +130,36 @@ func Script(p Plan) string {
 	w(`echo "Klaar: plan %s toegepast."`, p.Hash)
 	return b.String()
 }
+
+// nginxGuardScript beschermt nginx op de host. Het pakket
+// crowdsec-nginx-bouncer zet /etc/nginx/conf.d/crowdsec_nginx.conf, die de
+// lua-modules (lua-resty-*, libnginx-mod-http-lua) nodig heeft. Ontbreken die,
+// dan faalt nginx -t, en daarmee elke apt-run die nginx herstart. ClusterForge
+// installeert die bouncer nooit (de firewall-bouncer beschermt de node); staat
+// hij er toch en breekt hij nginx, dan gaat zijn config opzij, wordt nginx
+// herladen en dpkg afgewerkt. Breekt nginx om een andere reden, dan blijft
+// alles staan en meldt het script dat.
+const nginxGuardScript = `cf_nginx_guard() {
+  command -v nginx >/dev/null 2>&1 || return 0
+  nginx -t >/dev/null 2>&1 && return 0
+  local moved="" f
+  for f in /etc/nginx/conf.d/crowdsec_nginx.conf /etc/nginx/sites-enabled/crowdsec_nginx.conf; do
+    if [ -e "$f" ]; then mv "$f" "$f.cf-uit"; moved="$moved $f"; fi
+  done
+  if [ -z "$moved" ]; then
+    echo "LET OP: nginx -t faalt, niet door CrowdSec:"; nginx -t 2>&1 | tail -n 3 || true
+    return 0
+  fi
+  if nginx -t >/dev/null 2>&1; then
+    echo "nginx: de CrowdSec-nginx-bouncer werkt hier niet (lua-modules ontbreken) en brak nginx; uitgezet:$moved (.cf-uit). De firewall-bouncer beschermt de node."
+    systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
+    dpkg --configure -a 2>&1 | tail -n 3 || true
+  else
+    for f in $moved; do mv "$f.cf-uit" "$f"; done
+    echo "LET OP: nginx -t faalt ook zonder de CrowdSec-config; niets gewijzigd:"; nginx -t 2>&1 | tail -n 3 || true
+  fi
+}
+`
 
 // lapiPortScript houdt de lokale API van CrowdSec weg van poorten die iets
 // anders nodig heeft. Standaard luistert die op 127.0.0.1:8080, net als de

@@ -32,12 +32,15 @@ type fakeBus struct {
 	scripts   map[uuid.UUID]string
 	enrolled  map[uuid.UUID][]protocol.CrowdSecEnroll
 	failRun   bool
+	// lists: per node tag → waarden (protocol 57).
+	lists      map[uuid.UUID]map[string][]string
+	consoleOff map[uuid.UUID]int
 }
 
 func newFakeBus() *fakeBus {
 	return &fakeBus{installed: map[uuid.UUID]bool{}, applied: map[uuid.UUID]string{}, alerts: map[uuid.UUID][]protocol.CrowdSecAlert{},
 		bans: map[uuid.UUID][]protocol.CrowdSecActive{}, decided: map[uuid.UUID][]protocol.CrowdSecDecision{}, scripts: map[uuid.UUID]string{},
-		enrolled: map[uuid.UUID][]protocol.CrowdSecEnroll{}}
+		enrolled: map[uuid.UUID][]protocol.CrowdSecEnroll{}, lists: map[uuid.UUID]map[string][]string{}, consoleOff: map[uuid.UUID]int{}}
 }
 
 func (b *fakeBus) CrowdSec(_ context.Context, id uuid.UUID, req protocol.CrowdSecRequest) (protocol.CrowdSecResponse, error) {
@@ -54,7 +57,27 @@ func (b *fakeBus) CrowdSec(_ context.Context, id uuid.UUID, req protocol.CrowdSe
 		}
 		return protocol.CrowdSecResponse{Status: st}, nil
 	case protocol.CrowdSecOpPoll:
-		return protocol.CrowdSecResponse{Poll: &protocol.CrowdSecPoll{Alerts: b.alerts[id], Decisions: b.bans[id], Blocklist: 15000}}, nil
+		return protocol.CrowdSecResponse{Poll: &protocol.CrowdSecPoll{Alerts: b.alerts[id], Decisions: b.bans[id], Blocklist: 15000,
+			Lists: b.listCounts(id)}}, nil
+	case protocol.CrowdSecOpListImport:
+		if err := req.List.Validate(); err != nil {
+			return protocol.CrowdSecResponse{Error: err.Error()}, nil
+		}
+		if b.lists[id] == nil {
+			b.lists[id] = map[string][]string{}
+		}
+		b.lists[id][req.List.Tag] = append(b.lists[id][req.List.Tag], req.List.Values...)
+		return protocol.CrowdSecResponse{Count: len(req.List.Values)}, nil
+	case protocol.CrowdSecOpListDrop:
+		n := 0
+		for _, t := range req.Drop {
+			n += len(b.lists[id][t])
+			delete(b.lists[id], t)
+		}
+		return protocol.CrowdSecResponse{Count: n}, nil
+	case protocol.CrowdSecOpConsoleOff:
+		b.consoleOff[id]++
+		return protocol.CrowdSecResponse{Count: 1}, nil
 	case protocol.CrowdSecOpDecide:
 		b.decided[id] = append(b.decided[id], *req.Decide)
 		return protocol.CrowdSecResponse{Count: 1}, nil
@@ -66,6 +89,14 @@ func (b *fakeBus) CrowdSec(_ context.Context, id uuid.UUID, req protocol.CrowdSe
 		return protocol.CrowdSecResponse{Count: 1}, nil
 	}
 	return protocol.CrowdSecResponse{Error: "?"}, nil
+}
+
+func (b *fakeBus) listCounts(id uuid.UUID) map[string]int {
+	out := map[string]int{}
+	for t, v := range b.lists[id] {
+		out[t] = len(v)
+	}
+	return out
 }
 
 func (b *fakeBus) Run(_ context.Context, id uuid.UUID, req protocol.RunRequest) (protocol.RunResponse, error) {
