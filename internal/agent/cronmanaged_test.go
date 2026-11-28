@@ -55,7 +55,7 @@ func TestCronApply(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(root, "etc/clusterforge/cron", jobA+".json")); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("jobbestand: %v %v", fi, err)
 	}
-	want := "systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer; systemctl disable --now cf-cron-" + jobB + ".timer"
+	want := "systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer; systemctl disable --now cf-cron-" + jobB + ".timer; systemctl reset-failed cf-cron@" + jobB + ".service"
 	if got := strings.Join(calls, "; "); got != want {
 		t.Errorf("commando's:\n%s\nwil\n%s", got, want)
 	}
@@ -73,7 +73,7 @@ func TestCronApply(t *testing.T) {
 	if res := a.cronApply(ctx, []protocol.ManagedCron{a1}, nil); res.Error != "" {
 		t.Fatal(res.Error)
 	}
-	want = "systemctl disable --now cf-cron-" + jobB + ".timer; systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer"
+	want = "systemctl disable --now cf-cron-" + jobB + ".timer; systemctl reset-failed cf-cron@" + jobB + ".service; systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer"
 	if got := strings.Join(calls, "; "); got != want {
 		t.Errorf("commando's:\n%s\nwil\n%s", got, want)
 	}

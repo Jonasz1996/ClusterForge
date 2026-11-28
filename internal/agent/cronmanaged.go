@@ -103,6 +103,9 @@ func (a *Agent) cronApply(ctx context.Context, jobs []protocol.ManagedCron, rece
 		}
 		return nil
 	}
+	// resetFailed haalt de failed-stand van een job weg die niet meer draait
+	// (weg of uitgezet); een unit die systemd niet kent, is geen fout.
+	resetFailed := func(id string) { _, _ = a.exec(ctx, "systemctl", "reset-failed", "cf-cron@"+id+".service") }
 
 	// Jobs die er niet meer bij horen: timer stoppen en weghalen.
 	var stale []string
@@ -136,6 +139,9 @@ func (a *Agent) cronApply(ctx context.Context, jobs []protocol.ManagedCron, rece
 		if err := os.Remove(filepath.Join(jobDir, id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fail(err)
 		}
+		// Mislukte de laatste run, dan bleef cf-cron@<id> voor altijd op
+		// failed staan (er komt geen run meer die het rechtzet).
+		resetFailed(id)
 		res.Output = append(res.Output, "job "+id+" weggehaald")
 	}
 
@@ -204,6 +210,7 @@ func (a *Agent) cronApply(ctx context.Context, jobs []protocol.ManagedCron, rece
 			if err := systemctl("disable", "--now", cronTimerUnit(id)); err != nil {
 				return fail(err)
 			}
+			resetFailed(id)
 			res.Output = append(res.Output, fmt.Sprintf("job %s (%s) staat uit", j.Name, id))
 		}
 	}

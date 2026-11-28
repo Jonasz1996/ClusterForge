@@ -423,7 +423,8 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 	keys := filepath.Join(n.dir, "cfp/sleutels/gezichten")
 	must(t, os.MkdirAll(keys, 0o700))
 	ok := map[string]*string{"vip": on(""), "active-cf-platform": on(""), "uid": on("10001\n"),
-		"cli-sleutels-check": on("sleutelmap: in orde\n"), "cli-sleutels-check.rc": on("0")}
+		"cli-sleutels-check": on("sleutelmap: in orde\n"), "cli-sleutels-check.rc": on("0"),
+		"src/infra/single/compose.analyse.yaml": on("")}
 	for _, tc := range []struct {
 		name  string
 		state map[string]*string
@@ -436,6 +437,9 @@ func TestMediaPlatformSleutelsKlaar(t *testing.T) {
 			"Niets gekopieerd of gewist: deze node heeft het VIP van het platform (192.168.10.150) niet", protocol.SyncBeforeSkip, false},
 		{"platform draait niet", map[string]*string{"active-cf-platform": nil}, nil,
 			"Niets gekopieerd of gewist: het platform draait hier niet", protocol.SyncBeforeSkip, false},
+		// Zonder de analyse zijn er geen sleutels: overslaan, ook zonder map.
+		{"analyse uit", map[string]*string{"src/infra/single/compose.analyse.yaml": nil}, func(t *testing.T) { must(t, os.RemoveAll(filepath.Dir(keys))) },
+			"de analyse (gezichten) staat uit", protocol.SyncBeforeSkip, false},
 		{"andere eigenaar", map[string]*string{"uid": on("0\n")}, nil, "niet van uid 10001", 1, false},
 		{"map ontbreekt", nil, func(t *testing.T) { must(t, os.Remove(keys)) }, "is geen gewone map", 1, false},
 		{"map is een symlink", nil, func(t *testing.T) {
