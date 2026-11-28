@@ -13,8 +13,15 @@ Authentik, voorstellen voor een nieuw doel, opruimen van dode doelen).
     outpost-adres of oud adres in Advanced, verkeerd doel (zeker voorstel,
     naar het VIP, of een doel dat 404 geeft), Authentik weghalen bij "nooit"
     of "eigen login", open paden zetten, en **verhuizen** (zie eigenaarschap);
-  - **verwijderen**: host van een verdwenen dienst (doel antwoordt niet, geen
-    voorstel) en Authentik-app/-provider zonder NPM-host. Altijd eerst
+  - **verwijderen**: host van een verdwenen dienst en Authentik-app/-provider
+    zonder NPM-host. Onbereikbaar is op zich geen reden (scan 28/11): de
+    host komt alleen in het plan als ClusterForge het doel zelf heeft
+    bekeken en het niet antwoordt, het doel een IP is dat niet in de
+    inventaris staat (geen node, ook geen uitgeschakelde, en geen VIP), niet
+    op .1 tot .3 eindigt (gateway/firewall) en er geen dienst met die naam
+    meer draait. Anders staat het als opmerking onder het plan. Vlak voor het
+    uitschakelen controleert de taak het doel nog eens vanaf de NPM-node;
+    antwoordt het dan wel, dan blijft de host staan. Altijd eerst
     **uitschakelen met een kopie** (`publish_disabled`); terugzetten of
     definitief verwijderen staat onder Uitgeschakeld.
 - Goedkeuren: alles, de gekozen regels of één regel. Dat is één taak
@@ -43,8 +50,21 @@ verhuizing, of met de hand. Wil een scan een naam maken die al bestaat, dan
 wordt het een verhuizing: het doel gaat naar de nieuwe dienst en het oude
 doel blijft **terugval** (`error_page 502 504 = @cf_fallback`, ook in de
 location van Authentik) tot Jonas "terugval weghalen" kiest.
-Testclusters (test, lab) krijgen standaard `app.test.<domein>` (of
-`app.lab.<domein>`), zodat test en productie nooit om een naam vechten.
+Testclusters (omgeving `test`) krijgen standaard `app.test.<domein>`, zodat
+test en productie nooit om een naam vechten. Een labcluster (zoals media)
+krijgt gewoon `app.<domein>` (scan 28/11).
+
+## Doel en outpost (scan 28/11)
+
+- Een cluster met een VIP wijst altijd naar dat VIP, ook als de dienst nu
+  maar op één node draait. Het eigen VIP van een database (Patroni,
+  omschrijving met "database") telt niet mee.
+- Het outpost-adres van Authentik is het app-VIP van het Authentik-cluster,
+  niet het eerste VIP op adres (dat was de database-VIP .240 in plaats van
+  .244).
+- Een betere poort op hetzelfde adres (vaultx 80 → 443) wordt alleen een
+  opmerking, geen wijziging, en enkel als het huidige doel echt niet
+  antwoordt.
 
 ## Nummers
 

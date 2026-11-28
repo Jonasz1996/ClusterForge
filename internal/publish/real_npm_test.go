@@ -707,8 +707,27 @@ func TestRealNPM(t *testing.T) {
 	if c := conf(old[0]); strings.Contains(c, "cf_fallback") || !strings.Contains(c, "location ^~ /api") {
 		t.Fatalf("terugval weghalen:\n%s", c)
 	}
+	// Scan 28/11: antwoordt het doel nog, dan weigert het plan het
+	// uitschakelen. Pas als het doel echt weg is, gaat het door.
+	alive()
+	if _, err := s.Plan(ctx, Action{Action: ActDisable, HostID: old[0]}); err == nil || !strings.Contains(err.Error(), "antwoordt nu wel") {
+		t.Fatalf("uitschakelen van een levend doel niet geweigerd: %v", err)
+	}
+	setPort := func(port int) {
+		t.Helper()
+		tok = loginNPM(t, p81, identity, secret)
+		if st, b := npmAPI(t, p81, "PUT", fmt.Sprintf("/nginx/proxy-hosts/%d", old[0]), tok, map[string]any{"forward_port": port}); st >= 300 {
+			t.Fatalf("poort zetten: %d %s", st, b)
+		}
+		if data, err := s.readNPM(ctx, st0); err == nil {
+			s.saveRead(ctx, "npm", data, nil)
+		}
+	}
+	gone, _ := strconv.Atoi(freePort(t))
+	setPort(gone)
 	alive()
 	run(Action{Action: ActDisable, HostID: old[0]}, store.JobStatusSucceeded)
+	setPort(backend)
 	if data, err := s.readNPM(ctx, st0); err == nil {
 		s.saveRead(ctx, "npm", data, nil)
 	}

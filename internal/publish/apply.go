@@ -297,8 +297,10 @@ func (s *Service) outpostFor(ctx context.Context, st Settings) (string, error) {
 			return "", err
 		}
 		for _, c := range cl {
-			if c.ID == *st.AuthentikClusterID && len(c.VIPs) > 0 {
-				return "http://" + c.VIPs[0].Address + ":" + strconv.Itoa(st.AuthentikPort), nil
+			if c.ID == *st.AuthentikClusterID {
+				if vip := primaryVIP(c, nil); vip != "" {
+					return "http://" + vip + ":" + strconv.Itoa(st.AuthentikPort), nil
+				}
 			}
 		}
 	}

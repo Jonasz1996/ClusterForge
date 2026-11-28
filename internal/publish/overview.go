@@ -138,6 +138,15 @@ type Overview struct {
 	rawHosts []NPMHost
 	// rawAK is wat ClusterForge laatst in Authentik las (fase 49).
 	rawAK AKRead
+	// known: adressen die ClusterForge kent (nodes, VIP's), met de node
+	// erachter als die er is (scan 28/11: onbereikbaar is niet weg).
+	known map[string]knownAddr
+}
+
+// knownAddr is een adres uit de inventaris.
+type knownAddr struct {
+	What  string // node of VIP met de naam
+	Ready string // waarom de node nu niet antwoordt; leeg als hij online is
 }
 
 // ClusterRef is een cluster om in de instellingen te kiezen.
@@ -326,6 +335,19 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 		ov.DeadNets = []DeadNet{}
 	}
 	ov.rawHosts = npm.Hosts
+	ov.known = map[string]knownAddr{}
+	for _, n := range nodes {
+		k := knownAddr{What: "node " + n.Hostname, Ready: n.Ready()}
+		if n.PrimaryIP != "" {
+			ov.known[n.PrimaryIP] = k
+		}
+		ov.known[strings.ToLower(n.Hostname)] = k
+	}
+	for _, c := range clusters {
+		for _, v := range c.VIPs {
+			ov.known[v.Address] = knownAddr{What: "VIP van " + c.Name}
+		}
+	}
 	if akRead {
 		ov.rawAK = ak
 	}
