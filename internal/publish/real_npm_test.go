@@ -673,11 +673,19 @@ func TestRealNPM(t *testing.T) {
 
 	// 13. Fase 49: paden zonder Authentik en een terugval in de echte
 	// nginx, uitschakelen met een kopie en terugzetten, en een scan.
-	if _, err := s.SavePolicy(ctx, events.System(), nil, Policy{Name: "webapp", Mode: PolicyExceptPaths, Paths: []string{"/api", "/guide.xml"}}); err != nil {
+	s.Refresh(ctx)
+	ov, _ = s.Overview(ctx)
+	name0 := ""
+	for _, h := range ov.Hosts {
+		if h.ID == old[0] {
+			name0 = strings.ToLower(h.Domains[0])
+		}
+	}
+	if _, err := s.SavePolicy(ctx, events.System(), nil, Policy{Name: policyName(name0), Mode: PolicyExceptPaths, Paths: []string{"/api", "/guide.xml"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO publish_owners (domain, cluster_name, fallback_scheme, fallback_host, fallback_port, fallback_cluster)
-		VALUES ('webapp.example.test', 'nieuw', 'http', $1, $2, 'oud')`, gateway, backend); err != nil {
+		VALUES ($3, 'nieuw', 'http', $1, $2, 'oud')`, gateway, backend, name0); err != nil {
 		t.Fatal(err)
 	}
 	alive()
