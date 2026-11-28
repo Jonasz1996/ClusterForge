@@ -104,6 +104,10 @@ type ServiceRow struct {
 	// standaard niet te publiceren en geen tegel op de homepage.
 	Internal    bool   `json:"internal,omitempty"`
 	InternalWhy string `json:"internal_why,omitempty"`
+	// Fase 49: DefaultName is de volledige naam bij publiceren (testclusters
+	// onder test.<domein>); Policy de uitzondering die geldt.
+	DefaultName string `json:"default_name,omitempty"`
+	Policy      string `json:"policy,omitempty"`
 }
 
 // NodeShort is een node bij een dienst.

@@ -136,6 +136,8 @@ type Overview struct {
 	DeadNets []DeadNet `json:"dead_nets"`
 	// rawHosts zijn de hosts zoals NPM ze gaf (met de volledige Advanced).
 	rawHosts []NPMHost
+	// rawAK is wat ClusterForge laatst in Authentik las (fase 49).
+	rawAK AKRead
 }
 
 // ClusterRef is een cluster om in de instellingen te kiezen.
@@ -273,6 +275,11 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 	}
 	ov := &Overview{Settings: st, Protocol: 51}
 	ov.Services = buildServices(nodes, clusters, found, st.Defaults)
+	pols, err := s.policyMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	applyPolicies(ov.Services, pols, st)
 	for _, c := range clusters {
 		ref := ClusterRef{ID: c.ID, Name: c.Name, Template: c.Template}
 		for _, v := range c.VIPs {
@@ -319,6 +326,9 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 		ov.DeadNets = []DeadNet{}
 	}
 	ov.rawHosts = npm.Hosts
+	if akRead {
+		ov.rawAK = ak
+	}
 	ov.Apps = buildApps(npm, ak)
 	if th, err := s.Theme(ctx); err == nil {
 		for i, h := range ov.Hosts {

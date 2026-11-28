@@ -6380,6 +6380,82 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /publish/scan:
+    get:
+      operationId: getPublishScan
+      summary: Scannen (fase 49) - de laatste scan, de uitzonderingen per dienst en wat uitgeschakeld is
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: runPublishScan
+      summary: NPM, Authentik en de doelen nu lezen en één plan maken (toevoegen, bijwerken, verwijderen); verandert niets (admin)
+      responses:
+        "200":
+          description: De scan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/policies:
+    put:
+      operationId: savePublishPolicy
+      summary: Uitzondering voor een dienst maken of wijzigen (nooit Authentik, eigen login, Authentik behalve paden) (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: De uitzondering
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/policies/{name}:
+    delete:
+      operationId: deletePublishPolicy
+      summary: Uitzondering weghalen; dan gelden de standaarden (admin)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Weg }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/owners:
+    get:
+      operationId: getPublishOwners
+      summary: Eigenaar (cluster of dienst) per naam in NPM en Authentik, met de terugval na een verhuizing
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setPublishOwner
+      summary: Eigenaar van een naam met de hand zetten of weghalen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "204": { description: Bewaard }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters

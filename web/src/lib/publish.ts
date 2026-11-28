@@ -22,6 +22,8 @@ export type PublishDefaults = {
   authentik_auto_repair?: boolean;
   letsencrypt: boolean;
   letsencrypt_email?: string;
+  // Fase 49: niets vanzelf veranderen, alleen via Scannen.
+  manual_only?: boolean;
 };
 
 export type PublishSettings = {
@@ -150,6 +152,8 @@ export type PublishService = {
   web: boolean;
   published: { host_id: number; domain: string; authentik: AKState }[];
   authentik_default: boolean;
+  default_name?: string;
+  policy?: PolicyMode;
   internal?: boolean;
   internal_why?: string;
 };
@@ -233,7 +237,15 @@ export type PublishActionKind =
   | "ak_repair"
   | "move_address"
   | "delete_dead"
-  | "revert";
+  | "revert"
+  | "scan"
+  | "move"
+  | "open_paths"
+  | "disable"
+  | "ak_disable"
+  | "restore_disabled"
+  | "purge_disabled"
+  | "drop_fallback";
 
 export type PublishAction = {
   action: PublishActionKind;
@@ -263,6 +275,11 @@ export type PublishAction = {
   // De host mag daarna een andere app tonen (anders draait de controle terug).
   allow_other_app?: boolean;
   change_id?: string;
+  scan_id?: string;
+  items?: string[];
+  ak_slug?: string;
+  ak_provider?: number;
+  disabled_id?: string;
 };
 
 // Een wijziging die ClusterForge aan een proxy host deed (testlijst 2, 1.1).
@@ -637,6 +654,121 @@ export function useRetryAuto() {
   const done = useInvalidate();
   return useMutation({
     mutationFn: async (service_key: string) => unwrap(await api.POST("/publish/auto/retry", { body: { service_key } as Body })),
+    onSuccess: done,
+  });
+}
+
+// Fase 49: Scannen. Alleen als je op Scannen klikt; één plan in drie
+// soorten. Toepassen gaat als action "scan" langs plan en actions.
+
+export type PolicyMode = "authentik" | "never" | "own_login" | "except_paths";
+
+export type PublishPolicy = {
+  name: string;
+  mode: PolicyMode;
+  paths: string[];
+  note?: string;
+  updated_at?: string;
+};
+
+export type ScanItem = {
+  id: string;
+  kind: "add" | "update" | "remove";
+  what: string;
+  domain: string;
+  title: string;
+  detail?: string;
+  owner?: string;
+  host_id?: number;
+  action: PublishAction;
+};
+
+export type PublishScan = {
+  id: string;
+  created_at: string;
+  items: ScanItem[];
+  notes: string[];
+  counts: { add: number; update: number; remove: number };
+};
+
+export type DisabledItem = {
+  id: string;
+  kind: "npm" | "authentik";
+  domain: string;
+  host_id?: number;
+  ak_slug?: string;
+  ak_provider?: number;
+  disabled_at: string;
+};
+
+export type ScanView = {
+  scan?: PublishScan;
+  policies: PublishPolicy[];
+  disabled: DisabledItem[];
+  manual_only: boolean;
+};
+
+export type PublishOwner = {
+  domain: string;
+  cluster_id?: string;
+  cluster_name?: string;
+  service_key?: string;
+  service_name?: string;
+  source: "scan" | "hand";
+  fallback?: { scheme: string; host: string; port: number; cluster?: string };
+  moved_at?: string;
+  updated_at: string;
+  host_id?: number;
+  ak_slug?: string;
+};
+
+export function usePublishScan() {
+  return useQuery({
+    queryKey: ["publish", "scan"],
+    queryFn: async () => unwrap(await api.GET("/publish/scan")) as unknown as ScanView,
+  });
+}
+
+export function useRunScan() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async () => unwrap(await api.POST("/publish/scan")) as unknown as PublishScan,
+    onSuccess: done,
+  });
+}
+
+export function useSavePolicy() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: PublishPolicy) =>
+      unwrap(await api.PUT("/publish/policies", { body: body as unknown as Body })) as unknown as PublishPolicy,
+    onSuccess: done,
+  });
+}
+
+export function useDeletePolicy() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      unwrap(await api.DELETE("/publish/policies/{name}", { params: { path: { name } } }));
+    },
+    onSuccess: done,
+  });
+}
+
+export function usePublishOwners() {
+  return useQuery({
+    queryKey: ["publish", "owners"],
+    queryFn: async () => unwrap(await api.GET("/publish/owners")) as unknown as { owners: PublishOwner[]; without: string[] },
+  });
+}
+
+export function useSetOwner() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: { domain: string; cluster_id?: string; service_key?: string; clear?: boolean }) => {
+      unwrap(await api.PUT("/publish/owners", { body: body as unknown as Body }));
+    },
     onSuccess: done,
   });
 }
