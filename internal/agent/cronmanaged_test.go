@@ -135,6 +135,10 @@ func TestCronRunner(t *testing.T) {
 		runs[0].Output != "hallo\nkapot\n" || runs[0].Reason != protocol.CronReasonSchedule || runs[0].EndedAt == nil {
 		t.Fatalf("run: %+v", runs)
 	}
+	// De oorzaak staat ook in de journal (stderr van cron-run).
+	if e := stderr.String(); !strings.Contains(e, "failed (exit 3)") || !strings.Contains(e, "  | kapot") {
+		t.Errorf("journal: %q", e)
+	}
 	sp := cronSpool{filepath.Join(root, protocol.CronStateDir, "spool")}
 	sp.sent(runs)
 	if len(spooled(t, root)) != 0 {

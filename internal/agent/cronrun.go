@@ -183,6 +183,15 @@ func (r *CronRunner) attempt(ctx context.Context, job protocol.ManagedCron, run 
 	run.Output, run.OutputTruncated = tailFile(outPath, protocol.CronOutputMax)
 	run.Output = protocol.MaskSecrets(run.Output)
 	r.spool(*run)
+	// Mislukt: de oorzaak ook in de journal (journalctl -u cf-cron@<id>),
+	// niet alleen de exitcode. Bij een sync per doel de uitkomst.
+	if run.Result != protocol.CronOK && run.Result != protocol.CronSkipped {
+		r.logf("run %s: %s (exit %d)", run.ID, run.Result, exit)
+		for _, t := range run.Sync {
+			r.logf("  naar %s: %s exit %d %s", t.Hostname, t.Result, t.Exit, t.Error)
+		}
+		r.logf("%s", journalTail(run.Output, 40))
+	}
 	if exit == 0 && run.Result != protocol.CronOK && run.Result != protocol.CronSkipped {
 		return 1
 	}
@@ -260,4 +269,22 @@ func pruneOutputs(dir string, keep int) {
 	for _, f := range files[:len(files)-keep] {
 		_ = os.Remove(f)
 	}
+}
+
+// journalTail is het einde van de uitvoer van een run voor de journal: de
+// laatste n niet-lege regels, elk ingesprongen.
+func journalTail(out string, n int) string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimRight(l, "\r "); l != "" {
+			lines = append(lines, "  | "+l)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	if len(lines) == 0 {
+		return "  (geen uitvoer)"
+	}
+	return strings.Join(lines, "\n")
 }
