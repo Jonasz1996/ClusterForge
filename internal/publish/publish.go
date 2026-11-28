@@ -117,13 +117,16 @@ type Defaults struct {
 	LetsEncrypt bool `json:"letsencrypt"`
 	// LetsEncryptEmail is het e-mailadres voor Let's Encrypt (oudere NPM).
 	LetsEncryptEmail string `json:"letsencrypt_email,omitempty"`
+	// ManualOnly (fase 49): ClusterForge verandert niets vanzelf, ook niet
+	// automatisch publiceren of Authentik aanvullen; alles via Scannen.
+	ManualOnly bool `json:"manual_only"`
 }
 
 // DefaultDefaults zijn de standaarden die Jonas koos (17/11): SSL,
 // websockets, exploits blokkeren, Authentik aan behalve voor apps met een
 // eigen login.
 func DefaultDefaults() Defaults {
-	return Defaults{SSLForced: true, HTTP2: true, Websockets: true, BlockExploits: true, Authentik: true, AuthentikAutoRepair: true, LetsEncrypt: true,
+	return Defaults{SSLForced: true, HTTP2: true, Websockets: true, BlockExploits: true, Authentik: true, AuthentikAutoRepair: true, LetsEncrypt: true, ManualOnly: true,
 		AuthentikSkip: []string{"vaultwarden", "vaultx", "rustdesk", "homeassistant", "home-assistant", "plex", "nextcloud", "authentik", "proxmox", "opnsense", "jellyfin"}}
 }
 
@@ -421,8 +424,11 @@ func (s *Service) refresh(ctx context.Context) (failed bool) {
 		s.saveRead(ctx, "authentik", data, err)
 		failed = failed || err != nil
 	}
-	s.autoRepairAK(ctx, st)
-	s.autoPublish(ctx, st)
+	// Fase 49: alleen scannen als Jonas op Scannen klikt; niets vanzelf.
+	if !st.Defaults.ManualOnly {
+		s.autoRepairAK(ctx, st)
+		s.autoPublish(ctx, st)
+	}
 	return failed
 }
 

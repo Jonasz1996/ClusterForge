@@ -5,6 +5,7 @@ import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ActionModal } from "@/components/publish/ActionModal";
 import { AutoPublish } from "@/components/publish/AutoPublish";
 import { HostEditor } from "@/components/publish/HostEditor";
+import { ScanCard } from "@/components/publish/ScanCard";
 import { ThemeEditor } from "@/components/publish/ThemeEditor";
 import { AKBadge, Empty, StatusBar, ago } from "@/components/publish/bits";
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select } from "@/components/ui";
@@ -55,7 +56,8 @@ export default function PublishServicesPage() {
       {ov && (
         <>
           <StatusBar ov={ov} admin={admin} />
-          {ov.npm.linked && <AutoPublish ov={ov} admin={admin} />}
+          {ov.npm.linked && <ScanCard ov={ov} admin={admin} />}
+          {ov.npm.linked && !ov.settings.defaults.manual_only && <AutoPublish ov={ov} admin={admin} />}
           <Card title={`Diensten · ${rows.length}`}>
             <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
               <Input placeholder="Zoeken" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
@@ -201,12 +203,12 @@ export default function PublishServicesPage() {
 }
 
 function PublishModal({ s, domain, hasAK, onClose }: { s: PublishService; domain: string; hasAK: boolean; onClose: () => void }) {
-  const [label, setLabel] = useState(s.label);
+  const [label, setLabel] = useState(s.default_name || s.label);
   const [ak, setAK] = useState(hasAK && s.authentik_default);
   const [ssl, setSSL] = useState("auto");
   // Het plan volgt de velden pas na een korte pauze in het typen.
   const [applied, setApplied] = useState({
-    label: s.label,
+    label: s.default_name || s.label,
     ak: hasAK && s.authentik_default,
     ssl: "auto",
   });

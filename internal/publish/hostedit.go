@@ -17,7 +17,8 @@ import (
 // van ClusterForge (forward auth naar Authentik, sjabloon) erachter.
 func keepSnippet(current, own string) (string, error) {
 	own = strings.TrimSpace(strings.ReplaceAll(own, "\r\n", "\n"))
-	if strings.Contains(own, snippetBegin) || strings.Contains(own, snippetEnd) || strings.Contains(own, themeBegin) || strings.Contains(own, themeEnd) {
+	if strings.Contains(own, snippetBegin) || strings.Contains(own, snippetEnd) || strings.Contains(own, themeBegin) || strings.Contains(own, themeEnd) ||
+		strings.Contains(own, extrasBegin) || strings.Contains(own, extrasEnd) {
 		return "", invalid("de blokken van ClusterForge horen niet in je eigen Advanced; zet Authentik aan of uit met de knop en het thema via Sjabloon")
 	}
 	var blocks []string
@@ -28,6 +29,11 @@ func keepSnippet(current, own string) (string, error) {
 	}
 	if b := themeBlock(current); b != "" {
 		blocks = append(blocks, b)
+	}
+	if i := strings.Index(current, extrasBegin); i >= 0 {
+		if j := strings.Index(current[i:], extrasEnd); j >= 0 {
+			blocks = append(blocks, current[i:i+j+len(extrasEnd)])
+		}
 	}
 	if len(blocks) > 0 && locationRoot.MatchString(own) {
 		return "", invalid("een eigen 'location /' botst met het blok van ClusterForge op deze host (forward auth of sjabloon). Zet het in het sjabloon, of zet de host in Sjabloon op \"geen thema\" en Authentik uit")

@@ -96,6 +96,13 @@ type Action struct {
 	AllowOtherApp bool `json:"allow_other_app,omitempty"`
 	// ChangeID is de wijziging bij ActRevert.
 	ChangeID string `json:"change_id,omitempty"`
+	// Fase 49 (Scannen): ScanID en Items bij ActScan; AKSlug en AKProvider
+	// bij ActAKDisable; DisabledID bij ActRestoreDisabled en ActPurgeDisabled.
+	ScanID     string   `json:"scan_id,omitempty"`
+	Items      []string `json:"items,omitempty"`
+	AKSlug     string   `json:"ak_slug,omitempty"`
+	AKProvider int      `json:"ak_provider,omitempty"`
+	DisabledID string   `json:"disabled_id,omitempty"`
 }
 
 // Plan is wat een actie zou doen, voor het voorbeeldscherm en de taak.
@@ -147,6 +154,20 @@ type PlannedHost struct {
 	Before        *protocol.WebCheckResult `json:"before,omitempty"`
 	TitleAfter    string                   `json:"title_after,omitempty"`
 	AllowOtherApp bool                     `json:"allow_other_app,omitempty"`
+	// Fase 49. Disable schakelt de host uit (met een kopie), Enable zet een
+	// uitgeschakelde host terug aan. AK is een stap in Authentik zonder
+	// NPM-host (uitschakelen, terugzetten of definitief weg).
+	Disable bool    `json:"disable,omitempty"`
+	Enable  bool    `json:"enable,omitempty"`
+	AK      *akStep `json:"ak,omitempty"`
+	// DisabledID: de rij in publish_disabled bij terugzetten of verwijderen.
+	DisabledID string `json:"disabled_id,omitempty"`
+	// OpenPaths: paden zonder Authentik (uitzondering); Fallback: het vorige
+	// doel als terugval na een verhuizing. Beide gaan mee in Advanced.
+	OpenPaths []string  `json:"open_paths,omitempty"`
+	Fallback  *Fallback `json:"fallback,omitempty"`
+	// Owner: de eigenaar die na een geslaagde wijziging vastligt.
+	Owner *OwnerSet `json:"owner,omitempty"`
 }
 
 var (
@@ -315,7 +336,7 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	npm, err := s.readNPM(ctx, st)
+	npm, err := s.readNPMOnce(ctx, st)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -508,6 +529,8 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			if err != nil {
 				return Plan{}, err
 			}
+			ph.OpenPaths, ph.Fallback = s.extrasFor(ctx, name)
+			adv = decorate(adv, ph.OpenPaths, ph.Fallback)
 			label := strings.TrimSuffix(name, "."+st.Domain)
 			ph.Protect, ph.Outpost, ph.Body = true, outpost, map[string]any{"advanced_config": adv}
 			ph.AppName, ph.AppSlug, ph.AppGroup = appName(label), slugFor(label), strings.TrimSpace(a.AuthentikGroup)
@@ -612,6 +635,16 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 		if err := s.planRevert(ctx, npm, byID, taken, a, &p); err != nil {
 			return Plan{}, err
 		}
+	case ActScan:
+		if err := s.planScan(ctx, a, &p); err != nil {
+			return Plan{}, err
+		}
+	case ActMove, ActOpenPaths, ActDisable, ActAKDisable, ActRestoreDisabled, ActPurgeDisabled, ActDropFallback:
+		ak, err := s.planScanStep(ctx, st, npm, byID, managed, a, &p)
+		if err != nil {
+			return Plan{}, err
+		}
+		akNeeded = akNeeded || ak
 	default:
 		return Plan{}, invalid("onbekende actie %q", a.Action)
 	}
@@ -640,6 +673,10 @@ func (s *Service) Plan(ctx context.Context, a Action) (Plan, error) {
 			sort.Strings(names)
 			p.Warnings = append(p.Warnings, fmt.Sprintf("%s zouden allemaal naar %s wijzen; maar één ervan is waarschijnlijk juist. Pas ze liever per host toe", strings.Join(names, ", "), k))
 		}
+	}
+	if innerPlan(ctx) {
+		// Een regel van een scan: de algemene regels komen in het plan van de scan.
+		return p, nil
 	}
 	p.Lines = append(p.Lines, "Vooraf en achteraf: HTTP-code en titel van de pagina vergelijken; toont de host daarna een andere app, dan gaat hij terug")
 	p.Lines = append([]string{fmt.Sprintf("Kopie van de NPM-database en nginx-config op %s", node.Hostname)}, p.Lines...)
@@ -693,6 +730,9 @@ func (s *Service) planPublish(ctx context.Context, st Settings, npm *NPMRead, ta
 	label := a.Label
 	if label == "" && svc != nil {
 		label = svc.Label
+		if svc.DefaultName != "" {
+			label = svc.DefaultName
+		}
 	}
 	name, err := FullName(label, st.Domain)
 	if err != nil {
@@ -714,6 +754,7 @@ func (s *Service) planPublish(ctx context.Context, st Settings, npm *NPMRead, ta
 			fport = svc.Port
 		}
 		ph.ClusterID, ph.ServicePort = svc.ClusterID, svc.Port
+		ph.Owner = ownerOf(*svc)
 		if len(svc.Nodes) == 1 && !svc.TargetVIP {
 			ph.NodeID = &svc.Nodes[0].ID
 		}
@@ -848,6 +889,9 @@ func (s *Service) planPublish(ctx context.Context, st Settings, npm *NPMRead, ta
 			l := strings.TrimSuffix(name, "."+st.Domain)
 			ph.Protect, ph.Outpost = true, outpost
 			ph.AppName, ph.AppSlug, ph.AppGroup = appName(l), slugFor(l), strings.TrimSpace(a.AuthentikGroup)
+			if ph.OpenPaths, _ = s.extrasFor(ctx, name); len(ph.OpenPaths) > 0 {
+				lines = append(lines, "Authentik behalve "+strings.Join(ph.OpenPaths, ", ")+" (uitzondering)")
+			}
 			lines = append(lines, fmt.Sprintf("Authentik: provider, applicatie %q en outpost; daarna forward auth in NPM", ph.AppName))
 		}
 	} else {
@@ -1019,7 +1063,7 @@ func (s *Service) runApply(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
-	if (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair || p.Action.Action == ActMoveAddress || p.Action.Action == ActDeleteDead) && len(p.Plan.Hosts) > 1 {
+	if p.Action.Action == ActScan || (p.Action.Action == ActRetargetMany || p.Action.Action == ActThemeMany || p.Action.Action == ActAKRepair || p.Action.Action == ActMoveAddress || p.Action.Action == ActDeleteDead) && len(p.Plan.Hosts) > 1 {
 		return s.runMany(ctx, j, st, node, snapshot, p)
 	}
 	for i := range p.Plan.Hosts {
@@ -1080,6 +1124,9 @@ func (s *Service) web(ctx context.Context, node nodeRow, req protocol.WebRequest
 
 // applyHost doet de wijziging aan één host met controle en terugdraaien.
 func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node nodeRow, snapshot string, a Action, ph *PlannedHost) error {
+	if done, err := s.applyScanStep(ctx, j, st, node, snapshot, ph); done {
+		return err
+	}
 	created := false
 	var ak akCreated
 	var hostID = ph.HostID
@@ -1181,6 +1228,7 @@ func (s *Service) applyHost(ctx context.Context, j *jobs.Job, st Settings, node 
 					return err
 				}
 			}
+			adv = decorate(adv, ph.OpenPaths, ph.Fallback)
 			if _, err := s.npmWrite(ctx, st, node, hostID, map[string]any{"advanced_config": adv}, false); err != nil {
 				return err
 			}
@@ -1310,6 +1358,10 @@ func (s *Service) verify(ctx context.Context, step *jobs.Step, st Settings, node
 				step.Logf("✗ %s: %s", url, why)
 			}
 		}
+	}
+	// Fase 49: de paden van een uitzondering moeten zonder Authentik open zijn.
+	if protected || hasSnippet(ph.Advanced) || (h != nil && hasSnippet(h.AdvancedConfig)) {
+		failed = append(failed, s.checkOpenPaths(ctx, step, node, ph)...)
 	}
 	// N28: het doel zelf moet vanaf de NPM-node antwoorden.
 	if h != nil && h.ForwardHost != "" && h.ForwardPort > 0 {
@@ -1443,7 +1495,13 @@ func (s *Service) remember(ctx context.Context, j *jobs.Job, st Settings, node n
 	if err := s.recordChange(ctx, j, a, hostID, created, ph); err != nil {
 		s.log.Warn("publicatie: wijziging niet onthouden", "host", hostID, "err", err)
 	}
+	if ph.Owner != nil {
+		if err := s.saveOwner(ctx, ph.Domain, *ph.Owner, j.RequestedBy); err != nil {
+			s.log.Warn("publicatie: eigenaar niet onthouden", "domain", ph.Domain, "err", err)
+		}
+	}
 	if ph.Delete {
+		s.markDisabled(ctx, ph.DisabledID, "removed")
 		_, err := s.pool.Exec(ctx, `DELETE FROM publish_hosts WHERE npm_host_id = $1`, hostID)
 		return err
 	}

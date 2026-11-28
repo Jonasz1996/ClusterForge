@@ -16694,8 +16694,14 @@ type RetryPublishAutoJSONRequestBody = PveObject
 // SavePublishAutoRuleJSONRequestBody defines body for SavePublishAutoRule for application/json ContentType.
 type SavePublishAutoRuleJSONRequestBody = PveObject
 
+// SetPublishOwnerJSONRequestBody defines body for SetPublishOwner for application/json ContentType.
+type SetPublishOwnerJSONRequestBody = PveObject
+
 // PlanPublishJSONRequestBody defines body for PlanPublish for application/json ContentType.
 type PlanPublishJSONRequestBody = PveObject
+
+// SavePublishPolicyJSONRequestBody defines body for SavePublishPolicy for application/json ContentType.
+type SavePublishPolicyJSONRequestBody = PveObject
 
 // SavePublishSettingsJSONRequestBody defines body for SavePublishSettings for application/json ContentType.
 type SavePublishSettingsJSONRequestBody = PveObject
@@ -17917,12 +17923,30 @@ type ServerInterface interface {
 	// GetPublishOverview Diensten op de nodes, proxy hosts in NPM, applicaties in Authentik, drift en problemen (fase 35)
 	// (GET /publish/overview)
 	GetPublishOverview(w http.ResponseWriter, r *http.Request)
+	// GetPublishOwners Eigenaar (cluster of dienst) per naam in NPM en Authentik, met de terugval na een verhuizing
+	// (GET /publish/owners)
+	GetPublishOwners(w http.ResponseWriter, r *http.Request)
+	// SetPublishOwner Eigenaar van een naam met de hand zetten of weghalen (admin)
+	// (PUT /publish/owners)
+	SetPublishOwner(w http.ResponseWriter, r *http.Request)
 	// PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
 	// (POST /publish/plan)
 	PlanPublish(w http.ResponseWriter, r *http.Request)
+	// SavePublishPolicy Uitzondering voor een dienst maken of wijzigen (nooit Authentik, eigen login, Authentik behalve paden) (admin)
+	// (PUT /publish/policies)
+	SavePublishPolicy(w http.ResponseWriter, r *http.Request)
+	// DeletePublishPolicy Uitzondering weghalen; dan gelden de standaarden (admin)
+	// (DELETE /publish/policies/{name})
+	DeletePublishPolicy(w http.ResponseWriter, r *http.Request, name string)
 	// RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
 	// (POST /publish/refresh)
 	RefreshPublish(w http.ResponseWriter, r *http.Request)
+	// GetPublishScan Scannen (fase 49) - de laatste scan, de uitzonderingen per dienst en wat uitgeschakeld is
+	// (GET /publish/scan)
+	GetPublishScan(w http.ResponseWriter, r *http.Request)
+	// RunPublishScan NPM, Authentik en de doelen nu lezen en één plan maken (toevoegen, bijwerken, verwijderen); verandert niets (admin)
+	// (POST /publish/scan)
+	RunPublishScan(w http.ResponseWriter, r *http.Request)
 	// GetPublishSettings Hoofddomein, standaarden en de koppeling met NPM en Authentik, zonder geheimen (fase 35)
 	// (GET /publish/settings)
 	GetPublishSettings(w http.ResponseWriter, r *http.Request)
@@ -20449,15 +20473,51 @@ func (_ Unimplemented) GetPublishOverview(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetPublishOwners Eigenaar (cluster of dienst) per naam in NPM en Authentik, met de terugval na een verhuizing
+// (GET /publish/owners)
+func (_ Unimplemented) GetPublishOwners(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetPublishOwner Eigenaar van een naam met de hand zetten of weghalen (admin)
+// (PUT /publish/owners)
+func (_ Unimplemented) SetPublishOwner(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // PlanPublish Wat een actie zou doen, zonder iets te veranderen (admin)
 // (POST /publish/plan)
 func (_ Unimplemented) PlanPublish(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SavePublishPolicy Uitzondering voor een dienst maken of wijzigen (nooit Authentik, eigen login, Authentik behalve paden) (admin)
+// (PUT /publish/policies)
+func (_ Unimplemented) SavePublishPolicy(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeletePublishPolicy Uitzondering weghalen; dan gelden de standaarden (admin)
+// (DELETE /publish/policies/{name})
+func (_ Unimplemented) DeletePublishPolicy(w http.ResponseWriter, r *http.Request, name string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RefreshPublish Diensten, NPM en Authentik nu opnieuw lezen (admin)
 // (POST /publish/refresh)
 func (_ Unimplemented) RefreshPublish(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPublishScan Scannen (fase 49) - de laatste scan, de uitzonderingen per dienst en wat uitgeschakeld is
+// (GET /publish/scan)
+func (_ Unimplemented) GetPublishScan(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunPublishScan NPM, Authentik en de doelen nu lezen en één plan maken (toevoegen, bijwerken, verwijderen); verandert niets (admin)
+// (POST /publish/scan)
+func (_ Unimplemented) RunPublishScan(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -31589,6 +31649,34 @@ func (siw *ServerInterfaceWrapper) GetPublishOverview(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// GetPublishOwners operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishOwners(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishOwners(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetPublishOwner operation middleware
+func (siw *ServerInterfaceWrapper) SetPublishOwner(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPublishOwner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PlanPublish operation middleware
 func (siw *ServerInterfaceWrapper) PlanPublish(w http.ResponseWriter, r *http.Request) {
 
@@ -31603,11 +31691,79 @@ func (siw *ServerInterfaceWrapper) PlanPublish(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// SavePublishPolicy operation middleware
+func (siw *ServerInterfaceWrapper) SavePublishPolicy(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SavePublishPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePublishPolicy operation middleware
+func (siw *ServerInterfaceWrapper) DeletePublishPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", chi.URLParam(r, "name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePublishPolicy(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RefreshPublish operation middleware
 func (siw *ServerInterfaceWrapper) RefreshPublish(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RefreshPublish(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublishScan operation middleware
+func (siw *ServerInterfaceWrapper) GetPublishScan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublishScan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunPublishScan operation middleware
+func (siw *ServerInterfaceWrapper) RunPublishScan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunPublishScan(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -35395,6 +35551,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/publish/auto/backup", wrapper.GetPublishAutoBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/scan", wrapper.GetPublishScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/publish/scan", wrapper.RunPublishScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/policies", wrapper.SavePublishPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/publish/policies/{name}", wrapper.DeletePublishPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/publish/owners", wrapper.GetPublishOwners)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/publish/owners", wrapper.SetPublishOwner)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)
