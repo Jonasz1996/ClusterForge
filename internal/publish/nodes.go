@@ -3,6 +3,7 @@ package publish
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,43 @@ type clusterRow struct {
 type vipRow struct {
 	Address string
 	Owner   *uuid.UUID
+	// DB: het eigen VIP van een database (Patroni), niet van de app.
+	DB bool
+}
+
+// isDBVIP herkent het eigen VIP van een database aan zijn omschrijving.
+func isDBVIP(desc string) bool {
+	d := strings.ToLower(desc)
+	return strings.Contains(d, "database") || strings.Contains(d, "patroni") || strings.Contains(d, "postgres")
+}
+
+// primaryVIP is het VIP waar een dienst van het cluster naar moet wijzen:
+// nooit het eigen VIP van de database, liefst het VIP dat een node met de
+// dienst nu heeft, anders het eerste (scan 28/11: een cluster met VIP wijst
+// altijd naar zijn VIP, en .240 van Patroni is niet de outpost .244).
+func primaryVIP(c clusterRow, on []nodeRow) string {
+	var app []vipRow
+	for _, v := range c.VIPs {
+		if !v.DB {
+			app = append(app, v)
+		}
+	}
+	if len(app) == 0 {
+		return ""
+	}
+	for _, v := range app {
+		for _, n := range on {
+			if v.Owner != nil && *v.Owner == n.ID {
+				return v.Address
+			}
+			for _, a := range n.VIPs {
+				if a == v.Address {
+					return v.Address
+				}
+			}
+		}
+	}
+	return app[0].Address
 }
 
 func (s *Service) nodes(ctx context.Context) ([]nodeRow, error) {
@@ -86,7 +124,8 @@ func (s *Service) nodes(ctx context.Context) ([]nodeRow, error) {
 func (s *Service) clusters(ctx context.Context) ([]clusterRow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT c.id, c.name, c.slug, c.environment::text, coalesce(c.template_name, ''),
 		coalesce((SELECT array_agg(host(v.address) ORDER BY v.address) FROM vips v WHERE v.cluster_id = c.id), '{}'),
-		coalesce((SELECT array_agg(coalesce(v.owner_node_id::text, '') ORDER BY v.address) FROM vips v WHERE v.cluster_id = c.id), '{}')
+		coalesce((SELECT array_agg(coalesce(v.owner_node_id::text, '') ORDER BY v.address) FROM vips v WHERE v.cluster_id = c.id), '{}'),
+		coalesce((SELECT array_agg(v.description ORDER BY v.address) FROM vips v WHERE v.cluster_id = c.id), '{}')
 		FROM clusters c ORDER BY c.name`)
 	if err != nil {
 		return nil, err
@@ -95,12 +134,15 @@ func (s *Service) clusters(ctx context.Context) ([]clusterRow, error) {
 	var out []clusterRow
 	for rows.Next() {
 		var c clusterRow
-		var addrs, owners []string
-		if err := rows.Scan(&c.ID, &c.Name, &c.Slug, &c.Environment, &c.Template, &addrs, &owners); err != nil {
+		var addrs, owners, descs []string
+		if err := rows.Scan(&c.ID, &c.Name, &c.Slug, &c.Environment, &c.Template, &addrs, &owners, &descs); err != nil {
 			return nil, err
 		}
 		for i, a := range addrs {
 			v := vipRow{Address: a}
+			if i < len(descs) {
+				v.DB = isDBVIP(descs[i])
+			}
 			if i < len(owners) && owners[i] != "" {
 				if id, err := uuid.Parse(owners[i]); err == nil {
 					v.Owner = &id

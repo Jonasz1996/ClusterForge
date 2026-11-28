@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strings"
@@ -227,8 +228,8 @@ func buildScan(st Settings, ov *Overview, pols map[string]Policy, owners map[str
 		if !ak && pol.WantsAuthentik() {
 			detail = target + " · zonder Authentik (niet gekoppeld)"
 		}
-		if r.Environment == "test" || r.Environment == "lab" {
-			detail += " · " + r.Environment + "cluster: eigen subdomein"
+		if r.Environment == "test" {
+			detail += " · testcluster: eigen subdomein"
 		}
 		items = append(items, ScanItem{
 			ID: "add:" + r.Key, Kind: ScanAdd, What: "publish", Domain: name, Owner: owner,
@@ -257,11 +258,21 @@ func buildScan(st Settings, ov *Overview, pols map[string]Policy, owners map[str
 		}
 		cur := fmt.Sprintf("%s://%s:%d", v.ForwardScheme, v.ForwardHost, v.ForwardPort)
 		retarget := false
+		// deadProbe: ClusterForge vroeg het doel zelf (vanaf de NPM-node) en
+		// kreeg geen antwoord.
+		deadProbe := v.TargetProbe != nil && !v.TargetAlive
 		switch {
 		case v.SuggestVIP != "":
 			add(ScanUpdate, "vip", name+": naar het VIP", fmt.Sprintf("%s → %s (draait op alle nodes)", v.ForwardHost, v.SuggestVIP),
 				Action{Action: ActRetarget, HostID: v.ID, ForwardHost: v.SuggestVIP})
 			retarget = true
+		case v.Suggest != nil && v.Suggest.Sure && !deadProbe:
+			notes = append(notes, fmt.Sprintf("%s: voorstel %s://%s:%d, maar ClusterForge zag %s niet zelf falen; scan opnieuw of zet het met de hand", name, v.Suggest.Scheme, v.Suggest.Host, v.Suggest.Port, cur))
+		case v.Suggest != nil && v.Suggest.Sure && strings.EqualFold(v.Suggest.Host, v.ForwardHost):
+			// Scan 28/11 (vaultx 80 → 443): op dezelfde machine een andere
+			// poort is geen zeker voorstel; misschien luistert de dienst daar
+			// gewoon niet voor NPM (firewall, agent mist de poort).
+			notes = append(notes, fmt.Sprintf("%s: %s antwoordt niet; op dezelfde machine draait %s op poort %d. Geen voorstel: kijk na of de poort klopt en zet het zo nodig met de hand", name, cur, v.Suggest.ServiceName, v.Suggest.Port))
 		case v.Suggest != nil && v.Suggest.Sure:
 			add(ScanUpdate, "target", name+": verkeerd doel", fmt.Sprintf("%s → %s://%s:%d (%s, %s)", cur, v.Suggest.Scheme, v.Suggest.Host, v.Suggest.Port, v.Suggest.ServiceName, v.Suggest.Why),
 				Action{Action: ActRetargetMany, Hosts: []int{v.ID}})
@@ -284,19 +295,35 @@ func buildScan(st Settings, ov *Overview, pols map[string]Policy, owners map[str
 		if !retarget && len(v.AdvancedFix) > 0 && v.Suggest == nil {
 			what, title := "advanced", name+": oud adres in Advanced"
 			var parts []string
+			inInventory := ""
 			for _, f := range v.AdvancedFix {
 				if strings.Contains(f.Why, "outpost") {
 					what, title = "outpost", name+": verkeerd outpost-adres"
 				}
+				if k, ok := ov.known[advHost(f.Old)]; ok {
+					inInventory = f.Old + " is " + k.What
+				}
 				parts = append(parts, f.Old+" → "+f.New)
 			}
-			add(ScanUpdate, what, title, strings.Join(parts, ", "), Action{Action: ActRetargetMany, Hosts: []int{v.ID}})
+			if inInventory != "" {
+				// Een adres dat ClusterForge kent, is niet "oud" (scan 28/11:
+				// outpost .244 → .240, het VIP van de database).
+				notes = append(notes, fmt.Sprintf("%s: geen voorstel voor Advanced (%s); %s", name, strings.Join(parts, ", "), inInventory))
+			} else {
+				add(ScanUpdate, what, title, strings.Join(parts, ", "), Action{Action: ActRetargetMany, Hosts: []int{v.ID}})
+			}
 		}
-		// Verwijderen: het doel antwoordt niet en er is geen voorstel.
+		// Verwijderen: alleen als het doel echt weg is. Onbereikbaar is niet
+		// weg (scan 28/11): een adres uit de inventaris, een gateway, een naam
+		// in plaats van een IP of een dienst met dezelfde naam blijft staan.
 		dead := v.Cleanup || (hasProblem(v, "doel_weg") && !v.TargetAlive && v.Suggest == nil && v.SuggestVIP == "")
 		if dead && !retarget {
-			why := "op " + cur + " antwoordt niets meer"
-			if v.TargetProbe != nil && v.TargetProbe.Error != "" {
+			if why := keepReason(ov, name, v, deadProbe); why != "" {
+				notes = append(notes, fmt.Sprintf("%s: %s antwoordt niet, maar niet voorgesteld om te verwijderen: %s", name, cur, why))
+				continue
+			}
+			why := "op " + cur + " antwoordt niets meer en ClusterForge kent dat adres niet (meer)"
+			if v.TargetProbe.Error != "" {
 				why += " (" + trimText(v.TargetProbe.Error, 60) + ")"
 			}
 			add(ScanRemove, "disable", name+": dienst verdwenen", why+"; eerst uitschakelen met een kopie, definitief verwijderen kan later",
@@ -669,4 +696,41 @@ func (s *Service) planScan(ctx context.Context, a Action, p *Plan) error {
 	p.Title = fmt.Sprintf("Scan toepassen: %d toevoegen, %d bijwerken, %d verwijderen (uitschakelen)", c.Add, c.Update, c.Remove)
 	p.Lines = append(p.Lines, fmt.Sprintf("Regel voor regel, elk met een eigen kopie van NPM en een echte aanvraag als controle; mislukt er een, dan gaat alleen die terug en gaan de andere door (%d stappen)", len(p.Hosts)))
 	return nil
+}
+
+// advHost is het adres uit een URL als http://192.168.0.244:9000.
+func advHost(u string) string {
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	}
+	if i := strings.IndexAny(u, ":/"); i >= 0 {
+		u = u[:i]
+	}
+	return strings.ToLower(u)
+}
+
+// keepReason zegt waarom een host met een doel dat niet antwoordt toch niet
+// verwijderd mag worden; leeg als verwijderen (uitschakelen) mag.
+func keepReason(ov *Overview, name string, v HostView, deadProbe bool) string {
+	fh := strings.ToLower(v.ForwardHost)
+	ip := net.ParseIP(fh)
+	switch {
+	case !deadProbe:
+		return "ClusterForge heeft het doel zelf nog niet bekeken; scan opnieuw"
+	case ip == nil:
+		return "het doel is een naam, geen IP; kijk het met de hand na"
+	}
+	if k, ok := ov.known[fh]; ok {
+		if k.Ready != "" {
+			return k.What + " is bekend maar nu niet bereikbaar (" + k.Ready + "); zet de node terug of verwijder hem eerst uit de inventaris"
+		}
+		return "het is " + k.What + "; de dienst kan er nog draaien (firewall vanaf NPM, of de agent ziet de poort niet)"
+	}
+	if v4 := ip.To4(); v4 != nil && v4[3] >= 1 && v4[3] <= 3 {
+		return "het lijkt een gateway of firewall (.1 tot .3)"
+	}
+	if sg := suggestTarget(name, v.ForwardPort, ov.Services); sg != nil {
+		return "er draait nog een dienst " + sg.ServiceName + " met die naam"
+	}
+	return ""
 }

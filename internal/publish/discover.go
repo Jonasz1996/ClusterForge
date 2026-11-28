@@ -266,9 +266,10 @@ func buildServices(nodes []nodeRow, clusters []clusterRow, found map[uuid.UUID]n
 		if r.ClusterID != nil {
 			members := clusterNodes[*r.ClusterID]
 			r.OnAll = len(members) > 1 && len(g.nodes) == len(members)
-			c := clusterByID[*r.ClusterID]
-			if len(c.VIPs) > 0 && (r.OnAll || len(members) > 1 && clusterHasFloating(c, g.nodes)) {
-				r.Target, r.TargetVIP = c.VIPs[0].Address, true
+			// Scan 28/11: een cluster met een VIP wijst altijd naar dat VIP,
+			// ook als de dienst nu maar op één node draait (actief/passief).
+			if vip := primaryVIP(clusterByID[*r.ClusterID], g.nodes); vip != "" {
+				r.Target, r.TargetVIP = vip, true
 			}
 		}
 		if r.Target == "" && len(g.nodes) > 0 {
@@ -296,19 +297,4 @@ func buildServices(nodes []nodeRow, clusters []clusterRow, found map[uuid.UUID]n
 		return out[i].Port < out[j].Port
 	})
 	return out
-}
-
-// clusterHasFloating: een dienst die alleen op de node met het VIP draait
-// (zoals NPM zelf of de checks van een cluster) volgt het VIP; dan is het VIP
-// het doel.
-func clusterHasFloating(c clusterRow, on []nodeRow) bool {
-	if len(on) != 1 {
-		return false
-	}
-	for _, v := range c.VIPs {
-		if v.Owner != nil && *v.Owner == on[0].ID {
-			return true
-		}
-	}
-	return false
 }

@@ -76,6 +76,9 @@ func TestPolicies(t *testing.T) {
 	if n := defaultName(ServiceRow{Label: "app", Environment: "test"}, "jbogaert.be"); n != "app.test.jbogaert.be" {
 		t.Errorf("test: %s", n)
 	}
+	if n := defaultName(ServiceRow{Label: "media", Environment: "lab"}, "jbogaert.be"); n != "media.jbogaert.be" {
+		t.Errorf("lab: %s", n)
+	}
 	if n := defaultName(ServiceRow{Label: "app", Environment: "prod"}, "jbogaert.be"); n != "app.jbogaert.be" {
 		t.Errorf("prod: %s", n)
 	}
@@ -97,7 +100,12 @@ func TestBuildScan(t *testing.T) {
 		"matomo": {Name: "matomo", Mode: PolicyExceptPaths, Paths: []string{"/matomo.js"}},
 	}
 	snippet := AuthentikSnippet("http://192.168.103.244:9000")
+	dead := &Probe{Error: "connection refused", At: now}
 	ov := &Overview{
+		known: map[string]knownAddr{
+			"192.168.10.145": {What: "VIP van media"},
+			"192.168.30.20":  {What: "node guest1", Ready: "agent offline"},
+		},
 		Settings:  st,
 		Authentik: ReadState{Linked: true, ReadAt: &now},
 		Services: []ServiceRow{
@@ -108,7 +116,12 @@ func TestBuildScan(t *testing.T) {
 		},
 		Hosts: []HostView{
 			{ID: 1, Domains: []string{"grafana.jbogaert.be"}, Enabled: true, ForwardScheme: "http", ForwardHost: "192.168.20.9", ForwardPort: 3000, Authentik: AKProtected, ClusterName: "grafana"},
-			{ID: 2, Domains: []string{"gimp.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.0.7", ForwardPort: 3000, Cleanup: true, Authentik: AKOpen},
+			{ID: 2, Domains: []string{"gimp.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.0.7", ForwardPort: 3000, Cleanup: true, Authentik: AKOpen, TargetProbe: dead},
+			// Scan 28/11: onbereikbaar maar bekend, gateway of niet bekeken: nooit verwijderen.
+			{ID: 6, Domains: []string{"media.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.10.145", ForwardPort: 80, Cleanup: true, Authentik: AKOpen, TargetProbe: dead},
+			{ID: 7, Domains: []string{"firewall.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.10.1", ForwardPort: 443, Cleanup: true, Authentik: AKOpen, TargetProbe: dead},
+			{ID: 8, Domains: []string{"adguard.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.0.8", ForwardPort: 3000, Cleanup: true, Authentik: AKOpen},
+			{ID: 9, Domains: []string{"guest.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.30.20", ForwardPort: 8080, Cleanup: true, Authentik: AKOpen, TargetProbe: dead},
 			{ID: 3, Domains: []string{"radarr.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.10.60", ForwardPort: 7878, Authentik: AKOpen, ServiceKey: "x"},
 			{ID: 4, Domains: []string{"matomo.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.10.61", ForwardPort: 80, Authentik: AKProtected, ServiceKey: "y"},
 			{ID: 5, Domains: []string{"proxmox50.jbogaert.be"}, Enabled: true, ForwardHost: "192.168.10.62", ForwardPort: 8006, Authentik: AKProtected, ServiceKey: "z",
@@ -125,7 +138,19 @@ func TestBuildScan(t *testing.T) {
 			Providers:    []AKProxyProvider{{PK: 7, ExternalHost: "https://tautulli.jbogaert.be", Mode: "forward_single"}},
 		},
 	}
-	items, _ := buildScan(st, ov, pols, map[string]Owner{}, map[string]bool{})
+	items, notes := buildScan(st, ov, pols, map[string]Owner{}, map[string]bool{})
+	for _, id := range []string{"disable:6", "disable:7", "disable:8", "disable:9"} {
+		for _, it := range items {
+			if it.ID == id {
+				t.Errorf("%s voorgesteld om te verwijderen", id)
+			}
+		}
+	}
+	for _, want := range []string{"media.jbogaert.be", "firewall.jbogaert.be", "adguard.jbogaert.be", "guest.jbogaert.be"} {
+		if !strings.Contains(strings.Join(notes, "\n"), want) {
+			t.Errorf("geen opmerking voor %s in %v", want, notes)
+		}
+	}
 	got := map[string]ScanItem{}
 	for _, it := range items {
 		got[it.ID] = it
@@ -164,6 +189,22 @@ func TestBuildScan(t *testing.T) {
 		if it.ID == "disable:2" || it.ID == "ak:tautulli" {
 			t.Errorf("%s opnieuw voorgesteld", it.ID)
 		}
+	}
+}
+
+func TestPrimaryVIPSkipsDatabase(t *testing.T) {
+	c := clusterRow{VIPs: []vipRow{
+		{Address: "192.168.103.240", DB: true},
+		{Address: "192.168.103.244"},
+	}}
+	if got := primaryVIP(c, nil); got != "192.168.103.244" {
+		t.Errorf("outpost: %s, wil .244 (niet de database-VIP .240)", got)
+	}
+	if !isDBVIP("Patroni-primary; staat op de node waar de database schrijft (ClusterForge)") || isDBVIP("Authentik") {
+		t.Error("isDBVIP")
+	}
+	if got := primaryVIP(clusterRow{VIPs: []vipRow{{Address: "192.168.10.180", DB: true}}}, nil); got != "" {
+		t.Errorf("alleen db-VIP: %s", got)
 	}
 }
 

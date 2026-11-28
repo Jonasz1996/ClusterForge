@@ -110,16 +110,17 @@ func applyPolicies(services []ServiceRow, pols map[string]Policy, st Settings) {
 	}
 }
 
-// defaultName is de volledige naam bij publiceren: testclusters krijgen een
+// defaultName is de volledige naam bij publiceren: testclusters (omgeving
+// test) krijgen een
 // eigen subdomein (app.test.jbogaert.be), zodat test en productie nooit om
 // dezelfde naam vechten tot Jonas bewust verhuist.
 func defaultName(r ServiceRow, domain string) string {
 	if r.Label == "" || domain == "" {
 		return ""
 	}
-	switch r.Environment {
-	case "test", "lab":
-		return r.Label + "." + r.Environment + "." + domain
+	// Alleen test: lab is bij Jonas gewoon het homelab (media is lab).
+	if r.Environment == "test" {
+		return r.Label + ".test." + domain
 	}
 	return r.Label + "." + domain
 }

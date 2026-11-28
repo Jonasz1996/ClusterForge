@@ -186,6 +186,11 @@ func (s *Service) planScanStep(ctx context.Context, st Settings, npm *NPMRead, b
 		if !h.IsEnabled() {
 			return false, invalid("%s staat al uit", name)
 		}
+		// Scan 28/11: onbereikbaar in de scan is geen bewijs. Antwoordt het
+		// doel nu wel vanaf de NPM-node, dan niet uitschakelen.
+		if why := s.targetAnswers(ctx, st, h); why != "" {
+			return false, invalid("%s niet uitgeschakeld: %s", name, why)
+		}
 		p.Title = "Uitschakelen: " + name
 		p.Lines = append(p.Lines, fmt.Sprintf("NPM: %s uitschakelen (wijst naar %s:%d); een kopie van de host blijft in ClusterForge onder Uitgeschakeld (terugzetten of definitief verwijderen)", name, h.ForwardHost, h.ForwardPort))
 		if m, ok := managed[h.ID]; ok && m.AKCreated {
@@ -661,4 +666,22 @@ func (s *Service) checkOpenPaths(ctx context.Context, step *jobs.Step, node node
 		}
 	}
 	return failed
+}
+
+// targetAnswers kijkt vlak voor het uitschakelen nog eens vanaf de NPM-node
+// of het doel antwoordt. Leeg als het niet antwoordt (of niet te controleren
+// is); anders de reden om de host te laten staan.
+func (s *Service) targetAnswers(ctx context.Context, st Settings, h NPMHost) string {
+	node, err := s.npmNode(ctx, st)
+	if err != nil {
+		return ""
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	u := targetURL(h.ForwardScheme, h.ForwardHost, h.ForwardPort)
+	res, err := s.web(cctx, node, protocol.WebRequest{Op: protocol.WebOpCheckURL, Check: checkFor(u)})
+	if err != nil || res.Check == nil || res.Check.Error != "" || res.Check.Status == 0 {
+		return ""
+	}
+	return fmt.Sprintf("het doel %s antwoordt nu wel vanaf %s (HTTP %d)", u, node.Hostname, res.Check.Status)
 }
