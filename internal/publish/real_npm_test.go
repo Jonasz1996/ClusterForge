@@ -673,7 +673,16 @@ func TestRealNPM(t *testing.T) {
 
 	// 13. Fase 49: paden zonder Authentik en een terugval in de echte
 	// nginx, uitschakelen met een kopie en terugzetten, en een scan.
-	s.Refresh(ctx)
+	// Eerst wachten tot het automatisch aanvullen van stap 12 klaar is.
+	for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		if busy, _ := s.applyBusy(ctx); busy == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("taak van stap 12 loopt nog")
+		}
+	}
+	st0, _ := s.Settings(ctx)
 	ov, _ = s.Overview(ctx)
 	name0 := ""
 	for _, h := range ov.Hosts {
@@ -700,7 +709,9 @@ func TestRealNPM(t *testing.T) {
 	}
 	alive()
 	run(Action{Action: ActDisable, HostID: old[0]}, store.JobStatusSucceeded)
-	s.Refresh(ctx)
+	if data, err := s.readNPM(ctx, st0); err == nil {
+		s.saveRead(ctx, "npm", data, nil)
+	}
 	dis, err := s.disabledList(ctx)
 	if err != nil || len(dis) != 1 || dis[0].HostID != old[0] {
 		t.Fatalf("uitgeschakeld: %v %+v", err, dis)
