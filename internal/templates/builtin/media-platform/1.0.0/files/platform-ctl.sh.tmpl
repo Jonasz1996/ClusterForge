@@ -495,6 +495,9 @@ beeld() {
 stuurt_niet() { echo "Niets gekopieerd of gewist: $*" >&2; exit 113; }
 sleutels_klaar() {
   has_vip || stuurt_niet "deze node heeft het VIP van het platform ($VIP) niet; alleen die node stuurt de sleutels (verwacht op de node met het VIP van de database)"
+  # Zonder de analyse (gezichten) zijn er geen sleutels: niets te sturen, en
+  # sleutels-check of de map ontbreekt dan (de sync faalde zo elke minuut).
+  analyse_on || stuurt_niet "de analyse (gezichten) staat uit; er zijn geen sleutels om te sturen"
   systemctl is-active --quiet cf-platform || stuurt_niet "het platform draait hier niet (cf-platform); de sleutels blijven zoals ze zijn (verwacht tijdens een start, stop of failover)"
   for d in "${SLEUTELS%/*}" "$SLEUTELS"; do
     [ ! -L "$d" ] && [ -d "$d" ] || fail "$d is geen gewone map; de sleutels blijven zoals ze zijn"
