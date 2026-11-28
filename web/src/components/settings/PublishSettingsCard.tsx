@@ -159,6 +159,7 @@ function Form({ ov, isAdmin }: { ov: PublishOverview; isAdmin: boolean }) {
             {box("letsencrypt", "Let's Encrypt als er geen passend certificaat is")}
             {box("authentik", "Achter Authentik")}
             {box("authentik_auto_repair", "Half ingestelde Authentik vanzelf aanvullen")}
+            {box("manual_only", "Alleen via Scannen (niets vanzelf veranderen; zet automatisch publiceren en aanvullen stil)")}
           </div>
           <Field
             label="Niet achter Authentik (eigen login)"

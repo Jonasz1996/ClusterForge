@@ -6,13 +6,30 @@ Requires=cf-seaweedfs.service
 After=cf-seaweedfs.service
 
 [Service]
-# Het wachten op de filer zit in ExecStart, niet in ExecStartPre: de filer
-# komt pas als PostgreSQL er is, en dat zet ClusterForge na de uitrol. Zo
-# geldt de mount meteen als gestart en houdt hij de uitrol niet tegen.
-ExecStart=/bin/sh -c 'until curl -fsS -o /dev/null http://127.0.0.1:8888/; do sleep 5; done; exec /usr/local/bin/weed mount -filer=127.0.0.1:8888 -filer.path=/ -dir=/srv/platform-data -allowOthers -cacheDir=/var/cache/weed-mount -replication={{ .params.replication }}'
+# platform-ctl.sh mount wacht op de filer (in ExecStart, niet in
+# ExecStartPre: de filer komt pas als PostgreSQL er is, en dat zet
+# ClusterForge na de uitrol; zo houdt de mount de uitrol niet tegen) en op
+# het einde van een back-up van deze CT, en start dan weed mount met de
+# opties voor het geheugen.
+# Geen -replication: dat zou winnen van elke regel per map van de filer
+# (fs.configure, zoals blobs-r2 op 2 kopieën). Zonder kiest de filer: zijn
+# regel voor de map, anders zijn standaard (de replicatie van ClusterForge).
+ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh mount
 ExecStopPost=-/bin/fusermount3 -uz /srv/platform-data
 Restart=always
 RestartSec=5
+# Geheugen (fixlijst 26-11, punt 5; storing 27-11). Een harde grens, geen
+# MemoryHigh: boven MemoryHigh remt de kernel het proces af en duwt het naar
+# swap, en dan hangt elke stat op de mount (en het platform met hem) zonder
+# dat er iets stopt; zo gaf media.jbogaert.be op 27-11 uren 504. Geen swap
+# (MemorySwapMax=0): de mount groeide de swap vol. GOMEMLIMIT laat Go zijn
+# heap ruim onder de grens opruimen. Ruim voor de grens herstart
+# platform-ctl.sh check de mount en het platform zelf, netjes (verfris);
+# komt hij toch aan MemoryMax, dan doodt de kernel hem, start systemd hem na
+# 5 s opnieuw en herstart check het platform (de oude mount is dan dood).
+MemoryMax=2G
+MemorySwapMax=0
+Environment=GOMEMLIMIT=1280MiB
 
 [Install]
 WantedBy=multi-user.target

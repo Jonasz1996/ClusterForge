@@ -55,7 +55,7 @@ func TestCronApply(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(root, "etc/clusterforge/cron", jobA+".json")); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("jobbestand: %v %v", fi, err)
 	}
-	want := "systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer; systemctl disable --now cf-cron-" + jobB + ".timer"
+	want := "systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer; systemctl disable --now cf-cron-" + jobB + ".timer; systemctl reset-failed cf-cron@" + jobB + ".service"
 	if got := strings.Join(calls, "; "); got != want {
 		t.Errorf("commando's:\n%s\nwil\n%s", got, want)
 	}
@@ -73,7 +73,7 @@ func TestCronApply(t *testing.T) {
 	if res := a.cronApply(ctx, []protocol.ManagedCron{a1}, nil); res.Error != "" {
 		t.Fatal(res.Error)
 	}
-	want = "systemctl disable --now cf-cron-" + jobB + ".timer; systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer"
+	want = "systemctl disable --now cf-cron-" + jobB + ".timer; systemctl reset-failed cf-cron@" + jobB + ".service; systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer"
 	if got := strings.Join(calls, "; "); got != want {
 		t.Errorf("commando's:\n%s\nwil\n%s", got, want)
 	}
@@ -135,6 +135,10 @@ func TestCronRunner(t *testing.T) {
 		runs[0].Output != "hallo\nkapot\n" || runs[0].Reason != protocol.CronReasonSchedule || runs[0].EndedAt == nil {
 		t.Fatalf("run: %+v", runs)
 	}
+	// De oorzaak staat ook in de journal (stderr van cron-run).
+	if e := stderr.String(); !strings.Contains(e, "failed (exit 3)") || !strings.Contains(e, "  | kapot") {
+		t.Errorf("journal: %q", e)
+	}
 	sp := cronSpool{filepath.Join(root, protocol.CronStateDir, "spool")}
 	sp.sent(runs)
 	if len(spooled(t, root)) != 0 {
@@ -170,7 +174,9 @@ func TestCronRunner(t *testing.T) {
 	}
 	sp.sent(runs)
 
-	// Loopt de vorige run nog, dan slaat deze over.
+	// Loopt de vorige run nog, dan slaat deze over, zonder exitcode: zo
+	// houden de incidenten een fout van de vorige run open (anders dan een
+	// sync die oversloeg omdat deze node niet stuurt).
 	unlock, err := cronLock(filepath.Join(root, protocol.CronStateDir, "locks", jobB+".lock"))
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +184,7 @@ func TestCronRunner(t *testing.T) {
 	r.Main(ctx, jobB)
 	unlock()
 	runs = spooled(t, root)
-	if len(runs) != 1 || runs[0].Result != protocol.CronSkipped {
+	if len(runs) != 1 || runs[0].Result != protocol.CronSkipped || runs[0].Exit != nil {
 		t.Fatalf("overgeslagen: %+v", runs)
 	}
 }

@@ -79,15 +79,19 @@ func statInt(re *regexp.Regexp, s string) int64 {
 
 // runSync draait een sync naar elk doel na elkaar. Een doel dat weigert
 // (het heeft het VIP van zijn cluster) telt niet als fout, tenzij elk doel
-// weigert.
-func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out io.Writer) (int, []protocol.SyncResult, error) {
+// weigert. De bool is true als de voorbereiding zei dat deze node niet
+// stuurt; dan is er niets gekopieerd en is de exitcode 0.
+func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out io.Writer) (int, []protocol.SyncResult, bool, error) {
 	spec := job.Sync
 	if spec == nil || len(spec.Targets) == 0 {
 		_, _ = fmt.Fprintln(out, "Deze sync heeft geen doelen.")
-		return 1, nil, nil
+		return 1, nil, false, nil
 	}
-	if code, ok := syncBefore(ctx, spec, out); !ok {
-		return code, nil, nil
+	switch code, before := syncBefore(ctx, spec, out); before {
+	case beforeSkipped:
+		return 0, nil, true, nil
+	case beforeFailed:
+		return code, nil, false, nil
 	}
 	sshCmd := r.SSH
 	if sshCmd == "" {
@@ -113,7 +117,7 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 		defer unpause(dockerRun, ids, out)
 		if err != nil {
 			_, _ = fmt.Fprintf(out, "%v; de tweede kopie gebeurt niet.\n", err)
-			return 1, nil, nil
+			return 1, nil, false, nil
 		}
 		pctx, cancel := context.WithTimeout(ctx, protocol.MaxStackPause)
 		defer cancel()
@@ -150,33 +154,49 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 	if exit == 0 && refused == len(spec.Targets) {
 		exit = 1
 	}
-	return exit, results, nil
+	return exit, results, false, nil
 }
 
-// syncBefore draait de voorbereiding van een sync, als die er is. ok is
-// false als ze faalde; rsync draait dan niet, want de bronmap kan oud of half
-// zijn.
-func syncBefore(ctx context.Context, spec *protocol.SyncSpec, out io.Writer) (int, bool) {
+// Uitkomst van de voorbereiding van een sync.
+type beforeResult int
+
+const (
+	// beforeOK: rsync mag draaien.
+	beforeOK beforeResult = iota
+	// beforeFailed: de voorbereiding faalde; rsync draait niet, want de
+	// bronmap kan oud of half zijn.
+	beforeFailed
+	// beforeSkipped: de voorbereiding stopte met protocol.SyncBeforeSkip,
+	// deze node stuurt niet; rsync draait niet en de run slaat over.
+	beforeSkipped
+)
+
+// syncBefore draait de voorbereiding van een sync, als die er is, en geeft
+// haar exitcode en wat de sync nu doet.
+func syncBefore(ctx context.Context, spec *protocol.SyncSpec, out io.Writer) (int, beforeResult) {
 	if strings.TrimSpace(spec.Before) == "" {
-		return 0, true
+		return 0, beforeOK
 	}
 	// Een pauze van stacks (fase 21) is geen commando: runSync doet ze rond
 	// de tweede kopie.
 	if _, ok := protocol.PauseProjects(spec.Before); ok {
-		return 0, true
+		return 0, beforeOK
 	}
 	_, _ = fmt.Fprintf(out, "== voorbereiding: %s ==\n", spec.Before)
 	code, err := runCronArgv(ctx, "", []string{"/bin/sh", "-c", spec.Before}, out)
-	if err != nil {
+	switch {
+	case err != nil:
 		_, _ = fmt.Fprintf(out, "Voorbereiding niet gestart: %v. Niets gekopieerd.\n", err)
-		return max(code, 1), false
-	}
-	if code != 0 {
+		return max(code, 1), beforeFailed
+	case code == protocol.SyncBeforeSkip:
+		_, _ = fmt.Fprintf(out, "Voorbereiding: deze node stuurt niet (code %d). Overgeslagen, niets gekopieerd.\n", code)
+		return code, beforeSkipped
+	case code != 0:
 		_, _ = fmt.Fprintf(out, "Voorbereiding stopte met code %d. Niets gekopieerd.\n", code)
-		return code, false
+		return code, beforeFailed
 	}
 	_, _ = fmt.Fprintln(out)
-	return 0, true
+	return 0, beforeOK
 }
 
 // lastLineWith is de laatste regel van s met needle, zonder de rest.
@@ -534,8 +554,13 @@ func (a *Agent) cronDryRun(ctx context.Context, jobID, target string) protocol.C
 	var buf bytes.Buffer
 	// De proefrun kijkt naar wat de echte run zou kopiëren: eerst de
 	// voorbereiding (die schrijft alleen de bronmap).
-	if _, ok := syncBefore(ctx, job.Sync, &buf); !ok {
+	switch code, before := syncBefore(ctx, job.Sync, &buf); before {
+	case beforeFailed:
 		res.Error = "de voorbereiding faalde: " + lastLineWith(protocol.MaskSecrets(buf.String()), "")
+		res.Output = strings.Split(strings.TrimRight(protocol.MaskSecrets(buf.String()), "\n"), "\n")
+		return res
+	case beforeSkipped:
+		res.Error = fmt.Sprintf("de voorbereiding zegt dat deze node niet stuurt (code %d); een run slaat hier over en kopieert niets", code)
 		res.Output = strings.Split(strings.TrimRight(protocol.MaskSecrets(buf.String()), "\n"), "\n")
 		return res
 	}

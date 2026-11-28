@@ -145,6 +145,8 @@ type Server struct {
 	// hangen.
 	loginTimeout   time.Duration
 	sessionTimeout time.Duration
+	// recoveryLimiter remt "Kan niet inloggen?".
+	recoveryLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
 	enrollLimiter *ipLimiter
 	// throttle remt events die een aanvaller gratis kan laten schrijven.
@@ -319,18 +321,20 @@ func New(d Deps) *Server {
 		loginTimeout:   20 * time.Second,
 		sessionTimeout: 10 * time.Second,
 		enrollLimiter:  newIPLimiter(6*time.Second, 20),
-		throttle:       events.NewThrottle(ev),
-		assistant:      d.Assistant,
-		risk:           d.Risk,
-		topo:           d.Topo,
-		docs:           d.Docs,
-		reports:        d.Reports,
-		kube:           d.Kube,
-		databases:      d.Databases,
-		cronjobs:       d.Cronjobs,
-		heal:           d.Heal,
-		components:     d.Components,
-		kubeNodes:      d.KubeNodes,
+		// 5 aanvragen direct, daarna één per 20 seconden per IP-adres.
+		recoveryLimiter: newIPLimiter(20*time.Second, 5),
+		throttle:        events.NewThrottle(ev),
+		assistant:       d.Assistant,
+		risk:            d.Risk,
+		topo:            d.Topo,
+		docs:            d.Docs,
+		reports:         d.Reports,
+		kube:            d.Kube,
+		databases:       d.Databases,
+		cronjobs:        d.Cronjobs,
+		heal:            d.Heal,
+		components:      d.Components,
+		kubeNodes:       d.KubeNodes,
 	}
 	s.resources = resources.NewService(d.Pool, ev)
 	s.resources.Metrics = s.metrics
@@ -402,6 +406,13 @@ func (s *Server) Handler() http.Handler {
 		api.With(s.requireSession).Put("/resources/settings", s.resourcesSettingsPut)
 		api.With(s.requireSession).Get("/nodes/{nodeId}/pentest", s.pentestGet)
 		api.With(s.requireSession).Put("/nodes/{nodeId}/pentest", s.pentestSet)
+		// Pentest-inventaris voor de orchestrator, achter een los alleen-lezen
+		// API-token (cfa_) i.p.v. de sessiecookie of de cfi_-importsleutel.
+		// Least-privilege: enkel lezen (requireAPIToken dwingt GET-only af),
+		// apart in te trekken, los van de import/schrijfsleutel. De scope
+		// 'pentest' is verplicht (allowUnscoped=false): zo kan geen enkel
+		// ongescoped of dashboard-token de inventaris lezen.
+		api.With(s.requireAPIToken, s.requireScope("pentest", false)).Get("/pentest/nodes", s.pentestNodesAPI)
 		api.With(s.requireSession).Get("/upkeep/history", s.upkeepHistory)
 		api.With(s.requireSession).Put("/upkeep/scopes/{scope}", s.upkeepSetPolicy)
 		api.With(s.requireSession).Post("/upkeep/scopes/{scope}/start", s.upkeepStart)

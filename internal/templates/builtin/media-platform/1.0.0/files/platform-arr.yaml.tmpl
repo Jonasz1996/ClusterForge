@@ -1,0 +1,18 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Bovenop compose.arr.yaml van het platform (mediabeheer, fase 11). Geen
+# herstart door Docker zelf: alleen platform-ctl.sh start qBittorrent en
+# Prowlarr, op de node met het VIP. De downloads op een map van deze node in
+# plaats van op SeaweedFS (torrents schrijven veel kleine stukken door
+# elkaar; op de FUSE-mount is dat traag); de app leest ze op dezelfde plek in
+# de importmap. De config van beide (DATA_ROOT/arr) blijft op SeaweedFS.
+# platform-ctl.sh neemt dit bestand alleen mee met ARR=aan en compose.arr.yaml.
+services:
+  platform:
+    volumes:
+      - /var/lib/cf-platform/torrents:/data/import/torrents
+  qbittorrent:
+    restart: "no"
+    volumes:
+      - /var/lib/cf-platform/torrents:/downloads
+  prowlarr:
+    restart: "no"

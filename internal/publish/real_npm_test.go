@@ -238,6 +238,8 @@ func TestRealNPM(t *testing.T) {
 	npmPort, _ := json.Number(p81).Int64()
 	defaults := DefaultDefaults()
 	defaults.LetsEncrypt = false
+	// Deze test kijkt ook naar het automatisch aanvullen (stap 12).
+	defaults.ManualOnly = false
 	if _, err := s.SaveSettings(ctx, events.System(), nil, SettingsInput{Domain: "example.test", Defaults: &defaults,
 		NPMNodeID: &npmNode, NPMPort: int(npmPort), NPMIdentity: identity, NPMSecret: secret,
 		AuthentikNodeID: &akNode, AuthentikPort: akPort, AuthentikToken: "ak-token", AuthentikOutpost: fmt.Sprintf("http://%s:%d", gateway, akPort)}); err != nil {
@@ -667,6 +669,72 @@ func TestRealNPM(t *testing.T) {
 	s.Refresh(ctx)
 	if apps, provs, _ := fake.counts(); apps != 1 || provs != 1 {
 		t.Fatalf("dubbel aangevuld: %d apps, %d providers", apps, provs)
+	}
+
+	// 13. Fase 49: paden zonder Authentik en een terugval in de echte
+	// nginx, uitschakelen met een kopie en terugzetten, en een scan.
+	// Eerst wachten tot het automatisch aanvullen van stap 12 klaar is.
+	for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		if busy, _ := s.applyBusy(ctx); busy == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("taak van stap 12 loopt nog")
+		}
+	}
+	st0, _ := s.Settings(ctx)
+	ov, _ = s.Overview(ctx)
+	name0 := ""
+	for _, h := range ov.Hosts {
+		if h.ID == old[0] {
+			name0 = strings.ToLower(h.Domains[0])
+		}
+	}
+	if _, err := s.SavePolicy(ctx, events.System(), nil, Policy{Name: policyName(name0), Mode: PolicyExceptPaths, Paths: []string{"/api", "/guide.xml"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO publish_owners (domain, cluster_name, fallback_scheme, fallback_host, fallback_port, fallback_cluster)
+		VALUES ($3, 'nieuw', 'http', $1, $2, 'oud')`, gateway, backend, name0); err != nil {
+		t.Fatal(err)
+	}
+	alive()
+	run(Action{Action: ActOpenPaths, HostID: old[0]}, store.JobStatusSucceeded)
+	if c := conf(old[0]); !strings.Contains(c, "location ^~ /api") || !strings.Contains(c, "location = /guide.xml") || !strings.Contains(c, "location @cf_fallback") || !strings.Contains(c, fallbackMark) {
+		t.Fatalf("open paden en terugval:\n%s", c)
+	}
+	alive()
+	run(Action{Action: ActDropFallback, HostID: old[0]}, store.JobStatusSucceeded)
+	if c := conf(old[0]); strings.Contains(c, "cf_fallback") || !strings.Contains(c, "location ^~ /api") {
+		t.Fatalf("terugval weghalen:\n%s", c)
+	}
+	alive()
+	run(Action{Action: ActDisable, HostID: old[0]}, store.JobStatusSucceeded)
+	if data, err := s.readNPM(ctx, st0); err == nil {
+		s.saveRead(ctx, "npm", data, nil)
+	}
+	dis, err := s.disabledList(ctx)
+	if err != nil || len(dis) != 1 || dis[0].HostID != old[0] {
+		t.Fatalf("uitgeschakeld: %v %+v", err, dis)
+	}
+	ov, _ = s.Overview(ctx)
+	for _, h := range ov.Hosts {
+		if h.ID == old[0] && h.Enabled {
+			t.Fatal("host staat nog aan")
+		}
+	}
+	alive()
+	run(Action{Action: ActRestoreDisabled, DisabledID: dis[0].ID.String()}, store.JobStatusSucceeded)
+	if dis, _ := s.disabledList(ctx); len(dis) != 0 {
+		t.Fatalf("na terugzetten nog uitgeschakeld: %+v", dis)
+	}
+	alive()
+	sc, err := s.RunScan(ctx, events.System(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("scan: %+v", sc.Counts)
+	for _, it := range sc.Items {
+		t.Logf("scan: %s %s %s", it.Kind, it.ID, it.Title)
 	}
 }
 

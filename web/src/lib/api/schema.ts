@@ -89,6 +89,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een herstelcode aanvragen die de beheerder in de CLI plakt
+         * @description Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server user reset <code>` zoekt het account op.
+         */
+        post: operations["accountRecoveryHelp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/reset/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen) */
+        post: operations["completeResetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/sessions": {
         parameters: {
             query?: never;
@@ -5957,6 +5994,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publish/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scannen (fase 49) - de laatste scan, de uitzonderingen per dienst en wat uitgeschakeld is */
+        get: operations["getPublishScan"];
+        put?: never;
+        /** NPM, Authentik en de doelen nu lezen en één plan maken (toevoegen, bijwerken, verwijderen); verandert niets (admin) */
+        post: operations["runPublishScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Uitzondering voor een dienst maken of wijzigen (nooit Authentik, eigen login, Authentik behalve paden) (admin) */
+        put: operations["savePublishPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/policies/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Uitzondering weghalen; dan gelden de standaarden (admin) */
+        delete: operations["deletePublishPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/publish/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eigenaar (cluster of dienst) per naam in NPM en Authentik, met de terugval na een verhuizing */
+        get: operations["getPublishOwners"];
+        /** Eigenaar van een naam met de hand zetten of weghalen (admin) */
+        put: operations["setPublishOwner"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters": {
         parameters: {
             query?: never;
@@ -8442,6 +8549,8 @@ export interface components {
             /** @description Leeg = alle clusters */
             cluster_ids: string[];
             cluster_names: string[];
+            /** @description Leeg = alle lees-routes; anders alleen de genoemde capabilities */
+            scopes: ("pentest" | "dashboard")[];
             /** Format: date-time */
             expires_at: string | null;
             /** Format: date-time */
@@ -8455,6 +8564,8 @@ export interface components {
             name: string;
             /** @description Leeg of weg = alle clusters */
             cluster_ids?: string[];
+            /** @description Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het token alleen die capabilities lezen: 'pentest' = enkel de pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de dashboard-API. Least-privilege. */
+            scopes?: ("pentest" | "dashboard")[];
             /** @description 0 of weg = verloopt nooit */
             ttl_days?: number;
         };
@@ -11280,6 +11391,32 @@ export interface components {
             created_at: string;
             /** @description De leermodus in het dashboard Kubernetes staat aan */
             kube_learning: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden */
+            must_change_password: boolean;
+            /** @description Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden */
+            must_setup_totp: boolean;
+        };
+        RecoveryRequest: {
+            username: string;
+        };
+        RecoveryHelp: {
+            /** @description Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Tot wanneer de beheerder de code kan gebruiken
+             */
+            expires_at: string;
+            commands: components["schemas"]["RecoveryCommand"][];
+            /** @description Hoe lang het tijdelijke wachtwoord geldig is */
+            ttl_minutes: number;
+        };
+        RecoveryCommand: {
+            label: string;
+            command: string;
+        };
+        ResetPasswordRequest: {
+            new_password: string;
         };
         Me: {
             user: components["schemas"]["User"];
@@ -17254,6 +17391,58 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    accountRecoveryHelp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryHelp"];
+                };
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    completeResetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Ingesteld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listMySessions: {
@@ -26526,6 +26715,146 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getPublishScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    runPublishScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De scan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    savePublishPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description De uitzondering */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deletePublishPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getPublishOwners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setPublishOwner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     listPveDatacenters: {

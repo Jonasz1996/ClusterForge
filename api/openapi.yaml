@@ -83,6 +83,43 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /auth/recovery:
+    post:
+      operationId: accountRecoveryHelp
+      summary: Een herstelcode aanvragen die de beheerder in de CLI plakt
+      description: >
+        Openbaar. Elk verzoek krijgt een code, of het account nu bestaat of
+        niet: er wordt geen gebruiker opgezocht. Pas `clusterforge-server
+        user reset <code>` zoekt het account op.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecoveryRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryHelp" }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/reset/password:
+    post:
+      operationId: completeResetPassword
+      summary: Na een reset het nieuwe wachtwoord instellen (zonder het tijdelijke opnieuw te vragen)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        "204": { description: Ingesteld }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /auth/sessions:
     get:
       operationId: listMySessions
@@ -6343,6 +6380,82 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /publish/scan:
+    get:
+      operationId: getPublishScan
+      summary: Scannen (fase 49) - de laatste scan, de uitzonderingen per dienst en wat uitgeschakeld is
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: runPublishScan
+      summary: NPM, Authentik en de doelen nu lezen en één plan maken (toevoegen, bijwerken, verwijderen); verandert niets (admin)
+      responses:
+        "200":
+          description: De scan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/policies:
+    put:
+      operationId: savePublishPolicy
+      summary: Uitzondering voor een dienst maken of wijzigen (nooit Authentik, eigen login, Authentik behalve paden) (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "200":
+          description: De uitzondering
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /publish/policies/{name}:
+    delete:
+      operationId: deletePublishPolicy
+      summary: Uitzondering weghalen; dan gelden de standaarden (admin)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Weg }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /publish/owners:
+    get:
+      operationId: getPublishOwners
+      summary: Eigenaar (cluster of dienst) per naam in NPM en Authentik, met de terugval na een verhuizing
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setPublishOwner
+      summary: Eigenaar van een naam met de hand zetten of weghalen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "204": { description: Bewaard }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters
@@ -9204,7 +9317,7 @@ components:
         filter: { type: object, additionalProperties: true }
     ApiToken:
       type: object
-      required: [id, name, prefix, cluster_ids, cluster_names, expires_at, created_at, created_by, last_used_at, last_used_ip]
+      required: [id, name, prefix, cluster_ids, cluster_names, scopes, expires_at, created_at, created_by, last_used_at, last_used_ip]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -9216,6 +9329,10 @@ components:
         cluster_names:
           type: array
           items: { type: string }
+        scopes:
+          type: array
+          items: { type: string, enum: [pentest, dashboard] }
+          description: Leeg = alle lees-routes; anders alleen de genoemde capabilities
         expires_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         created_by: { type: string }
@@ -9230,6 +9347,14 @@ components:
           type: array
           items: { type: string, format: uuid }
           description: Leeg of weg = alle clusters
+        scopes:
+          type: array
+          items: { type: string, enum: [pentest, dashboard] }
+          description: >-
+            Leeg of weg = alle lees-routes (zoals voorheen). Anders mag het
+            token alleen die capabilities lezen: 'pentest' = enkel de
+            pentest-inventaris (/api/v1/pentest/nodes), 'dashboard' = enkel de
+            dashboard-API. Least-privilege.
         ttl_days:
           type: integer
           minimum: 0
@@ -11882,7 +12007,7 @@ components:
       enum: [admin, viewer]
     User:
       type: object
-      required: [id, username, role, totp_enabled, created_at, kube_learning]
+      required: [id, username, role, totp_enabled, created_at, kube_learning, must_change_password, must_setup_totp]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
@@ -11890,6 +12015,38 @@ components:
         totp_enabled: { type: boolean }
         created_at: { type: string, format: date-time }
         kube_learning: { type: boolean, description: De leermodus in het dashboard Kubernetes staat aan }
+        must_change_password:
+          type: boolean
+          description: Na een reset via de CLI moet eerst een nieuw wachtwoord ingesteld worden
+        must_setup_totp:
+          type: boolean
+          description: Na een reset via de CLI moet eerst een nieuwe TOTP ingesteld worden
+    RecoveryRequest:
+      type: object
+      required: [username]
+      properties:
+        username: { type: string }
+    RecoveryHelp:
+      type: object
+      required: [code, expires_at, commands, ttl_minutes]
+      properties:
+        code: { type: string, description: Herstelcode voor de beheerder; draagt de ingevulde naam leesbaar in zich }
+        expires_at: { type: string, format: date-time, description: Tot wanneer de beheerder de code kan gebruiken }
+        commands:
+          type: array
+          items: { $ref: "#/components/schemas/RecoveryCommand" }
+        ttl_minutes: { type: integer, description: Hoe lang het tijdelijke wachtwoord geldig is }
+    RecoveryCommand:
+      type: object
+      required: [label, command]
+      properties:
+        label: { type: string }
+        command: { type: string }
+    ResetPasswordRequest:
+      type: object
+      required: [new_password]
+      properties:
+        new_password: { type: string }
     Me:
       type: object
       required: [user, csrf_token, session_expires_at]

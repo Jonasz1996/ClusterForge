@@ -2,6 +2,7 @@ package rollout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/noderun"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -92,7 +94,75 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
+	if s.PVE != nil && d.Template != nil && d.Template.Autostart && len(p.Nodes) > 0 {
+		return j.Step(ctx, "Meestarten met de host", func(ctx context.Context, st *jobs.Step) error {
+			s.autostart(ctx, st, p.Nodes)
+			return nil
+		})
+	}
 	return nil
+}
+
+// memState is de state van één PVE-actie binnen een stap die zijn eigen
+// state niet deelt. Na een herstart van de server begint de actie opnieuw;
+// onboot zetten mag twee keer.
+type memState struct{ v []byte }
+
+func (m *memState) State(v any) bool {
+	if m.v == nil {
+		return false
+	}
+	return json.Unmarshal(m.v, v) == nil
+}
+
+func (m *memState) SetState(_ context.Context, v any) error {
+	b, err := json.Marshal(v)
+	m.v = b
+	return err
+}
+
+// autostart zet onboot aan op de Proxmox-gast van elke node waar het uit
+// staat. Nooit fataal: een node zonder gast of zonder agent op zijn host
+// krijgt een regel in de log.
+func (s *Service) autostart(ctx context.Context, st *jobs.Step, nodes []PlanNode) {
+	on := true
+	for _, n := range nodes {
+		row, err := s.q.GetNode(ctx, n.NodeID)
+		if err != nil {
+			st.Logf("%s: niet gevonden (%v)", n.Hostname, err)
+			continue
+		}
+		if row.Node.ProxmoxID == nil || row.Node.PveVmid == nil {
+			st.Logf("%s: geen Proxmox-gast die ClusterForge kent; zet automatisch starten zelf aan", n.Hostname)
+			continue
+		}
+		host, _, g, err := s.PVE.FindGuest(ctx, *row.Node.ProxmoxID, int(*row.Node.PveVmid))
+		if err != nil {
+			st.Logf("%s: niet nagekeken (%v)", n.Hostname, err)
+			continue
+		}
+		if g.OnBoot {
+			st.Logf("%s: %s %d start al mee met de host", n.Hostname, guestWord(g.Type), g.VMID)
+			continue
+		}
+		res, err := s.PVE.Do(ctx, st, &memState{}, host, protocol.PVERun{Action: protocol.PVESet, Type: g.Type, VMID: g.VMID,
+			Set: &protocol.PVESetting{OnBoot: &on}}, "automatisch starten")
+		switch {
+		case err != nil:
+			st.Logf("%s: onboot aanzetten mislukte: %v", n.Hostname, err)
+		case res.State != protocol.RunOK:
+			st.Logf("%s: onboot aanzetten mislukte: %s", n.Hostname, noderun.Describe(res))
+		default:
+			st.Logf("%s: %s %d start nu mee met de host (onboot stond uit)", n.Hostname, guestWord(g.Type), g.VMID)
+		}
+	}
+}
+
+func guestWord(typ string) string {
+	if typ == "qemu" {
+		return "VM"
+	}
+	return "CT"
 }
 
 // current leest de gewenste staat en controleert dat die nog is zoals bij

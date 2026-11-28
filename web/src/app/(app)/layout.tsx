@@ -13,7 +13,7 @@ import { PageHelpBox } from "@/components/help/PageHelpBox";
 import { reopenHelp, useHelpClosed, useHelpOn } from "@/lib/helpPrefs";
 import { Button } from "@/components/ui";
 import { useAttentionBadges } from "@/lib/attention";
-import { useLogout, useRequireMe } from "@/lib/auth";
+import { setupPending, useLogout, useRequireMe } from "@/lib/auth";
 import { useLiveUpdates } from "@/lib/live";
 import { titleFor } from "@/lib/nav";
 import { useTheme, type Theme } from "@/lib/theme";
@@ -26,11 +26,13 @@ const themeIcon: Record<Theme, ReactNode> = { system: <SystemIcon />, light: <Su
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const me = useRequireMe();
+  // Na een reset gaat de gebruiker eerst naar /login om zijn account in te stellen.
+  const ready = !!me.data && !setupPending(me.data);
   // Het adres voor agents, voor elk installcommando in de interface.
-  useAgentEndpoints(!!me.data);
+  useAgentEndpoints(ready);
   const logout = useLogout();
   const pathname = usePathname();
-  useLiveUpdates(!!me.data);
+  useLiveUpdates(ready);
   const isAdmin = me.data?.user.role === "admin";
   // Het menu op mobiel hoort bij de pagina waar het openging: na een
   // navigatie is het vanzelf dicht.
@@ -41,8 +43,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useTheme();
   const [helpOn, setHelpOn] = useHelpOn();
   const helpClosedHere = useHelpClosed().includes(pathname);
-  const badges = useAttentionBadges(!!me.data);
-  const updated = useServerUpdated(!!me.data);
+  const badges = useAttentionBadges(ready);
+  const updated = useServerUpdated(ready);
   useReloadOnStaleChunks();
 
   // De titel van het tabblad volgt de pagina (React zet <title> in <head>).
@@ -73,7 +75,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     };
   }, [menuOpen]);
 
-  if (!me.data) {
+  if (!me.data || !ready) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-slate-500">
         {title}

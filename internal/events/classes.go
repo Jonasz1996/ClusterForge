@@ -19,7 +19,7 @@ var classes = map[string]Class{
 	"auth.password_changed": ClassInfo, "auth.totp_enabled": ClassInfo, "auth.totp_disabled": ClassInfo, "security.prod_2fa_changed": ClassInfo,
 	"auth.reauth_failed": ClassInfo, "auth.totp_setup_started": ClassInfo, "auth.rate_limited": ClassInfo,
 	"user.created": ClassInfo, "user.disabled": ClassInfo, "user.enabled": ClassInfo, "user.role_changed": ClassInfo,
-	"user.totp_reset": ClassInfo, "user.sessions_revoked": ClassInfo, "audit.exported": ClassInfo,
+	"user.totp_reset": ClassInfo, "user.reset": ClassInfo, "auth.recovery_requested": ClassInfo, "user.sessions_revoked": ClassInfo, "audit.exported": ClassInfo,
 	"audit.throttled": ClassInfo,
 
 	"cluster.created": ClassInfo, "cluster.updated": ClassChange, "cluster.deleted": ClassInfo,

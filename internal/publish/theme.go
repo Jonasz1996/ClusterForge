@@ -205,7 +205,9 @@ func withoutTheme(adv string) string {
 }
 
 // ownAdvanced is de Advanced zonder de blokken van ClusterForge.
-func ownAdvanced(adv string) string { return strings.TrimSpace(withoutTheme(withoutSnippet(adv))) }
+func ownAdvanced(adv string) string {
+	return strings.TrimSpace(withoutExtras(withoutTheme(withoutSnippet(adv))))
+}
 
 func joinBlocks(parts ...string) string {
 	var out []string
