@@ -1853,6 +1853,21 @@ type PublishConnection struct {
 	Connections int32
 }
 
+type PublishDisabled struct {
+	ID         uuid.UUID
+	Kind       string
+	Domain     string
+	NpmHostID  *int32
+	AkSlug     string
+	AkProvider *int32
+	Copy       []byte
+	JobID      *uuid.UUID
+	DisabledBy *uuid.UUID
+	DisabledAt time.Time
+	Done       *string
+	DoneAt     *time.Time
+}
+
 type PublishFeedState struct {
 	Source string
 	At     time.Time
@@ -1885,11 +1900,44 @@ type PublishHostCss struct {
 	UpdatedAt time.Time
 }
 
+type PublishOwner struct {
+	Domain          string
+	ClusterID       *uuid.UUID
+	ClusterName     string
+	ServiceKey      string
+	ServiceName     string
+	Source          string
+	FallbackScheme  *string
+	FallbackHost    *string
+	FallbackPort    *int32
+	FallbackCluster string
+	MovedAt         *time.Time
+	UpdatedBy       *uuid.UUID
+	UpdatedAt       time.Time
+}
+
+type PublishPolicy struct {
+	Name      string
+	Mode      string
+	Paths     []string
+	Note      string
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
+}
+
 type PublishRead struct {
 	Kind   string
 	Data   []byte
 	Error  string
 	ReadAt time.Time
+}
+
+type PublishScan struct {
+	ID        uuid.UUID
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
+	Items     []byte
+	Notes     []byte
 }
 
 type PublishService struct {
